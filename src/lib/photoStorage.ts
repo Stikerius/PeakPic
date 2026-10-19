@@ -1,56 +1,33 @@
 import { Directory, File, Paths } from "expo-file-system";
 
-import type { LocalPhoto } from "@/types/photo";
-
 const photosDir = new Directory(Paths.document, "photos");
-const indexFile = new File(photosDir, "index.json");
 
-function createId(): string {
-  return `${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
-}
+/** Metadata file written by the first camera version; superseded by the workout repo. */
+const legacyIndexFile = new File(photosDir, "index.json");
 
-function isLocalPhoto(value: unknown): value is LocalPhoto {
-  if (typeof value !== "object" || value === null) return false;
-  const v = value as Record<string, unknown>;
-  return (
-    typeof v.id === "string" &&
-    typeof v.fileName === "string" &&
-    (typeof v.caption === "string" || v.caption === null) &&
-    typeof v.createdAt === "string"
-  );
-}
-
-export function getLocalPhotoUri(photo: LocalPhoto): string {
-  return new File(photosDir, photo.fileName).uri;
-}
-
-export async function listLocalPhotos(): Promise<LocalPhoto[]> {
-  if (!indexFile.exists) return [];
-  const parsed: unknown = JSON.parse(await indexFile.text());
-  return Array.isArray(parsed) ? parsed.filter(isLocalPhoto) : [];
-}
-
-/** Copies a temporary photo (camera/picker cache) into permanent app storage. */
-export async function saveLocalPhoto(
-  sourceUri: string,
-  caption: string,
-): Promise<LocalPhoto> {
+/**
+ * Copies a temporary photo (camera/picker cache) into permanent app storage.
+ * Returns the file name; resolve it with `getPhotoUri`, because the app container
+ * path can change between installs.
+ */
+export async function copyIntoPhotoDir(sourceUri: string, id: string): Promise<string> {
   photosDir.create({ idempotent: true, intermediates: true });
-
-  const id = createId();
   const source = new File(sourceUri);
   const fileName = `${id}${source.extension || ".jpg"}`;
   await source.copy(new File(photosDir, fileName));
+  return fileName;
+}
 
-  const trimmed = caption.trim();
-  const photo: LocalPhoto = {
-    id,
-    fileName,
-    caption: trimmed.length > 0 ? trimmed : null,
-    createdAt: new Date().toISOString(),
-  };
+export function getPhotoUri(fileName: string): string {
+  return new File(photosDir, fileName).uri;
+}
 
-  const existing = await listLocalPhotos();
-  indexFile.write(JSON.stringify([photo, ...existing]));
-  return photo;
+/** Reads the legacy metadata file. Returns null if there is none. */
+export async function readLegacyPhotoIndex(): Promise<unknown> {
+  if (!legacyIndexFile.exists) return null;
+  return JSON.parse(await legacyIndexFile.text());
+}
+
+export function deleteLegacyPhotoIndex(): void {
+  if (legacyIndexFile.exists) legacyIndexFile.delete();
 }

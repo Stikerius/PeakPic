@@ -9,7 +9,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { CameraPermissionPrompt } from "@/components/camera/camera-permission-prompt";
 import { PhotoReview } from "@/components/camera/photo-review";
 import { colors, fontSize, radius, spacing } from "@/constants/theme";
-import { saveLocalPhoto } from "@/lib/photoStorage";
+import { workoutRepo } from "@/lib/workoutRepo";
 import type { CapturedPhoto } from "@/types/photo";
 
 const NOTICE_DURATION_MS = 2500;
@@ -88,7 +88,7 @@ export default function CameraScreen() {
     setSaving(true);
     setSaveError(null);
     try {
-      await saveLocalPhoto(captured.uri, caption);
+      await workoutRepo.addWorkout({ sourceUri: captured.uri, caption });
       setCaptured(null);
       setNotice("Foto gespeichert 💪");
     } catch {
