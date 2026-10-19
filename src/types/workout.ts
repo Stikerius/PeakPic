@@ -1,7 +1,9 @@
+import type { DayKey } from "@/lib/streak";
+
 export type Workout = {
   id: string;
-  /** Displayable image URI (local file now, signed URL once backed by Supabase). */
-  photoUri: string;
+  /** Training day in Europe/Zurich, "YYYY-MM-DD". */
+  workoutDate: DayKey;
   caption: string | null;
   /** ISO 8601 timestamp of when the photo was saved. */
   createdAt: string;

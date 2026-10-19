@@ -1,14 +1,15 @@
-import { localWorkoutRepo } from "@/lib/workoutRepo.local";
+import type { DayKey } from "@/lib/streak";
+import { supabaseWorkoutRepo } from "@/lib/workoutRepo.supabase";
 import type { NewWorkout, Workout } from "@/types/workout";
 
 /**
  * Single access point for workout data. Screens only talk to this interface,
- * so the backing store (local now, Supabase later) can be swapped here.
+ * so the backing store can be swapped here (local: workoutRepo.local.ts).
  */
 export interface WorkoutRepo {
-  /** All workouts of the current user, newest first. */
-  listWorkouts(): Promise<Workout[]>;
+  /** Training days of the current user (duplicates allowed). */
+  listWorkoutDays(): Promise<DayKey[]>;
   addWorkout(input: NewWorkout): Promise<Workout>;
 }
 
-export const workoutRepo: WorkoutRepo = localWorkoutRepo;
+export const workoutRepo: WorkoutRepo = supabaseWorkoutRepo;

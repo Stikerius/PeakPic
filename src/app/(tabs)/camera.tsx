@@ -106,9 +106,9 @@ export default function CameraScreen() {
     try {
       await workoutRepo.addWorkout({ sourceUri: captured.uri, caption });
       setCaptured(null);
-      setNotice("Foto gespeichert 💪");
+      setNotice("Workout gepostet 💪");
     } catch {
-      setSaveError("Speichern fehlgeschlagen. Bitte versuche es erneut.");
+      setSaveError("Hochladen fehlgeschlagen. Prüfe deine Verbindung und versuche es erneut.");
     } finally {
       setSaving(false);
     }

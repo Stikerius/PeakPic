@@ -122,17 +122,28 @@ export type StreakStats = {
   longest: number;
 };
 
+/** Stats from training day keys (e.g. posts.workout_date); duplicates are fine. */
+export function computeStreakStatsFromDays(
+  days: readonly DayKey[],
+  today: DayKey,
+): StreakStats {
+  const trainingDays = new Set(days);
+  return {
+    trainingDays,
+    current: currentStreak(trainingDays, today),
+    longest: longestStreak(trainingDays),
+  };
+}
+
 export function computeStreakStats(
   timestamps: readonly (string | Date)[],
   now: Date,
   timeZone: string = APP_TIME_ZONE,
 ): StreakStats {
-  const trainingDays = toTrainingDays(timestamps, timeZone);
-  return {
-    trainingDays,
-    current: currentStreak(trainingDays, toDayKey(now, timeZone)),
-    longest: longestStreak(trainingDays),
-  };
+  return computeStreakStatsFromDays(
+    [...toTrainingDays(timestamps, timeZone)],
+    toDayKey(now, timeZone),
+  );
 }
 
 export function daysInMonth(year: number, month: number): number {

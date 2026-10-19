@@ -4,6 +4,7 @@ import {
   addDays,
   addMonths,
   computeStreakStats,
+  computeStreakStatsFromDays,
   currentStreak,
   flameTier,
   longestStreak,
@@ -121,6 +122,18 @@ describe("computeStreakStats", () => {
     expect([...stats.trainingDays].sort()).toEqual(["2026-05-08", "2026-05-10"]);
     expect(stats.current).toBe(1);
     expect(stats.longest).toBe(1);
+  });
+});
+
+describe("computeStreakStatsFromDays", () => {
+  it("dedupes workout_date values from several posts on one day", () => {
+    const stats = computeStreakStatsFromDays(
+      ["2026-05-09", "2026-05-10", "2026-05-10", "2026-05-11"],
+      "2026-05-12",
+    );
+    expect(stats.trainingDays.size).toBe(3);
+    expect(stats.current).toBe(3);
+    expect(stats.longest).toBe(3);
   });
 });
 

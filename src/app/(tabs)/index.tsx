@@ -4,30 +4,26 @@ import { ActivityIndicator, ScrollView, StyleSheet, Text, View } from "react-nat
 import { MonthCalendar } from "@/components/streak/month-calendar";
 import { StreakSummary } from "@/components/streak/streak-summary";
 import { colors, fontSize, spacing } from "@/constants/theme";
-import { useWorkouts } from "@/hooks/use-workouts";
+import { useWorkoutDays } from "@/hooks/use-workout-days";
 import {
   addMonths,
-  computeStreakStats,
+  computeStreakStatsFromDays,
   parseDayKey,
   runLengthByDay,
   toDayKey,
 } from "@/lib/streak";
 
 export default function HomeScreen() {
-  const { workouts, loading, error } = useWorkouts();
+  const { days, loading, error } = useWorkoutDays();
 
-  const now = new Date();
-  const today = toDayKey(now);
+  const today = toDayKey(new Date());
   const { year: currentYear, month: currentMonth } = parseDayKey(today);
   const [visibleMonth, setVisibleMonth] = useState({
     year: currentYear,
     month: currentMonth,
   });
 
-  const stats = computeStreakStats(
-    workouts.map((w) => w.createdAt),
-    now,
-  );
+  const stats = computeStreakStatsFromDays(days, today);
   const runLengths = runLengthByDay(stats.trainingDays);
   const canGoNext =
     visibleMonth.year * 12 + visibleMonth.month < currentYear * 12 + currentMonth;

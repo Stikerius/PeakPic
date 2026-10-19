@@ -1,18 +1,18 @@
 import { useFocusEffect } from "expo-router";
 import { useCallback, useState } from "react";
 
+import type { DayKey } from "@/lib/streak";
 import { workoutRepo } from "@/lib/workoutRepo";
-import type { Workout } from "@/types/workout";
 
-type UseWorkoutsResult = {
-  workouts: Workout[];
+type UseWorkoutDaysResult = {
+  days: DayKey[];
   loading: boolean;
   error: string | null;
 };
 
-/** Loads the user's workouts and reloads whenever the screen regains focus. */
-export function useWorkouts(): UseWorkoutsResult {
-  const [workouts, setWorkouts] = useState<Workout[]>([]);
+/** Loads the user's training days and reloads whenever the screen regains focus. */
+export function useWorkoutDays(): UseWorkoutDaysResult {
+  const [days, setDays] = useState<DayKey[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -20,10 +20,10 @@ export function useWorkouts(): UseWorkoutsResult {
     useCallback(() => {
       let active = true;
       workoutRepo
-        .listWorkouts()
+        .listWorkoutDays()
         .then((result) => {
           if (!active) return;
-          setWorkouts(result);
+          setDays(result);
           setError(null);
         })
         .catch(() => {
@@ -38,5 +38,5 @@ export function useWorkouts(): UseWorkoutsResult {
     }, []),
   );
 
-  return { workouts, loading, error };
+  return { days, loading, error };
 }

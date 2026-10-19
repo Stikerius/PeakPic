@@ -3,9 +3,9 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 import {
   copyIntoPhotoDir,
   deleteLegacyPhotoIndex,
-  getPhotoUri,
   readLegacyPhotoIndex,
 } from "@/lib/photoStorage";
+import { toDayKey } from "@/lib/streak";
 import type { WorkoutRepo } from "@/lib/workoutRepo";
 import type { Workout } from "@/types/workout";
 
@@ -40,7 +40,7 @@ function createId(): string {
 function toWorkout(stored: StoredWorkout): Workout {
   return {
     id: stored.id,
-    photoUri: getPhotoUri(stored.fileName),
+    workoutDate: toDayKey(new Date(stored.createdAt)),
     caption: stored.caption,
     createdAt: stored.createdAt,
   };
@@ -61,13 +61,10 @@ async function readAll(): Promise<StoredWorkout[]> {
   return migrated;
 }
 
+/** Device-only backend from phase 2. Not wired up; kept as an offline/dev fallback. */
 export const localWorkoutRepo: WorkoutRepo = {
-  async listWorkouts() {
-    const all = await readAll();
-    return all
-      .slice()
-      .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
-      .map(toWorkout);
+  async listWorkoutDays() {
+    return (await readAll()).map((stored) => toWorkout(stored).workoutDate);
   },
 
   async addWorkout({ sourceUri, caption }) {
