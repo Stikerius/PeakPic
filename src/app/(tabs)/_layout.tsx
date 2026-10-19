@@ -45,7 +45,11 @@ export default function TabLayout() {
       />
       <Tabs.Screen
         name="camera"
-        options={{ title: "Kamera", tabBarIcon: tabIcon("camera", "camera-outline") }}
+        options={{
+          title: "Kamera",
+          headerShown: false,
+          tabBarIcon: tabIcon("camera", "camera-outline"),
+        }}
       />
       <Tabs.Screen
         name="profile"

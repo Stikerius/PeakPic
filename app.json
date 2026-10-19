@@ -32,6 +32,22 @@
           "image": "./assets/images/splash-icon.png",
           "imageWidth": 76
         }
+      ],
+      [
+        "expo-camera",
+        {
+          "cameraPermission": "PeakPic braucht Zugriff auf deine Kamera, damit du Workout-Fotos für deinen Streak aufnehmen kannst.",
+          "microphonePermission": false,
+          "recordAudioAndroid": false
+        }
+      ],
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "PeakPic braucht Zugriff auf deine Fotos, damit du ein Workout-Foto aus deiner Galerie wählen kannst.",
+          "cameraPermission": "PeakPic braucht Zugriff auf deine Kamera, damit du Workout-Fotos für deinen Streak aufnehmen kannst.",
+          "microphonePermission": false
+        }
       ]
     ],
     "experiments": {
