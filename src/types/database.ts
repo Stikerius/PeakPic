@@ -4,6 +4,7 @@
  */
 
 type Timestamp = string;
+export type AudienceScope = "stories" | "posts";
 type Uuid = string;
 
 type Rel<Name extends string, Column extends string, Target extends string> = {
@@ -18,9 +19,15 @@ export type Database = {
   public: {
     Tables: {
       profiles: {
-        Row: { id: Uuid; username: string; avatar_path: string | null; created_at: Timestamp };
+        Row: {
+          id: Uuid;
+          username: string;
+          avatar_path: string | null;
+          created_at: Timestamp;
+          notifications_seen_at: Timestamp;
+        };
         Insert: { id: Uuid; username: string; avatar_path?: string | null; created_at?: Timestamp };
-        Update: { username?: string; avatar_path?: string | null };
+        Update: { username?: string; avatar_path?: string | null; notifications_seen_at?: Timestamp };
         Relationships: [];
       };
       posts: {
@@ -106,6 +113,15 @@ export type Database = {
         Relationships: [
           Rel<"story_views_story_id_fkey", "story_id", "stories">,
           Rel<"story_views_user_id_fkey", "user_id", "profiles">,
+        ];
+      };
+      audience_restrictions: {
+        Row: { owner_id: Uuid; hidden_user_id: Uuid; scope: AudienceScope; created_at: Timestamp };
+        Insert: { owner_id: Uuid; hidden_user_id: Uuid; scope: AudienceScope; created_at?: Timestamp };
+        Update: Record<string, never>;
+        Relationships: [
+          Rel<"audience_restrictions_owner_id_fkey", "owner_id", "profiles">,
+          Rel<"audience_restrictions_hidden_user_id_fkey", "hidden_user_id", "profiles">,
         ];
       };
       conversations: {

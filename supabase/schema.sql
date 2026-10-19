@@ -9,9 +9,12 @@
 --   * profiles      readable by every signed-in user (needed for search)
 --   * follows       readable by every signed-in user (follower counts)
 --   * posts/stories readable by the owner and by people who follow the owner;
---                   a post shared into a chat is also readable by that chat's members
+--                   a post shared into a chat is also readable by that chat's members;
+--                   tagged people can see a story. Owners can hide their posts and/or
+--                   stories from specific people (audience_restrictions); that always wins.
 --   * chats         only members can read conversations, members and messages
---   * storage       bucket "photos" (private), objects live under {user_id}/...
+--   * storage       bucket "photos" (private), objects live under {user_id}/{kind}/...;
+--                   a photo is readable exactly when its post/story is (avatars: everyone)
 -- =============================================================================
 
 
@@ -26,6 +29,9 @@ create table if not exists public.profiles (
   avatar_path text,
   created_at  timestamptz not null default now()
 );
+-- Everything in the notifications screen newer than this counts as unread.
+alter table public.profiles
+  add column if not exists notifications_seen_at timestamptz not null default now();
 
 create table if not exists public.posts (
   id           uuid primary key default gen_random_uuid(),
@@ -38,6 +44,7 @@ create table if not exists public.posts (
 );
 create index if not exists posts_user_created_idx on public.posts (user_id, created_at desc);
 create index if not exists posts_created_idx on public.posts (created_at desc);
+create index if not exists posts_photo_path_idx on public.posts (photo_path);
 
 create table if not exists public.post_likes (
   post_id    uuid not null references public.posts (id) on delete cascade,
@@ -76,6 +83,7 @@ create index if not exists stories_user_expires_idx on public.stories (user_id, 
 -- People tagged in the story; they may see it even if they don't follow the author.
 alter table public.stories add column if not exists mentioned_user_ids uuid[] not null default '{}';
 create index if not exists stories_mentions_idx on public.stories using gin (mentioned_user_ids);
+create index if not exists stories_photo_path_idx on public.stories (photo_path);
 
 create table if not exists public.story_likes (
   story_id   uuid not null references public.stories (id) on delete cascade,
@@ -92,6 +100,18 @@ create table if not exists public.story_views (
   primary key (story_id, user_id)
 );
 create index if not exists story_views_user_idx on public.story_views (user_id);
+
+-- "Hide my stories / posts from this person". Only the owner can read or change it.
+create table if not exists public.audience_restrictions (
+  owner_id       uuid not null references public.profiles (id) on delete cascade,
+  hidden_user_id uuid not null references public.profiles (id) on delete cascade,
+  scope          text not null check (scope in ('stories', 'posts')),
+  created_at     timestamptz not null default now(),
+  primary key (owner_id, hidden_user_id, scope),
+  check (owner_id <> hidden_user_id)
+);
+create index if not exists audience_restrictions_hidden_idx
+  on public.audience_restrictions (hidden_user_id, scope);
 
 create table if not exists public.conversations (
   id         uuid primary key default gen_random_uuid(),
@@ -136,6 +156,17 @@ as $$
   select exists (
     select 1 from public.follows
     where follower_id = (select auth.uid()) and following_id = target
+  );
+$$;
+
+-- True if `owner` has hidden their `scope` ('stories' or 'posts') from the caller.
+create or replace function public.is_hidden_from_me(owner uuid, scope text)
+returns boolean
+language sql stable security definer set search_path = ''
+as $$
+  select exists (
+    select 1 from public.audience_restrictions r
+    where r.owner_id = owner and r.hidden_user_id = (select auth.uid()) and r.scope = is_hidden_from_me.scope
   );
 $$;
 
@@ -185,7 +216,13 @@ as $$
   select exists (
     select 1 from public.posts p
     where p.id = post
-      and (public.can_see_user_content(p.user_id) or public.is_post_shared_with_me(p.id))
+      and (
+        p.user_id = (select auth.uid())
+        or (
+          (public.is_following(p.user_id) or public.is_post_shared_with_me(p.id))
+          and not public.is_hidden_from_me(p.user_id, 'posts')
+        )
+      )
   );
 $$;
 
@@ -196,8 +233,14 @@ as $$
   select exists (
     select 1 from public.stories s
     where s.id = story
-      and s.expires_at > now()
-      and (public.can_see_user_content(s.user_id) or (select auth.uid()) = any (s.mentioned_user_ids))
+      and (
+        s.user_id = (select auth.uid())
+        or (
+          s.expires_at > now()
+          and (public.is_following(s.user_id) or (select auth.uid()) = any (s.mentioned_user_ids))
+          and not public.is_hidden_from_me(s.user_id, 'stories')
+        )
+      )
   );
 $$;
 
@@ -210,21 +253,14 @@ as $$
     (storage.foldername(object_name))[1] = (select auth.uid())::text
     -- Avatars are visible to every signed-in user (search results, chats).
     or (storage.foldername(object_name))[2] = 'avatar'
-    or exists (
-      select 1 from public.follows f
-      where f.follower_id = (select auth.uid())
-        and f.following_id::text = (storage.foldername(object_name))[1]
-    )
+    -- Post and story photos follow the visibility of their post/story exactly.
     or exists (
       select 1 from public.posts p
-      join public.messages m on m.post_id = p.id
-      where p.photo_path = object_name and public.is_conversation_member(m.conversation_id)
+      where p.photo_path = object_name and public.can_view_post(p.id)
     )
     or exists (
       select 1 from public.stories s
-      where s.photo_path = object_name
-        and s.expires_at > now()
-        and (select auth.uid()) = any (s.mentioned_user_ids)
+      where s.photo_path = object_name and public.can_view_story(s.id)
     );
 $$;
 
@@ -310,8 +346,8 @@ grant execute on function public.username_available(text) to anon, authenticated
 
 grant select, insert, update, delete on
   public.profiles, public.posts, public.post_likes, public.comments, public.follows,
-  public.stories, public.story_likes, public.story_views, public.conversations,
-  public.conversation_members, public.messages
+  public.stories, public.story_likes, public.story_views, public.audience_restrictions,
+  public.conversations, public.conversation_members, public.messages
 to authenticated;
 
 
@@ -327,6 +363,7 @@ alter table public.follows              enable row level security;
 alter table public.stories              enable row level security;
 alter table public.story_likes          enable row level security;
 alter table public.story_views          enable row level security;
+alter table public.audience_restrictions enable row level security;
 alter table public.conversations        enable row level security;
 alter table public.conversation_members enable row level security;
 alter table public.messages             enable row level security;
@@ -351,8 +388,10 @@ create policy "posts: read own, followed or shared" on public.posts
   for select to authenticated
   using (
     user_id = (select auth.uid())
-    or public.is_following(user_id)
-    or public.is_post_shared_with_me(id)
+    or (
+      (public.is_following(user_id) or public.is_post_shared_with_me(id))
+      and not public.is_hidden_from_me(user_id, 'posts')
+    )
   );
 
 drop policy if exists "posts: insert own" on public.posts;
@@ -430,6 +469,7 @@ create policy "stories: read active from followed, own always" on public.stories
     or (
       expires_at > now()
       and (public.is_following(user_id) or (select auth.uid()) = any (mentioned_user_ids))
+      and not public.is_hidden_from_me(user_id, 'stories')
     )
   );
 
@@ -484,6 +524,19 @@ drop policy if exists "story_views: record own view" on public.story_views;
 create policy "story_views: record own view" on public.story_views
   for insert to authenticated
   with check (user_id = (select auth.uid()) and public.can_view_story(story_id));
+
+-- audience_restrictions: private to the owner (the hidden person must not find out).
+drop policy if exists "audience_restrictions: owner reads" on public.audience_restrictions;
+create policy "audience_restrictions: owner reads" on public.audience_restrictions
+  for select to authenticated using (owner_id = (select auth.uid()));
+
+drop policy if exists "audience_restrictions: owner adds" on public.audience_restrictions;
+create policy "audience_restrictions: owner adds" on public.audience_restrictions
+  for insert to authenticated with check (owner_id = (select auth.uid()));
+
+drop policy if exists "audience_restrictions: owner removes" on public.audience_restrictions;
+create policy "audience_restrictions: owner removes" on public.audience_restrictions
+  for delete to authenticated using (owner_id = (select auth.uid()));
 
 -- conversations / members: read for members only. Inserts happen through
 -- get_or_create_direct_conversation(), so there are no insert policies.
