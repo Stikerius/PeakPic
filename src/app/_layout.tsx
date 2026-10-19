@@ -54,6 +54,10 @@ function RootNavigator() {
         />
         <Stack.Screen name="day/[date]" options={{ title: "", presentation: "modal" }} />
         <Stack.Screen
+          name="story-create"
+          options={{ headerShown: false, presentation: "fullScreenModal", gestureEnabled: false }}
+        />
+        <Stack.Screen
           name="stories/[userId]"
           options={{ headerShown: false, presentation: "fullScreenModal", animation: "fade" }}
         />

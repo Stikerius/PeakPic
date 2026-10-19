@@ -1,40 +1,18 @@
 import Ionicons from "@expo/vector-icons/Ionicons";
-import * as ImagePicker from "expo-image-picker";
 import { router } from "expo-router";
 import { useEffect, useState } from "react";
-import { ActivityIndicator, Alert, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
+import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 
 import { Avatar } from "@/components/avatar";
 import { colors, fontSize, radius, spacing } from "@/constants/theme";
 import { getMyProfile, type Profile } from "@/lib/profileRepo";
-import { addStory, refreshStories, useStories } from "@/lib/storyStore";
+import { refreshStories, useStories } from "@/lib/storyStore";
 import type { StoryGroup } from "@/types/social";
 
 const AVATAR_SIZE = 62;
 const RING_GAP = 3;
 const RING_WIDTH = 2.5;
 const ITEM_SIZE = AVATAR_SIZE + 2 * (RING_GAP + RING_WIDTH);
-const STORY_QUALITY = 0.9;
-
-async function pickStoryPhoto(source: "camera" | "gallery"): Promise<string | null> {
-  if (source === "camera") {
-    const permission = await ImagePicker.requestCameraPermissionsAsync();
-    if (!permission.granted) {
-      Alert.alert(
-        "Kamerazugriff benötigt",
-        "Erlaube den Kamerazugriff in den Einstellungen oder wähle ein Foto aus der Galerie.",
-      );
-      return null;
-    }
-  }
-  // No allowsEditing: the iOS editor only crops squares, stories are portrait.
-  const options: ImagePicker.ImagePickerOptions = { mediaTypes: ["images"], quality: STORY_QUALITY };
-  const result =
-    source === "camera"
-      ? await ImagePicker.launchCameraAsync(options)
-      : await ImagePicker.launchImageLibraryAsync(options);
-  return result.canceled ? null : (result.assets[0]?.uri ?? null);
-}
 
 function openViewer(group: StoryGroup) {
   router.push({ pathname: "/stories/[userId]", params: { userId: group.author.id } });
@@ -54,18 +32,7 @@ export function StoryBar() {
   }, []);
 
   function chooseSource() {
-    Alert.alert("Story hinzufügen", undefined, [
-      { text: "Kamera", onPress: () => void add("camera") },
-      { text: "Galerie", onPress: () => void add("gallery") },
-      { text: "Abbrechen", style: "cancel" },
-    ]);
-  }
-
-  async function add(source: "camera" | "gallery") {
-    const uri = await pickStoryPhoto(source);
-    if (uri === null) return;
-    const error = await addStory(uri);
-    if (error !== null) Alert.alert("Upload fehlgeschlagen", error);
+    router.push("/story-create");
   }
 
   return (

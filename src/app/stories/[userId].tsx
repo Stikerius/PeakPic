@@ -226,6 +226,14 @@ export default function StoryViewerScreen() {
         </View>
 
         <View style={[styles.bottom, { paddingBottom: insets.bottom + spacing.md }]} pointerEvents="box-none">
+          <View style={styles.mentions} pointerEvents="none">
+            {story.mentions.map((person) => (
+              <View key={person.id} style={styles.mentionChip}>
+                <Ionicons name="person" size={12} color={colors.background} />
+                <Text style={styles.mentionText}>@{person.username}</Text>
+              </View>
+            ))}
+          </View>
           {group.isMine ? (
             <Pressable
               onPress={confirmDelete}
@@ -311,8 +319,30 @@ const styles = StyleSheet.create({
     left: 0,
     right: 0,
     bottom: 0,
+    flexDirection: "row",
     alignItems: "flex-end",
+    gap: spacing.md,
     paddingHorizontal: spacing.lg,
+  },
+  mentions: {
+    flex: 1,
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: spacing.xs,
+  },
+  mentionChip: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+    paddingHorizontal: spacing.sm,
+    paddingVertical: 4,
+    borderRadius: radius.full,
+    backgroundColor: "rgba(255, 255, 255, 0.85)",
+  },
+  mentionText: {
+    color: colors.background,
+    fontSize: fontSize.sm,
+    fontWeight: "700",
   },
   roundButton: {
     width: 52,
