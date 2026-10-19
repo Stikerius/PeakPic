@@ -144,6 +144,20 @@ as $$
   );
 $$;
 
+-- True if the post was shared into a chat the caller is a member of.
+create or replace function public.is_post_shared_with_me(post uuid)
+returns boolean
+language sql stable security definer set search_path = ''
+as $$
+  select exists (
+    select 1 from public.messages m
+    where m.post_id = post and public.is_conversation_member(m.conversation_id)
+  );
+$$;
+
+-- For policies on OTHER tables (likes, comments, messages) that reference an existing post.
+-- Don't use it in the posts policy itself: it looks the post up again, and inside
+-- INSERT ... RETURNING that lookup can't see the row being inserted yet.
 create or replace function public.can_view_post(post uuid)
 returns boolean
 language sql stable security definer set search_path = ''
@@ -151,13 +165,7 @@ as $$
   select exists (
     select 1 from public.posts p
     where p.id = post
-      and (
-        public.can_see_user_content(p.user_id)
-        or exists (
-          select 1 from public.messages m
-          where m.post_id = p.id and public.is_conversation_member(m.conversation_id)
-        )
-      )
+      and (public.can_see_user_content(p.user_id) or public.is_post_shared_with_me(p.id))
   );
 $$;
 
@@ -307,9 +315,16 @@ create policy "profiles: update own" on public.profiles
   with check (id = (select auth.uid()));
 
 -- posts
+-- Checks the row's own columns instead of looking the post up again, so the owner
+-- can always read their posts, including the new row returned by insert().select().
 drop policy if exists "posts: read own, followed or shared" on public.posts;
 create policy "posts: read own, followed or shared" on public.posts
-  for select to authenticated using (public.can_view_post(id));
+  for select to authenticated
+  using (
+    user_id = (select auth.uid())
+    or public.is_following(user_id)
+    or public.is_post_shared_with_me(id)
+  );
 
 drop policy if exists "posts: insert own" on public.posts;
 create policy "posts: insert own" on public.posts
