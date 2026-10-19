@@ -73,6 +73,9 @@ create table if not exists public.stories (
   expires_at timestamptz not null default (now() + interval '24 hours')
 );
 create index if not exists stories_user_expires_idx on public.stories (user_id, expires_at desc);
+-- People tagged in the story; they may see it even if they don't follow the author.
+alter table public.stories add column if not exists mentioned_user_ids uuid[] not null default '{}';
+create index if not exists stories_mentions_idx on public.stories using gin (mentioned_user_ids);
 
 create table if not exists public.story_likes (
   story_id   uuid not null references public.stories (id) on delete cascade,
@@ -136,6 +139,14 @@ as $$
   );
 $$;
 
+-- True if the caller follows every user in `ids` (an empty list is allowed).
+create or replace function public.follows_all(ids uuid[])
+returns boolean
+language sql stable security definer set search_path = ''
+as $$
+  select coalesce(bool_and(public.is_following(id)), true) from unnest(ids) as id;
+$$;
+
 create or replace function public.can_see_user_content(owner uuid)
 returns boolean
 language sql stable security definer set search_path = ''
@@ -184,7 +195,9 @@ language sql stable security definer set search_path = ''
 as $$
   select exists (
     select 1 from public.stories s
-    where s.id = story and s.expires_at > now() and public.can_see_user_content(s.user_id)
+    where s.id = story
+      and s.expires_at > now()
+      and (public.can_see_user_content(s.user_id) or (select auth.uid()) = any (s.mentioned_user_ids))
   );
 $$;
 
@@ -206,6 +219,12 @@ as $$
       select 1 from public.posts p
       join public.messages m on m.post_id = p.id
       where p.photo_path = object_name and public.is_conversation_member(m.conversation_id)
+    )
+    or exists (
+      select 1 from public.stories s
+      where s.photo_path = object_name
+        and s.expires_at > now()
+        and (select auth.uid()) = any (s.mentioned_user_ids)
     );
 $$;
 
@@ -408,15 +427,20 @@ create policy "stories: read active from followed, own always" on public.stories
   for select to authenticated
   using (
     user_id = (select auth.uid())
-    or (expires_at > now() and public.is_following(user_id))
+    or (
+      expires_at > now()
+      and (public.is_following(user_id) or (select auth.uid()) = any (mentioned_user_ids))
+    )
   );
 
+-- You can only tag people you follow.
 drop policy if exists "stories: insert own" on public.stories;
 create policy "stories: insert own" on public.stories
   for insert to authenticated
   with check (
     user_id = (select auth.uid())
     and (storage.foldername(photo_path))[1] = (select auth.uid())::text
+    and public.follows_all(mentioned_user_ids)
   );
 
 drop policy if exists "stories: delete own" on public.stories;

@@ -29,6 +29,8 @@ export type Story = {
   expiresAt: string;
   seen: boolean;
   likedByMe: boolean;
+  /** People tagged in the story. */
+  mentions: PublicProfile[];
 };
 
 export type StoryGroup = {

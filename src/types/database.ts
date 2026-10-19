@@ -77,6 +77,7 @@ export type Database = {
           photo_path: string;
           created_at: Timestamp;
           expires_at: Timestamp;
+          mentioned_user_ids: Uuid[];
         };
         Insert: {
           id?: Uuid;
@@ -84,6 +85,7 @@ export type Database = {
           photo_path: string;
           created_at?: Timestamp;
           expires_at?: Timestamp;
+          mentioned_user_ids?: Uuid[];
         };
         Update: Record<string, never>;
         Relationships: [Rel<"stories_user_id_fkey", "user_id", "profiles">];

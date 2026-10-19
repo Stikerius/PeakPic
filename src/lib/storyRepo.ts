@@ -1,12 +1,13 @@
 import { getSignedPhotoUrls, removePhotos, uploadPhoto } from "@/lib/photoUpload";
-import { toPublicProfiles } from "@/lib/profiles";
+import { PROFILE_COLUMNS, toPublicProfiles } from "@/lib/profiles";
 import { requireUserId } from "@/lib/session";
 import { getFollowingIds } from "@/lib/socialRepo";
 import { supabase } from "@/lib/supabase";
 import type { Story, StoryGroup } from "@/types/social";
 
 /**
- * Active stories (not expired) of people I follow plus my own, grouped by author.
+ * Active stories (not expired) of people I follow, my own, and stories I'm tagged in,
+ * grouped by author.
  * Order: my group first, then groups with unseen stories (newest first), then seen ones.
  */
 export async function fetchStoryGroups(): Promise<StoryGroup[]> {
@@ -16,23 +17,27 @@ export async function fetchStoryGroups(): Promise<StoryGroup[]> {
   const { data: rows, error } = await supabase
     .from("stories")
     .select(
-      "id, user_id, photo_path, created_at, expires_at, author:profiles!stories_user_id_fkey(id, username, avatar_path)",
+      "id, user_id, photo_path, created_at, expires_at, mentioned_user_ids, author:profiles!stories_user_id_fkey(id, username, avatar_path)",
     )
-    .in("user_id", authorIds)
+    .or(`user_id.in.(${authorIds.join(",")}),mentioned_user_ids.cs.{${userId}}`)
     .gt("expires_at", new Date().toISOString())
     .order("created_at", { ascending: true });
   if (error) throw error;
   if (rows.length === 0) return [];
 
   const storyIds = rows.map((r) => r.id);
-  const [viewsResult, likesResult, photoUrls, authors] = await Promise.all([
+  const mentionedIds = [...new Set(rows.flatMap((r) => r.mentioned_user_ids))];
+  const [viewsResult, likesResult, mentionedResult, photoUrls, authors] = await Promise.all([
     supabase.from("story_views").select("story_id").eq("user_id", userId).in("story_id", storyIds),
     supabase.from("story_likes").select("story_id").eq("user_id", userId).in("story_id", storyIds),
+    supabase.from("profiles").select(PROFILE_COLUMNS).in("id", mentionedIds),
     getSignedPhotoUrls(rows.map((r) => r.photo_path)),
     toPublicProfiles(rows.map((r) => r.author)),
   ]);
   if (viewsResult.error) throw viewsResult.error;
   if (likesResult.error) throw likesResult.error;
+  if (mentionedResult.error) throw mentionedResult.error;
+  const mentionedProfiles = await toPublicProfiles(mentionedResult.data);
   const seen = new Set(viewsResult.data.map((v) => v.story_id));
   const liked = new Set(likesResult.data.map((l) => l.story_id));
 
@@ -48,6 +53,10 @@ export async function fetchStoryGroups(): Promise<StoryGroup[]> {
       // Your own stories never count as unseen.
       seen: isMine || seen.has(row.id),
       likedByMe: liked.has(row.id),
+      mentions: row.mentioned_user_ids.flatMap((id) => {
+        const profile = mentionedProfiles.get(id);
+        return profile !== undefined ? [profile] : [];
+      }),
     };
     const group = groups.get(row.user_id);
     if (group === undefined) {
@@ -75,10 +84,12 @@ export async function fetchStoryGroups(): Promise<StoryGroup[]> {
   });
 }
 
-export async function addStory(sourceUri: string): Promise<void> {
+export async function addStory(sourceUri: string, mentionedUserIds: string[]): Promise<void> {
   const userId = await requireUserId();
   const photoPath = await uploadPhoto(userId, "stories", sourceUri);
-  const { error } = await supabase.from("stories").insert({ user_id: userId, photo_path: photoPath });
+  const { error } = await supabase
+    .from("stories")
+    .insert({ user_id: userId, photo_path: photoPath, mentioned_user_ids: mentionedUserIds });
   if (error) {
     await removePhotos([photoPath]).catch(() => undefined);
     throw error;

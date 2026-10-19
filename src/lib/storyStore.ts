@@ -78,10 +78,13 @@ export async function toggleLike(story: Story): Promise<void> {
 }
 
 /** Uploads a story and reloads the bar. Returns an error message or null. */
-export async function addStory(sourceUri: string): Promise<string | null> {
+export async function addStory(
+  sourceUri: string,
+  mentionedUserIds: string[] = [],
+): Promise<string | null> {
   setState({ uploading: true });
   try {
-    await addStoryRemote(sourceUri);
+    await addStoryRemote(sourceUri, mentionedUserIds);
     await refreshStories();
     return null;
   } catch (error) {
