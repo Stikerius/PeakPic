@@ -1,0 +1,47 @@
+import { Image } from "expo-image";
+import { StyleSheet, Text, View } from "react-native";
+
+import { colors } from "@/constants/theme";
+
+type AvatarProps = {
+  uri: string | null;
+  username: string;
+  size: number;
+};
+
+export function Avatar({ uri, username, size }: AvatarProps) {
+  const dimensions = { width: size, height: size, borderRadius: size / 2 };
+  if (uri !== null) {
+    return (
+      <Image
+        source={{ uri }}
+        style={[styles.image, dimensions]}
+        contentFit="cover"
+        transition={150}
+        accessibilityLabel={`Profilbild von ${username}`}
+      />
+    );
+  }
+  return (
+    <View style={[styles.placeholder, dimensions]} accessibilityLabel={`Profilbild von ${username}`}>
+      <Text style={[styles.initial, { fontSize: size * 0.42 }]}>
+        {username.charAt(0).toUpperCase() || "?"}
+      </Text>
+    </View>
+  );
+}
+
+const styles = StyleSheet.create({
+  image: {
+    backgroundColor: colors.surfaceElevated,
+  },
+  placeholder: {
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: colors.primaryMuted,
+  },
+  initial: {
+    color: colors.text,
+    fontWeight: "700",
+  },
+});

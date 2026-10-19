@@ -37,13 +37,6 @@ export function useSession(): SessionState {
   return value;
 }
 
-/** Session of the signed-in user. Only use inside routes guarded by a session. */
-export function useRequiredSession(): Session {
-  const { session } = useSession();
-  if (session === null) throw new Error("useRequiredSession called without a session");
-  return session;
-}
-
 /** User id of the current session for non-React code (repos). */
 export async function requireUserId(): Promise<string> {
   const { data } = await supabase.auth.getSession();
