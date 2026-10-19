@@ -13,8 +13,10 @@ import {
 
 import { Button } from "@/components/button";
 import { PostCard } from "@/components/feed/post-card";
+import { StoryBar } from "@/components/stories/story-bar";
 import { colors, fontSize, radius, spacing } from "@/constants/theme";
 import { useFeed } from "@/hooks/use-feed";
+import { refreshStories } from "@/lib/storyStore";
 import type { FeedPost } from "@/types/social";
 
 /** The bits of the tab navigator this screen needs; expo-router doesn't export its tab types. */
@@ -34,6 +36,7 @@ export default function FeedScreen() {
       if (!navigation.isFocused()) return;
       listRef.current?.scrollToOffset({ offset: 0, animated: true });
       void refresh();
+      void refreshStories();
     });
   }, [navigation, refresh]);
 
@@ -71,10 +74,14 @@ export default function FeedScreen() {
           if (hasMore) void loadMore();
         }}
         onEndReachedThreshold={0.6}
+        ListHeaderComponent={<StoryBar />}
         refreshControl={
           <RefreshControl
             refreshing={status === "refreshing"}
-            onRefresh={() => void refresh()}
+            onRefresh={() => {
+              void refresh();
+              void refreshStories();
+            }}
             tintColor={colors.primary}
           />
         }

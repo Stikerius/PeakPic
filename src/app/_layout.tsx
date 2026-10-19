@@ -53,6 +53,10 @@ function RootNavigator() {
           options={{ title: "Senden an", presentation: "modal" }}
         />
         <Stack.Screen name="day/[date]" options={{ title: "", presentation: "modal" }} />
+        <Stack.Screen
+          name="stories/[userId]"
+          options={{ headerShown: false, presentation: "fullScreenModal", animation: "fade" }}
+        />
       </Stack.Protected>
       <Stack.Protected guard={!signedIn}>
         <Stack.Screen name="login" options={{ headerShown: false }} />
