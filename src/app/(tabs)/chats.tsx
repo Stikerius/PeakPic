@@ -1,5 +1,5 @@
 import Ionicons from "@expo/vector-icons/Ionicons";
-import { Link, router, Stack, useFocusEffect } from "expo-router";
+import { router, useFocusEffect } from "expo-router";
 import { useCallback, useEffect, useState } from "react";
 import { ActivityIndicator, FlatList, Pressable, RefreshControl, StyleSheet, Text, View } from "react-native";
 
@@ -9,16 +9,6 @@ import { colors, fontSize, radius, spacing } from "@/constants/theme";
 import { listConversations, subscribeToMessages } from "@/lib/chatRepo";
 import { formatRelativeTime } from "@/lib/format";
 import type { ConversationSummary } from "@/types/chat";
-
-function NewChatButton() {
-  return (
-    <Link href="/chats/new" asChild>
-      <Pressable accessibilityRole="button" accessibilityLabel="Neuer Chat" hitSlop={spacing.sm}>
-        <Ionicons name="create-outline" size={24} color={colors.text} />
-      </Pressable>
-    </Link>
-  );
-}
 
 export default function ChatListScreen() {
   const [conversations, setConversations] = useState<ConversationSummary[] | null>(null);
@@ -51,7 +41,6 @@ export default function ChatListScreen() {
 
   return (
     <>
-      <Stack.Screen options={{ headerRight: NewChatButton }} />
       {conversations === null ? (
         <View style={styles.centered}>
           {error !== null ? (

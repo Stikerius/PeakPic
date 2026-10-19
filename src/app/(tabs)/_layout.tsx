@@ -3,7 +3,8 @@ import { Link, Tabs } from "expo-router";
 import type { ComponentProps } from "react";
 import { Pressable, StyleSheet, View, type ColorValue } from "react-native";
 
-import { colors, radius, spacing } from "@/constants/theme";
+import { NewChatButton } from "@/components/chat/new-chat-button";
+import { colors, spacing } from "@/constants/theme";
 import { useUnreadChatCount } from "@/hooks/use-unread-chats";
 
 type IoniconName = ComponentProps<typeof Ionicons>["name"];
@@ -23,7 +24,6 @@ function tabIcon(active: IoniconName, inactive: IoniconName) {
 }
 
 function FeedHeaderActions() {
-  const unreadChats = useUnreadChatCount();
   return (
     <View style={styles.headerActions}>
       <Link href="/search" asChild>
@@ -31,21 +31,12 @@ function FeedHeaderActions() {
           <Ionicons name="person-add-outline" size={22} color={colors.text} />
         </Pressable>
       </Link>
-      <Link href="/chats" asChild>
-        <Pressable
-          accessibilityRole="button"
-          accessibilityLabel={unreadChats > 0 ? `Chats, ${unreadChats} ungelesen` : "Chats"}
-          hitSlop={spacing.sm}
-        >
-          <Ionicons name="paper-plane-outline" size={23} color={colors.text} />
-          {unreadChats > 0 && <View style={styles.unreadDot} />}
-        </Pressable>
-      </Link>
     </View>
   );
 }
 
 export default function TabLayout() {
+  const unreadChats = useUnreadChatCount();
   return (
     <Tabs
       screenOptions={{
@@ -80,6 +71,16 @@ export default function TabLayout() {
         }}
       />
       <Tabs.Screen
+        name="chats"
+        options={{
+          title: "Chats",
+          tabBarIcon: tabIcon("chatbubbles", "chatbubbles-outline"),
+          tabBarBadge: unreadChats > 0 ? unreadChats : undefined,
+          tabBarBadgeStyle: { backgroundColor: colors.primary, color: colors.text },
+          headerRight: NewChatButton,
+        }}
+      />
+      <Tabs.Screen
         name="profile"
         options={{ title: "Profil", tabBarIcon: tabIcon("person", "person-outline") }}
       />
@@ -93,16 +94,5 @@ const styles = StyleSheet.create({
     alignItems: "center",
     gap: spacing.lg,
     paddingHorizontal: spacing.md,
-  },
-  unreadDot: {
-    position: "absolute",
-    top: -2,
-    right: -4,
-    width: 10,
-    height: 10,
-    borderRadius: radius.full,
-    backgroundColor: colors.danger,
-    borderWidth: 2,
-    borderColor: colors.surface,
   },
 });

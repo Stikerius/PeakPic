@@ -53,7 +53,6 @@ function RootNavigator() {
           options={{ title: "Senden an", presentation: "modal" }}
         />
         <Stack.Screen name="day/[date]" options={{ title: "", presentation: "modal" }} />
-        <Stack.Screen name="chats" options={{ title: "Chats", headerBackTitle: "Feed" }} />
         <Stack.Screen name="chats/new" options={{ title: "Neuer Chat", presentation: "modal" }} />
         <Stack.Screen name="chats/[conversationId]" options={{ title: "", headerBackTitle: "Chats" }} />
         <Stack.Screen name="post/[postId]" options={{ title: "Post" }} />
