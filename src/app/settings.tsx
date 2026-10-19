@@ -4,7 +4,9 @@ import type { ComponentProps } from "react";
 import { useCallback, useState } from "react";
 import { Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 
+import { appIconForNativeName } from "@/constants/appIcons";
 import { colors, fontSize, radius, spacing } from "@/constants/theme";
+import { loadAppIconLibrary } from "@/lib/appIcon";
 import { listHiddenUserIds } from "@/lib/privacyRepo";
 import type { AudienceScope } from "@/types/database";
 
@@ -41,11 +43,21 @@ function countLabel(count: number | undefined): string {
 
 export default function SettingsScreen() {
   const [counts, setCounts] = useState<Partial<Record<AudienceScope, number>>>({});
+  const [appIconLabel, setAppIconLabel] = useState<string | null>(null);
 
   useFocusEffect(
     useCallback(() => {
       void Promise.all([listHiddenUserIds("stories"), listHiddenUserIds("posts")])
         .then(([stories, posts]) => setCounts({ stories: stories.size, posts: posts.size }))
+        .catch(() => undefined);
+      loadAppIconLibrary()
+        .then((library) =>
+          setAppIconLabel(
+            library?.supportsAlternateIcons
+              ? appIconForNativeName(library.getAppIconName()).label
+              : "Nur in der installierten App verfügbar",
+          ),
+        )
         .catch(() => undefined);
     }, []),
   );
@@ -56,7 +68,17 @@ export default function SettingsScreen() {
 
   return (
     <ScrollView style={styles.screen} contentContainerStyle={styles.content}>
-      <Text style={styles.sectionTitle}>Privatsphäre</Text>
+      <Text style={styles.sectionTitle}>Darstellung</Text>
+      <View style={styles.card}>
+        <SettingsRow
+          icon="apps-outline"
+          title="App-Icon"
+          subtitle={appIconLabel ?? "…"}
+          onPress={() => router.push("/app-icon")}
+        />
+      </View>
+
+      <Text style={[styles.sectionTitle, styles.sectionSpacing]}>Privatsphäre</Text>
       <View style={styles.card}>
         <SettingsRow
           icon="aperture-outline"
@@ -94,6 +116,9 @@ const styles = StyleSheet.create({
     fontSize: fontSize.sm,
     fontWeight: "600",
     paddingHorizontal: spacing.sm,
+  },
+  sectionSpacing: {
+    marginTop: spacing.md,
   },
   card: {
     borderRadius: radius.lg,

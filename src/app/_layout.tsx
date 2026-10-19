@@ -60,6 +60,7 @@ function RootNavigator() {
         <Stack.Screen name="notifications" options={{ title: "Mitteilungen" }} />
         <Stack.Screen name="settings" options={{ title: "Einstellungen", headerBackTitle: "Profil" }} />
         <Stack.Screen name="privacy/[scope]" options={{ title: "" }} />
+        <Stack.Screen name="app-icon" options={{ title: "App-Icon" }} />
         <Stack.Screen
           name="story-create"
           options={{ headerShown: false, presentation: "fullScreenModal", gestureEnabled: false }}

@@ -4,18 +4,16 @@
     "slug": "PeakPic",
     "version": "1.0.0",
     "orientation": "portrait",
-    "icon": "./assets/images/icon.png",
+    "icon": "./assets/peakpic-icons/default_bw.png",
     "scheme": "peakpic",
     "userInterfaceStyle": "dark",
     "ios": {
-      "icon": "./assets/expo.icon"
+      "icon": "./assets/peakpic-icons/default_bw.png"
     },
     "android": {
       "adaptiveIcon": {
-        "backgroundColor": "#E6F4FE",
-        "foregroundImage": "./assets/images/android-icon-foreground.png",
-        "backgroundImage": "./assets/images/android-icon-background.png",
-        "monochromeImage": "./assets/images/android-icon-monochrome.png"
+        "foregroundImage": "./assets/peakpic-icons/default_bw.png",
+        "backgroundColor": "#000000"
       },
       "predictiveBackGestureEnabled": false
     },
@@ -48,6 +46,91 @@
           "cameraPermission": "PeakPic braucht Zugriff auf deine Kamera, damit du Workout-Fotos für deinen Streak aufnehmen kannst.",
           "microphonePermission": false
         }
+      ],
+      [
+        "expo-alternate-app-icons",
+        [
+          {
+            "name": "Coral",
+            "ios": "./assets/peakpic-icons/coral.png",
+            "android": {
+              "foregroundImage": "./assets/peakpic-icons/coral.png",
+              "backgroundColor": "#000000"
+            }
+          },
+          {
+            "name": "BlueBlack",
+            "ios": "./assets/peakpic-icons/blue_black.png",
+            "android": {
+              "foregroundImage": "./assets/peakpic-icons/blue_black.png",
+              "backgroundColor": "#000000"
+            }
+          },
+          {
+            "name": "RedBlack",
+            "ios": "./assets/peakpic-icons/red_black.png",
+            "android": {
+              "foregroundImage": "./assets/peakpic-icons/red_black.png",
+              "backgroundColor": "#000000"
+            }
+          },
+          {
+            "name": "Duotone",
+            "ios": "./assets/peakpic-icons/duotone.png",
+            "android": {
+              "foregroundImage": "./assets/peakpic-icons/duotone.png",
+              "backgroundColor": "#000000"
+            }
+          },
+          {
+            "name": "Outline",
+            "ios": "./assets/peakpic-icons/outline.png",
+            "android": {
+              "foregroundImage": "./assets/peakpic-icons/outline.png",
+              "backgroundColor": "#000000"
+            }
+          },
+          {
+            "name": "NeonNavy",
+            "ios": "./assets/peakpic-icons/neon_navy.png",
+            "android": {
+              "foregroundImage": "./assets/peakpic-icons/neon_navy.png",
+              "backgroundColor": "#000000"
+            }
+          },
+          {
+            "name": "Sunset",
+            "ios": "./assets/peakpic-icons/sunset.png",
+            "android": {
+              "foregroundImage": "./assets/peakpic-icons/sunset.png",
+              "backgroundColor": "#000000"
+            }
+          },
+          {
+            "name": "MinimalTeal",
+            "ios": "./assets/peakpic-icons/minimal_teal.png",
+            "android": {
+              "foregroundImage": "./assets/peakpic-icons/minimal_teal.png",
+              "backgroundColor": "#000000"
+            }
+          },
+          {
+            "name": "Pastel",
+            "ios": "./assets/peakpic-icons/pastel.png",
+            "android": {
+              "foregroundImage": "./assets/peakpic-icons/pastel.png",
+              "backgroundColor": "#000000"
+            }
+          },
+          {
+            "name": "Popart",
+            "ios": "./assets/peakpic-icons/popart.png",
+            "android": {
+              "foregroundImage": "./assets/peakpic-icons/popart.png",
+              "backgroundColor": "#000000"
+            }
+          }
+        ]
       ]
     ],
     "experiments": {
