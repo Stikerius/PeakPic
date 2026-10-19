@@ -4,6 +4,7 @@ import type { ComponentProps } from "react";
 import { Pressable, StyleSheet, View, type ColorValue } from "react-native";
 
 import { NewChatButton } from "@/components/chat/new-chat-button";
+import { NotificationBell } from "@/components/notification-bell";
 import { colors, spacing } from "@/constants/theme";
 import { useUnreadChatCount } from "@/hooks/use-unread-chats";
 
@@ -46,6 +47,15 @@ function FeedHeaderActions() {
           <Ionicons name="person-add-outline" size={22} color={colors.text} />
         </Pressable>
       </Link>
+      <NotificationBell />
+    </View>
+  );
+}
+
+function HomeHeaderActions() {
+  return (
+    <View style={styles.headerActions}>
+      <NotificationBell />
     </View>
   );
 }
@@ -67,7 +77,11 @@ export default function TabLayout() {
     >
       <Tabs.Screen
         name="index"
-        options={{ title: "Home", tabBarIcon: tabIcon("home", "home-outline") }}
+        options={{
+          title: "Home",
+          tabBarIcon: tabIcon("home", "home-outline"),
+          headerRight: HomeHeaderActions,
+        }}
       />
       <Tabs.Screen
         name="feed"

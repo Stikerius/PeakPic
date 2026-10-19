@@ -57,6 +57,7 @@ function RootNavigator() {
         <Stack.Screen name="chats/[conversationId]" options={{ title: "", headerBackTitle: "Chats" }} />
         <Stack.Screen name="post/[postId]" options={{ title: "Post" }} />
         <Stack.Screen name="user/[userId]" options={{ title: "" }} />
+        <Stack.Screen name="notifications" options={{ title: "Mitteilungen" }} />
         <Stack.Screen name="settings" options={{ title: "Einstellungen", headerBackTitle: "Profil" }} />
         <Stack.Screen name="privacy/[scope]" options={{ title: "" }} />
         <Stack.Screen
