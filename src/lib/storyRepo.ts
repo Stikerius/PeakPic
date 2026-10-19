@@ -3,7 +3,7 @@ import { PROFILE_COLUMNS, toPublicProfiles } from "@/lib/profiles";
 import { requireUserId } from "@/lib/session";
 import { getFollowingIds } from "@/lib/socialRepo";
 import { supabase } from "@/lib/supabase";
-import type { Story, StoryGroup } from "@/types/social";
+import type { PublicProfile, Story, StoryGroup } from "@/types/social";
 
 /**
  * Active stories (not expired) of people I follow, my own, and stories I'm tagged in,
@@ -108,6 +108,47 @@ export async function deleteStory(storyId: string): Promise<void> {
   await removePhotos(data.map((row) => row.photo_path)).catch((removeError: unknown) =>
     console.warn("[stories] Foto konnte nicht gelöscht werden:", removeError),
   );
+}
+
+export type StoryViewer = { profile: PublicProfile; liked: boolean; at: string };
+export type StoryActivity = { viewers: StoryViewer[]; viewCount: number; likeCount: number };
+
+/** Who viewed and liked one of my stories (readable only by the story owner). */
+export async function fetchStoryActivity(storyId: string): Promise<StoryActivity> {
+  const [views, likes] = await Promise.all([
+    supabase
+      .from("story_views")
+      .select(`viewed_at, profile:profiles!story_views_user_id_fkey(${PROFILE_COLUMNS})`)
+      .eq("story_id", storyId),
+    supabase
+      .from("story_likes")
+      .select(`created_at, profile:profiles!story_likes_user_id_fkey(${PROFILE_COLUMNS})`)
+      .eq("story_id", storyId),
+  ]);
+  if (views.error) throw views.error;
+  if (likes.error) throw likes.error;
+
+  const profiles = await toPublicProfiles([
+    ...views.data.map((v) => v.profile),
+    ...likes.data.map((l) => l.profile),
+  ]);
+  const likedIds = new Set(likes.data.map((l) => l.profile.id));
+  const byUser = new Map<string, StoryViewer>();
+  for (const view of views.data) {
+    const profile = profiles.get(view.profile.id);
+    if (profile) byUser.set(profile.id, { profile, liked: likedIds.has(profile.id), at: view.viewed_at });
+  }
+  // Likes without a recorded view (shouldn't happen, but don't lose them).
+  for (const like of likes.data) {
+    const profile = profiles.get(like.profile.id);
+    if (profile && !byUser.has(profile.id)) byUser.set(profile.id, { profile, liked: true, at: like.created_at });
+  }
+
+  const viewers = [...byUser.values()].sort((a, b) => {
+    if (a.liked !== b.liked) return a.liked ? -1 : 1;
+    return b.at.localeCompare(a.at);
+  });
+  return { viewers, viewCount: viewers.length, likeCount: likedIds.size };
 }
 
 export async function markStorySeen(storyId: string): Promise<void> {

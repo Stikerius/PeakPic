@@ -18,9 +18,11 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { scheduleOnRN } from "react-native-worklets";
 
 import { Avatar } from "@/components/avatar";
+import { StoryActivitySheet } from "@/components/stories/story-activity-sheet";
 import { useOpenProfile } from "@/hooks/use-open-profile";
 import { colors, fontSize, radius, spacing } from "@/constants/theme";
 import { formatRelativeTime } from "@/lib/format";
+import { fetchStoryActivity, type StoryActivity } from "@/lib/storyRepo";
 import { deleteStory, markSeen, toggleLike, useStories } from "@/lib/storyStore";
 import type { StoryGroup } from "@/types/social";
 
@@ -59,6 +61,8 @@ export default function StoryViewerScreen() {
   const progress = useSharedValue(0);
   const translateY = useSharedValue(0);
   const openProfile = useOpenProfile();
+  const [activity, setActivity] = useState<StoryActivity | null>(null);
+  const [activityOpen, setActivityOpen] = useState(false);
 
   const group = groups[groupIndex];
   const story = group?.stories[Math.min(storyIndex, group.stories.length - 1)];
@@ -106,9 +110,23 @@ export default function StoryViewerScreen() {
     if (upcoming !== undefined && upcoming.length > 0) void Image.prefetch(upcoming);
   }, [story?.id]);
 
+  useEffect(() => {
+    setActivity(null);
+    if (story === undefined || group?.isMine !== true) return;
+    let active = true;
+    fetchStoryActivity(story.id)
+      .then((result) => {
+        if (active) setActivity(result);
+      })
+      .catch(() => undefined);
+    return () => {
+      active = false;
+    };
+  }, [story?.id, group?.isMine]);
+
   // Run the timer once the image is shown; pausing keeps the current progress.
   useEffect(() => {
-    if (!loaded || paused) return;
+    if (!loaded || paused || activityOpen) return;
     progress.value = withTiming(
       1,
       { duration: (1 - progress.value) * STORY_DURATION_MS },
@@ -117,7 +135,7 @@ export default function StoryViewerScreen() {
       },
     );
     return () => cancelAnimation(progress);
-  }, [loaded, paused, story?.id]);
+  }, [loaded, paused, activityOpen, story?.id]);
 
   // Group disappeared (e.g. last own story deleted): leave the viewer.
   useEffect(() => {
@@ -241,6 +259,19 @@ export default function StoryViewerScreen() {
 
         <View style={[styles.bottom, { paddingBottom: insets.bottom + spacing.md }]} pointerEvents="box-none">
           <View style={styles.mentions}>
+            {group.isMine && (
+              <Pressable
+                onPress={() => setActivityOpen(true)}
+                accessibilityRole="button"
+                accessibilityLabel={`${activity?.viewCount ?? 0} Aufrufe, ${activity?.likeCount ?? 0} Likes`}
+                style={styles.activityPill}
+              >
+                <Ionicons name="eye-outline" size={16} color={colors.text} />
+                <Text style={styles.activityText}>{activity?.viewCount ?? "–"}</Text>
+                <Ionicons name="heart" size={16} color={colors.danger} />
+                <Text style={styles.activityText}>{activity?.likeCount ?? "–"}</Text>
+              </Pressable>
+            )}
             {story.mentions.map((person) => (
               <Pressable
                 key={person.id}
@@ -280,6 +311,16 @@ export default function StoryViewerScreen() {
           )}
         </View>
       </Animated.View>
+
+      <StoryActivitySheet
+        activity={activity}
+        visible={activityOpen}
+        onClose={() => setActivityOpen(false)}
+        onOpenProfile={(userId) => {
+          setActivityOpen(false);
+          closeAndOpenProfile(userId);
+        }}
+      />
     </View>
   );
 }
@@ -354,6 +395,21 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     flexWrap: "wrap",
     gap: spacing.xs,
+  },
+  activityPill: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+    paddingHorizontal: spacing.sm,
+    paddingVertical: 6,
+    borderRadius: radius.full,
+    backgroundColor: "rgba(0, 0, 0, 0.5)",
+  },
+  activityText: {
+    color: colors.text,
+    fontSize: fontSize.sm,
+    fontWeight: "700",
+    marginRight: 4,
   },
   mentionChip: {
     flexDirection: "row",
