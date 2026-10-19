@@ -49,7 +49,8 @@
     "ios": "expo start --ios",
     "web": "expo start --web",
     "lint": "expo lint",
-    "test": "jest"
+    "test": "jest",
+    "seed": "node --env-file=.env scripts/seed-fake-users.mjs"
   },
   "private": true,
   "jest": {
