@@ -5,6 +5,7 @@ import { ActivityIndicator, ScrollView, StyleSheet, Text, View } from "react-nat
 
 import { PostCard } from "@/components/feed/post-card";
 import { colors, fontSize, spacing } from "@/constants/theme";
+import { useOpenProfile } from "@/hooks/use-open-profile";
 import { onAppEvent } from "@/lib/events";
 import { fetchPost, setPostLiked } from "@/lib/feedRepo";
 import type { FeedPost } from "@/types/social";
@@ -16,6 +17,7 @@ export default function PostScreen() {
   const { postId } = useLocalSearchParams<{ postId: string }>();
   const [state, setState] = useState<LoadState>({ status: "loading" });
   const [liking, setLiking] = useState(false);
+  const openProfile = useOpenProfile();
 
   useEffect(() => {
     let active = true;
@@ -83,6 +85,7 @@ export default function PostScreen() {
         post={state.post}
         onToggleLike={() => void toggleLike()}
         onOpenComments={(id) => router.push({ pathname: "/comments/[postId]", params: { postId: id } })}
+        onOpenProfile={openProfile}
         onShare={(id) => router.push({ pathname: "/share/[postId]", params: { postId: id } })}
       />
     </ScrollView>

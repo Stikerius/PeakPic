@@ -56,6 +56,7 @@ function RootNavigator() {
         <Stack.Screen name="chats/new" options={{ title: "Neuer Chat", presentation: "modal" }} />
         <Stack.Screen name="chats/[conversationId]" options={{ title: "", headerBackTitle: "Chats" }} />
         <Stack.Screen name="post/[postId]" options={{ title: "Post" }} />
+        <Stack.Screen name="user/[userId]" options={{ title: "" }} />
         <Stack.Screen name="settings" options={{ title: "Einstellungen", headerBackTitle: "Profil" }} />
         <Stack.Screen name="privacy/[scope]" options={{ title: "" }} />
         <Stack.Screen

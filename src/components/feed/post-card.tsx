@@ -12,18 +12,24 @@ type PostCardProps = {
   onToggleLike: (postId: string) => void;
   onOpenComments: (postId: string) => void;
   onShare: (postId: string) => void;
+  onOpenProfile: (userId: string) => void;
 };
 
-export function PostCard({ post, onToggleLike, onOpenComments, onShare }: PostCardProps) {
+export function PostCard({ post, onToggleLike, onOpenComments, onShare, onOpenProfile }: PostCardProps) {
   return (
     <View style={styles.card}>
-      <View style={styles.header}>
+      <Pressable
+        onPress={() => onOpenProfile(post.author.id)}
+        accessibilityRole="button"
+        accessibilityLabel={`Profil von ${post.author.username}`}
+        style={styles.header}
+      >
         <Avatar uri={post.author.avatarUrl} username={post.author.username} size={36} />
         <View style={styles.headerText}>
           <Text style={styles.username}>@{post.author.username}</Text>
           <Text style={styles.meta}>{formatRelativeTime(post.createdAt)}</Text>
         </View>
-      </View>
+      </Pressable>
 
       {post.photoUrl !== null ? (
         <Image

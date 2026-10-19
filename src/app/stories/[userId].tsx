@@ -18,6 +18,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { scheduleOnRN } from "react-native-worklets";
 
 import { Avatar } from "@/components/avatar";
+import { useOpenProfile } from "@/hooks/use-open-profile";
 import { colors, fontSize, radius, spacing } from "@/constants/theme";
 import { formatRelativeTime } from "@/lib/format";
 import { deleteStory, markSeen, toggleLike, useStories } from "@/lib/storyStore";
@@ -57,6 +58,7 @@ export default function StoryViewerScreen() {
   const [paused, setPaused] = useState(false);
   const progress = useSharedValue(0);
   const translateY = useSharedValue(0);
+  const openProfile = useOpenProfile();
 
   const group = groups[groupIndex];
   const story = group?.stories[Math.min(storyIndex, group.stories.length - 1)];
@@ -64,6 +66,11 @@ export default function StoryViewerScreen() {
 
   function close() {
     router.back();
+  }
+
+  function closeAndOpenProfile(userId: string) {
+    router.back();
+    openProfile(userId);
   }
 
   function goNext() {
@@ -210,8 +217,15 @@ export default function StoryViewerScreen() {
             ))}
           </View>
           <View style={styles.header}>
-            <Avatar uri={group.author.avatarUrl} username={group.author.username} size={32} />
-            <Text style={styles.username}>{group.isMine ? "Deine Story" : group.author.username}</Text>
+            <Pressable
+              onPress={() => closeAndOpenProfile(group.author.id)}
+              accessibilityRole="button"
+              accessibilityLabel={`Profil von ${group.author.username}`}
+              style={styles.author}
+            >
+              <Avatar uri={group.author.avatarUrl} username={group.author.username} size={32} />
+              <Text style={styles.username}>{group.isMine ? "Deine Story" : group.author.username}</Text>
+            </Pressable>
             <Text style={styles.time}>{formatRelativeTime(story.createdAt)}</Text>
             <View style={styles.flex} />
             <Pressable
@@ -226,12 +240,18 @@ export default function StoryViewerScreen() {
         </View>
 
         <View style={[styles.bottom, { paddingBottom: insets.bottom + spacing.md }]} pointerEvents="box-none">
-          <View style={styles.mentions} pointerEvents="none">
+          <View style={styles.mentions}>
             {story.mentions.map((person) => (
-              <View key={person.id} style={styles.mentionChip}>
+              <Pressable
+                key={person.id}
+                onPress={() => closeAndOpenProfile(person.id)}
+                accessibilityRole="button"
+                accessibilityLabel={`Profil von ${person.username}`}
+                style={styles.mentionChip}
+              >
                 <Ionicons name="person" size={12} color={colors.background} />
                 <Text style={styles.mentionText}>@{person.username}</Text>
-              </View>
+              </Pressable>
             ))}
           </View>
           {group.isMine ? (
@@ -304,6 +324,11 @@ const styles = StyleSheet.create({
     alignItems: "center",
     gap: spacing.sm,
     paddingHorizontal: spacing.xs,
+  },
+  author: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: spacing.sm,
   },
   username: {
     color: colors.text,

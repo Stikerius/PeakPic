@@ -1,5 +1,5 @@
 import Ionicons from "@expo/vector-icons/Ionicons";
-import { Stack, useLocalSearchParams } from "expo-router";
+import { router, Stack, useLocalSearchParams } from "expo-router";
 import { useHeaderHeight } from "expo-router/react-navigation";
 import { useEffect, useState } from "react";
 import {
@@ -139,10 +139,15 @@ export default function ChatScreen() {
         options={{
           headerTitle: () =>
             partner !== null ? (
-              <View style={styles.headerTitle}>
+              <Pressable
+                onPress={() => router.push({ pathname: "/user/[userId]", params: { userId: partner.id } })}
+                accessibilityRole="button"
+                accessibilityLabel={`Profil von ${partner.username}`}
+                style={styles.headerTitle}
+              >
                 <Avatar uri={partner.avatarUrl} username={partner.username} size={30} />
                 <Text style={styles.headerName}>{partner.username}</Text>
-              </View>
+              </Pressable>
             ) : null,
         }}
       />

@@ -16,19 +16,23 @@ import { colors, fontSize, radius, spacing } from "@/constants/theme";
 import { describeError } from "@/lib/errors";
 import { emitAppEvent } from "@/lib/events";
 import { formatDayTitle, formatTime } from "@/lib/format";
+import { useSession } from "@/lib/session";
+import { fetchUserPostsOnDay } from "@/lib/userProfileRepo";
 import { workoutRepo } from "@/lib/workoutRepo";
 import type { WorkoutWithPhoto } from "@/types/workout";
 
 export default function DayScreen() {
-  const { date } = useLocalSearchParams<{ date: string }>();
+  // Without userId (or with your own) this is your day and photos can be deleted.
+  const { date, userId } = useLocalSearchParams<{ date: string; userId?: string }>();
+  const myId = useSession().session?.user.id;
+  const isMine = userId === undefined || userId === myId;
   const [workouts, setWorkouts] = useState<WorkoutWithPhoto[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [deletingId, setDeletingId] = useState<string | null>(null);
 
   useEffect(() => {
     let active = true;
-    workoutRepo
-      .listWorkoutsOnDay(date)
+    (isMine || userId === undefined ? workoutRepo.listWorkoutsOnDay(date) : fetchUserPostsOnDay(userId, date))
       .then((result) => {
         if (active) setWorkouts(result);
       })
@@ -38,7 +42,7 @@ export default function DayScreen() {
     return () => {
       active = false;
     };
-  }, [date]);
+  }, [date, userId, isMine]);
 
   async function remove(workout: WorkoutWithPhoto) {
     setDeletingId(workout.id);
@@ -109,20 +113,22 @@ export default function DayScreen() {
                     <Text style={styles.caption}>{workout.caption}</Text>
                   )}
                 </View>
-                <Pressable
-                  onPress={() => confirmRemove(workout)}
-                  disabled={deletingId !== null}
-                  accessibilityRole="button"
-                  accessibilityLabel="Foto löschen"
-                  hitSlop={spacing.sm}
-                  style={({ pressed }) => [styles.deleteButton, pressed && styles.pressed]}
-                >
-                  {deletingId === workout.id ? (
-                    <ActivityIndicator size="small" color={colors.danger} />
-                  ) : (
-                    <Ionicons name="trash-outline" size={22} color={colors.danger} />
-                  )}
-                </Pressable>
+                {isMine && (
+                  <Pressable
+                    onPress={() => confirmRemove(workout)}
+                    disabled={deletingId !== null}
+                    accessibilityRole="button"
+                    accessibilityLabel="Foto löschen"
+                    hitSlop={spacing.sm}
+                    style={({ pressed }) => [styles.deleteButton, pressed && styles.pressed]}
+                  >
+                    {deletingId === workout.id ? (
+                      <ActivityIndicator size="small" color={colors.danger} />
+                    ) : (
+                      <Ionicons name="trash-outline" size={22} color={colors.danger} />
+                    )}
+                  </Pressable>
+                )}
               </View>
             </View>
           ))}

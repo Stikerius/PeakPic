@@ -4,6 +4,7 @@ import { ActivityIndicator, FlatList, StyleSheet, Text, TextInput, View } from "
 
 import { Button } from "@/components/button";
 import { ProfileRow } from "@/components/profile-row";
+import { useOpenProfile } from "@/hooks/use-open-profile";
 import { colors, fontSize, radius, spacing } from "@/constants/theme";
 import { emitAppEvent } from "@/lib/events";
 import { getFollowingIds, listFollowing, searchProfiles, setFollowing } from "@/lib/socialRepo";
@@ -18,6 +19,7 @@ export default function SearchScreen() {
   const [followingIds, setFollowingIds] = useState<Set<string>>(new Set());
   const [searching, setSearching] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const openProfile = useOpenProfile();
 
   useEffect(() => {
     void Promise.all([getFollowingIds(), listFollowing()])
@@ -119,6 +121,7 @@ export default function SearchScreen() {
           return (
             <ProfileRow
               profile={item}
+              onPress={() => openProfile(item.id)}
               accessory={
                 <Button
                   label={isFollowing ? "Gefolgt" : "Folgen"}

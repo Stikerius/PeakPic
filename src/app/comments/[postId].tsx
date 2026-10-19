@@ -16,6 +16,7 @@ import {
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { Avatar } from "@/components/avatar";
+import { useOpenProfile } from "@/hooks/use-open-profile";
 import { colors, fontSize, radius, spacing } from "@/constants/theme";
 import { COMMENT_MAX_LENGTH, addComment, listComments } from "@/lib/commentRepo";
 import { emitAppEvent } from "@/lib/events";
@@ -27,6 +28,7 @@ export default function CommentsScreen() {
   const headerHeight = useHeaderHeight();
   const insets = useSafeAreaInsets();
   const listRef = useRef<FlatList<PostComment>>(null);
+  const openProfile = useOpenProfile();
 
   const [comments, setComments] = useState<PostComment[] | null>(null);
   const [draft, setDraft] = useState("");
@@ -90,10 +92,18 @@ export default function CommentsScreen() {
           keyboardShouldPersistTaps="handled"
           renderItem={({ item }) => (
             <View style={styles.comment}>
-              <Avatar uri={item.author.avatarUrl} username={item.author.username} size={32} />
+              <Pressable
+                onPress={() => openProfile(item.author.id)}
+                accessibilityRole="button"
+                accessibilityLabel={`Profil von ${item.author.username}`}
+              >
+                <Avatar uri={item.author.avatarUrl} username={item.author.username} size={32} />
+              </Pressable>
               <View style={styles.commentBody}>
                 <Text style={styles.commentText}>
-                  <Text style={styles.username}>@{item.author.username} </Text>
+                  <Text style={styles.username} onPress={() => openProfile(item.author.id)}>
+                    @{item.author.username}{" "}
+                  </Text>
                   {item.body}
                 </Text>
                 <Text style={styles.meta}>{formatRelativeTime(item.createdAt)}</Text>
