@@ -14,6 +14,12 @@ export const colors = {
   danger: "#FF453A",
 } as const;
 
+/** Flame colour per streak tier (see FLAME_TIER_THRESHOLDS in lib/streak.ts). */
+export const flameColors = ["#FFB347", "#FF7A1A", "#FF3B30", "#4DA3FF"] as const;
+
+/** Flame size multiplier per streak tier. */
+export const flameScale = [1, 1.15, 1.3, 1.5] as const;
+
 export const spacing = {
   xs: 4,
   sm: 8,

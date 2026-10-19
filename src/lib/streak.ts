@@ -41,10 +41,15 @@ export function formatDayKey(year: number, month: number, day: number): DayKey {
 
 /** Converts an instant to the calendar day it falls on in `timeZone`. */
 export function toDayKey(date: Date, timeZone: string = APP_TIME_ZONE): DayKey {
-  const parts = getDayKeyFormatter(timeZone).formatToParts(date);
-  const get = (type: Intl.DateTimeFormatPartTypes): number =>
-    Number(parts.find((p) => p.type === type)?.value);
-  return formatDayKey(get("year"), get("month"), get("day"));
+  try {
+    const parts = getDayKeyFormatter(timeZone).formatToParts(date);
+    const get = (type: Intl.DateTimeFormatPartTypes): number =>
+      Number(parts.find((p) => p.type === type)?.value);
+    return formatDayKey(get("year"), get("month"), get("day"));
+  } catch {
+    // Engines without time zone support: fall back to the device's local day.
+    return formatDayKey(date.getFullYear(), date.getMonth() + 1, date.getDate());
+  }
 }
 
 export function parseDayKey(key: DayKey): { year: number; month: number; day: number } {
