@@ -81,6 +81,15 @@ create table if not exists public.story_likes (
   primary key (story_id, user_id)
 );
 
+-- Who has seen which story (drives the "unseen" ring in the story bar).
+create table if not exists public.story_views (
+  story_id  uuid not null references public.stories (id) on delete cascade,
+  user_id   uuid not null references public.profiles (id) on delete cascade,
+  viewed_at timestamptz not null default now(),
+  primary key (story_id, user_id)
+);
+create index if not exists story_views_user_idx on public.story_views (user_id);
+
 create table if not exists public.conversations (
   id         uuid primary key default gen_random_uuid(),
   created_by uuid not null references public.profiles (id) on delete cascade,
@@ -282,8 +291,8 @@ grant execute on function public.username_available(text) to anon, authenticated
 
 grant select, insert, update, delete on
   public.profiles, public.posts, public.post_likes, public.comments, public.follows,
-  public.stories, public.story_likes, public.conversations, public.conversation_members,
-  public.messages
+  public.stories, public.story_likes, public.story_views, public.conversations,
+  public.conversation_members, public.messages
 to authenticated;
 
 
@@ -298,6 +307,7 @@ alter table public.comments             enable row level security;
 alter table public.follows              enable row level security;
 alter table public.stories              enable row level security;
 alter table public.story_likes          enable row level security;
+alter table public.story_views          enable row level security;
 alter table public.conversations        enable row level security;
 alter table public.conversation_members enable row level security;
 alter table public.messages             enable row level security;
@@ -433,6 +443,23 @@ create policy "story_likes: like visible stories" on public.story_likes
 drop policy if exists "story_likes: unlike own" on public.story_likes;
 create policy "story_likes: unlike own" on public.story_likes
   for delete to authenticated using (user_id = (select auth.uid()));
+
+-- story_views: you record your own views; you and the story owner can read them.
+drop policy if exists "story_views: read own or on own story" on public.story_views;
+create policy "story_views: read own or on own story" on public.story_views
+  for select to authenticated
+  using (
+    user_id = (select auth.uid())
+    or exists (
+      select 1 from public.stories s
+      where s.id = story_id and s.user_id = (select auth.uid())
+    )
+  );
+
+drop policy if exists "story_views: record own view" on public.story_views;
+create policy "story_views: record own view" on public.story_views
+  for insert to authenticated
+  with check (user_id = (select auth.uid()) and public.can_view_story(story_id));
 
 -- conversations / members: read for members only. Inserts happen through
 -- get_or_create_direct_conversation(), so there are no insert policies.

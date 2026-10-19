@@ -20,6 +20,25 @@ export type FeedPost = {
   commentCount: number;
 };
 
+export type Story = {
+  id: string;
+  userId: string;
+  /** Signed photo URL; null if it could not be signed. */
+  photoUrl: string | null;
+  createdAt: string;
+  expiresAt: string;
+  seen: boolean;
+  likedByMe: boolean;
+};
+
+export type StoryGroup = {
+  author: PublicProfile;
+  /** Oldest first, like Instagram. */
+  stories: Story[];
+  isMine: boolean;
+  hasUnseen: boolean;
+};
+
 export type PostComment = {
   id: string;
   postId: string;

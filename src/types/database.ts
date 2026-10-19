@@ -97,6 +97,15 @@ export type Database = {
           Rel<"story_likes_user_id_fkey", "user_id", "profiles">,
         ];
       };
+      story_views: {
+        Row: { story_id: Uuid; user_id: Uuid; viewed_at: Timestamp };
+        Insert: { story_id: Uuid; user_id: Uuid; viewed_at?: Timestamp };
+        Update: Record<string, never>;
+        Relationships: [
+          Rel<"story_views_story_id_fkey", "story_id", "stories">,
+          Rel<"story_views_user_id_fkey", "user_id", "profiles">,
+        ];
+      };
       conversations: {
         Row: { id: Uuid; created_by: Uuid; created_at: Timestamp };
         Insert: { id?: Uuid; created_by: Uuid; created_at?: Timestamp };
