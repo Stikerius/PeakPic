@@ -10,11 +10,13 @@ import {
 import { colors, fontSize, radius, spacing } from "@/constants/theme";
 
 type ButtonVariant = "primary" | "secondary";
+type ButtonSize = "md" | "sm";
 
 type ButtonProps = {
   label: string;
   onPress: () => void;
   variant?: ButtonVariant;
+  size?: ButtonSize;
   disabled?: boolean;
   loading?: boolean;
   style?: StyleProp<ViewStyle>;
@@ -24,6 +26,7 @@ export function Button({
   label,
   onPress,
   variant = "primary",
+  size = "md",
   disabled = false,
   loading = false,
   style,
@@ -37,6 +40,7 @@ export function Button({
       disabled={isDisabled}
       style={({ pressed }) => [
         styles.base,
+        size === "sm" && styles.small,
         variant === "primary" ? styles.primary : styles.secondary,
         (pressed || isDisabled) && styles.dimmed,
         style,
@@ -45,7 +49,7 @@ export function Button({
       {loading ? (
         <ActivityIndicator color={colors.text} />
       ) : (
-        <Text style={styles.label}>{label}</Text>
+        <Text style={[styles.label, size === "sm" && styles.smallLabel]}>{label}</Text>
       )}
     </Pressable>
   );
@@ -58,6 +62,11 @@ const styles = StyleSheet.create({
     borderRadius: radius.md,
     alignItems: "center",
     justifyContent: "center",
+  },
+  small: {
+    minHeight: 34,
+    paddingHorizontal: spacing.md,
+    borderRadius: radius.sm,
   },
   primary: {
     backgroundColor: colors.primary,
@@ -74,5 +83,8 @@ const styles = StyleSheet.create({
     color: colors.text,
     fontSize: fontSize.md,
     fontWeight: "600",
+  },
+  smallLabel: {
+    fontSize: fontSize.sm,
   },
 });

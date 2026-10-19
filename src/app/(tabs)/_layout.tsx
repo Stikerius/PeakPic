@@ -1,9 +1,9 @@
 import Ionicons from "@expo/vector-icons/Ionicons";
-import { Tabs } from "expo-router";
+import { Link, Tabs } from "expo-router";
 import type { ComponentProps } from "react";
-import type { ColorValue } from "react-native";
+import { Pressable, StyleSheet, type ColorValue } from "react-native";
 
-import { colors } from "@/constants/theme";
+import { colors, spacing } from "@/constants/theme";
 
 type IoniconName = ComponentProps<typeof Ionicons>["name"];
 
@@ -19,6 +19,21 @@ function tabIcon(active: IoniconName, inactive: IoniconName) {
       <Ionicons name={focused ? active : inactive} color={color} size={size} />
     );
   };
+}
+
+function SearchButton() {
+  return (
+    <Link href="/search" asChild>
+      <Pressable
+        accessibilityRole="button"
+        accessibilityLabel="Leute finden"
+        hitSlop={spacing.sm}
+        style={styles.headerButton}
+      >
+        <Ionicons name="person-add-outline" size={22} color={colors.text} />
+      </Pressable>
+    </Link>
+  );
 }
 
 export default function TabLayout() {
@@ -41,7 +56,11 @@ export default function TabLayout() {
       />
       <Tabs.Screen
         name="feed"
-        options={{ title: "Feed", tabBarIcon: tabIcon("people", "people-outline") }}
+        options={{
+          title: "Feed",
+          tabBarIcon: tabIcon("people", "people-outline"),
+          headerRight: SearchButton,
+        }}
       />
       <Tabs.Screen
         name="camera"
@@ -58,3 +77,9 @@ export default function TabLayout() {
     </Tabs>
   );
 }
+
+const styles = StyleSheet.create({
+  headerButton: {
+    paddingHorizontal: spacing.md,
+  },
+});

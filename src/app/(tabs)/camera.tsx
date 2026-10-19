@@ -10,6 +10,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { CameraPermissionPrompt } from "@/components/camera/camera-permission-prompt";
 import { PhotoReview } from "@/components/camera/photo-review";
 import { colors, fontSize, radius, spacing } from "@/constants/theme";
+import { emitAppEvent } from "@/lib/events";
 import { workoutRepo } from "@/lib/workoutRepo";
 import type { CapturedPhoto } from "@/types/photo";
 
@@ -105,6 +106,7 @@ export default function CameraScreen() {
     setSaveError(null);
     try {
       await workoutRepo.addWorkout({ sourceUri: captured.uri, caption });
+      emitAppEvent("postCreated", undefined);
       setCaptured(null);
       setNotice("Workout gepostet 💪");
     } catch {

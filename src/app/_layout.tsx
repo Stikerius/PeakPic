@@ -43,6 +43,15 @@ function RootNavigator() {
     >
       <Stack.Protected guard={signedIn}>
         <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
+        <Stack.Screen name="search" options={{ title: "Leute finden", presentation: "modal" }} />
+        <Stack.Screen
+          name="comments/[postId]"
+          options={{ title: "Kommentare", presentation: "modal" }}
+        />
+        <Stack.Screen
+          name="share/[postId]"
+          options={{ title: "Senden an", presentation: "modal" }}
+        />
       </Stack.Protected>
       <Stack.Protected guard={!signedIn}>
         <Stack.Screen name="login" options={{ headerShown: false }} />
