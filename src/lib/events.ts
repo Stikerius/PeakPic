@@ -6,6 +6,7 @@ type AppEvents = {
   postCreated: undefined;
   commentAdded: { postId: string };
   followChanged: undefined;
+  postDeleted: { postId: string };
 };
 
 type Listeners = { [K in keyof AppEvents]: Set<(payload: AppEvents[K]) => void> };
@@ -14,6 +15,7 @@ const listeners: Listeners = {
   postCreated: new Set(),
   commentAdded: new Set(),
   followChanged: new Set(),
+  postDeleted: new Set(),
 };
 
 export function emitAppEvent<K extends keyof AppEvents>(event: K, payload: AppEvents[K]): void {

@@ -22,6 +22,11 @@ export function getPhotoUri(fileName: string): string {
   return new File(photosDir, fileName).uri;
 }
 
+export function deletePhotoFile(fileName: string): void {
+  const file = new File(photosDir, fileName);
+  if (file.exists) file.delete();
+}
+
 /** Reads the legacy metadata file. Returns null if there is none. */
 export async function readLegacyPhotoIndex(): Promise<unknown> {
   if (!legacyIndexFile.exists) return null;

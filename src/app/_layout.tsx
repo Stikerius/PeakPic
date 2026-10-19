@@ -52,6 +52,7 @@ function RootNavigator() {
           name="share/[postId]"
           options={{ title: "Senden an", presentation: "modal" }}
         />
+        <Stack.Screen name="day/[date]" options={{ title: "", presentation: "modal" }} />
       </Stack.Protected>
       <Stack.Protected guard={!signedIn}>
         <Stack.Screen name="login" options={{ headerShown: false }} />

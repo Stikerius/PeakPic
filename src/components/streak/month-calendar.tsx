@@ -22,6 +22,8 @@ type MonthCalendarProps = {
   canGoNext: boolean;
   onPrev: () => void;
   onNext: () => void;
+  /** Called when a training day is tapped. */
+  onSelectDay: (day: DayKey) => void;
 };
 
 export function MonthCalendar({
@@ -32,6 +34,7 @@ export function MonthCalendar({
   canGoNext,
   onPrev,
   onNext,
+  onSelectDay,
 }: MonthCalendarProps) {
   const weeks = monthGrid(year, month);
   const monthName = MONTH_NAMES[month - 1] ?? "";
@@ -87,18 +90,43 @@ export function MonthCalendar({
             const run = runLengths.get(day);
             const isToday = day === today;
             const isFuture = day > today;
-            return (
-              <View
-                key={day}
-                style={[styles.cell, isToday && styles.today]}
-                accessible
-                accessibilityLabel={`${parseDayKey(day).day}. ${monthName}${run !== undefined ? ", trainiert" : ""}${isToday ? ", heute" : ""}`}
-              >
+            const label = `${parseDayKey(day).day}. ${monthName}${run !== undefined ? ", trainiert" : ""}${isToday ? ", heute" : ""}`;
+            const content = (
+              <>
                 <Text style={[styles.dayNumber, isFuture && styles.future]}>
                   {parseDayKey(day).day}
                 </Text>
                 {run !== undefined && <FlameIcon tier={flameTier(run)} baseSize={16} />}
-              </View>
+              </>
+            );
+            if (run === undefined) {
+              return (
+                <View
+                  key={day}
+                  style={[styles.cell, isToday && styles.today]}
+                  accessible
+                  accessibilityLabel={label}
+                >
+                  {content}
+                </View>
+              );
+            }
+            return (
+              <Pressable
+                key={day}
+                onPress={() => onSelectDay(day)}
+                style={({ pressed }) => [
+                  styles.cell,
+                  styles.trainedCell,
+                  isToday && styles.today,
+                  pressed && styles.pressedCell,
+                ]}
+                accessibilityRole="button"
+                accessibilityLabel={label}
+                accessibilityHint="Zeigt die Fotos dieses Tages"
+              >
+                {content}
+              </Pressable>
             );
           })}
         </View>
@@ -163,6 +191,12 @@ const styles = StyleSheet.create({
     borderRadius: radius.md,
     borderWidth: 1,
     borderColor: "transparent",
+  },
+  trainedCell: {
+    backgroundColor: colors.surfaceElevated,
+  },
+  pressedCell: {
+    opacity: 0.6,
   },
   today: {
     borderColor: colors.primary,

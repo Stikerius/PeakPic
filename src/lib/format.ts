@@ -14,6 +14,33 @@ export function formatRelativeTime(iso: string, now: Date = new Date()): string 
   return formatDate(iso);
 }
 
+const WEEKDAYS = ["Sonntag", "Montag", "Dienstag", "Mittwoch", "Donnerstag", "Freitag", "Samstag"];
+const MONTHS = [
+  "Januar", "Februar", "März", "April", "Mai", "Juni",
+  "Juli", "August", "September", "Oktober", "November", "Dezember",
+];
+
+/** "Montag, 12. Oktober 2026" for a "YYYY-MM-DD" day key. */
+export function formatDayTitle(dayKey: string): string {
+  const [year = 0, month = 1, day = 1] = dayKey.split("-").map(Number);
+  const weekday = WEEKDAYS[new Date(Date.UTC(year, month - 1, day)).getUTCDay()] ?? "";
+  return `${weekday}, ${day}. ${MONTHS[month - 1] ?? ""} ${year}`;
+}
+
+/** "18:42" in the app time zone. */
+export function formatTime(iso: string): string {
+  try {
+    return new Intl.DateTimeFormat("de-CH", {
+      timeZone: APP_TIME_ZONE,
+      hour: "2-digit",
+      minute: "2-digit",
+    }).format(new Date(iso));
+  } catch {
+    const d = new Date(iso);
+    return `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
+  }
+}
+
 /** "12.03.2026" in the app time zone. */
 export function formatDate(iso: string): string {
   try {

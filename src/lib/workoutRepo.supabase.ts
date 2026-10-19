@@ -1,5 +1,5 @@
 import { StepError } from "@/lib/errors";
-import { removePhotos, uploadPhoto } from "@/lib/photoUpload";
+import { getSignedPhotoUrls, removePhotos, uploadPhoto } from "@/lib/photoUpload";
 import { requireUserId } from "@/lib/session";
 import { toDayKey } from "@/lib/streak";
 import { supabase } from "@/lib/supabase";
@@ -14,6 +14,25 @@ export const supabaseWorkoutRepo: WorkoutRepo = {
       .eq("user_id", userId);
     if (error) throw error;
     return data.map((row) => row.workout_date);
+  },
+
+  async listWorkoutsOnDay(day) {
+    const userId = await requireUserId();
+    const { data, error } = await supabase
+      .from("posts")
+      .select("id, photo_path, caption, workout_date, created_at")
+      .eq("user_id", userId)
+      .eq("workout_date", day)
+      .order("created_at", { ascending: true });
+    if (error) throw error;
+    const urls = await getSignedPhotoUrls(data.map((row) => row.photo_path));
+    return data.map((row) => ({
+      id: row.id,
+      workoutDate: row.workout_date,
+      caption: row.caption,
+      createdAt: row.created_at,
+      photoUrl: urls.get(row.photo_path) ?? null,
+    }));
   },
 
   async addWorkout({ sourceUri, caption }) {
@@ -44,5 +63,20 @@ export const supabaseWorkoutRepo: WorkoutRepo = {
       caption: data.caption,
       createdAt: data.created_at,
     };
+  },
+
+  async deleteWorkout(id) {
+    const userId = await requireUserId();
+    const { data, error } = await supabase
+      .from("posts")
+      .delete()
+      .eq("id", id)
+      .eq("user_id", userId)
+      .select("photo_path");
+    if (error) throw error;
+    // The row is gone either way; a leftover file is only wasted storage.
+    await removePhotos(data.map((row) => row.photo_path)).catch((removeError: unknown) =>
+      console.warn("[workouts] Foto konnte nicht gelöscht werden:", removeError),
+    );
   },
 };

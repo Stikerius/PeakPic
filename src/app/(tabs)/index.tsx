@@ -1,3 +1,4 @@
+import { router } from "expo-router";
 import { useState } from "react";
 import { ActivityIndicator, ScrollView, StyleSheet, Text, View } from "react-native";
 
@@ -52,6 +53,7 @@ export default function HomeScreen() {
         canGoNext={canGoNext}
         onPrev={() => setVisibleMonth((m) => addMonths(m.year, m.month, -1))}
         onNext={() => setVisibleMonth((m) => addMonths(m.year, m.month, 1))}
+        onSelectDay={(day) => router.push({ pathname: "/day/[date]", params: { date: day } })}
       />
     </ScrollView>
   );

@@ -3,6 +3,8 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 import {
   copyIntoPhotoDir,
   deleteLegacyPhotoIndex,
+  deletePhotoFile,
+  getPhotoUri,
   readLegacyPhotoIndex,
 } from "@/lib/photoStorage";
 import { toDayKey } from "@/lib/streak";
@@ -67,6 +69,13 @@ export const localWorkoutRepo: WorkoutRepo = {
     return (await readAll()).map((stored) => toWorkout(stored).workoutDate);
   },
 
+  async listWorkoutsOnDay(day) {
+    return (await readAll())
+      .map((stored) => ({ ...toWorkout(stored), photoUrl: getPhotoUri(stored.fileName) }))
+      .filter((workout) => workout.workoutDate === day)
+      .sort((a, b) => a.createdAt.localeCompare(b.createdAt));
+  },
+
   async addWorkout({ sourceUri, caption }) {
     const id = createId();
     const fileName = await copyIntoPhotoDir(sourceUri, id);
@@ -79,5 +88,12 @@ export const localWorkoutRepo: WorkoutRepo = {
     };
     await writeAll([stored, ...(await readAll())]);
     return toWorkout(stored);
+  },
+
+  async deleteWorkout(id) {
+    const all = await readAll();
+    const target = all.find((stored) => stored.id === id);
+    await writeAll(all.filter((stored) => stored.id !== id));
+    if (target !== undefined) deletePhotoFile(target.fileName);
   },
 };

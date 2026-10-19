@@ -82,6 +82,9 @@ export function useFeed() {
     const unsubscribers = [
       onAppEvent("postCreated", () => void loadFirstPage("silent")),
       onAppEvent("followChanged", () => void loadFirstPage("silent")),
+      onAppEvent("postDeleted", ({ postId }) =>
+        setPosts((prev) => prev.filter((p) => p.id !== postId)),
+      ),
       onAppEvent("commentAdded", ({ postId }) =>
         setPosts((prev) =>
           prev.map((p) => (p.id === postId ? { ...p, commentCount: p.commentCount + 1 } : p)),
