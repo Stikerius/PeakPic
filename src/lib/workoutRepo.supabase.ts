@@ -1,3 +1,4 @@
+import { StepError } from "@/lib/errors";
 import { removePhotos, uploadPhoto } from "@/lib/photoUpload";
 import { requireUserId } from "@/lib/session";
 import { toDayKey } from "@/lib/streak";
@@ -34,7 +35,7 @@ export const supabaseWorkoutRepo: WorkoutRepo = {
     if (error) {
       // Don't leave an orphaned file behind if the post row could not be created.
       await removePhotos([photoPath]).catch(() => undefined);
-      throw error;
+      throw new StepError("Post speichern", error.message);
     }
 
     return {

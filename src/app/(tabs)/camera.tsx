@@ -10,6 +10,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { CameraPermissionPrompt } from "@/components/camera/camera-permission-prompt";
 import { PhotoReview } from "@/components/camera/photo-review";
 import { colors, fontSize, radius, spacing } from "@/constants/theme";
+import { describeError } from "@/lib/errors";
 import { emitAppEvent } from "@/lib/events";
 import { workoutRepo } from "@/lib/workoutRepo";
 import type { CapturedPhoto } from "@/types/photo";
@@ -109,8 +110,10 @@ export default function CameraScreen() {
       emitAppEvent("postCreated", undefined);
       setCaptured(null);
       setNotice("Workout gepostet 💪");
-    } catch {
-      setSaveError("Hochladen fehlgeschlagen. Prüfe deine Verbindung und versuche es erneut.");
+    } catch (error) {
+      // Shows up in the dev server terminal, so upload problems can be diagnosed.
+      console.error("[camera] Workout speichern fehlgeschlagen:", error);
+      setSaveError(`Hochladen fehlgeschlagen – ${describeError(error)}`);
     } finally {
       setSaving(false);
     }

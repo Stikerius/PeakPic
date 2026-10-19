@@ -18,6 +18,7 @@ import { FlameIcon } from "@/components/streak/flame-icon";
 import { colors, fontSize, radius, spacing } from "@/constants/theme";
 import { useWorkoutDays } from "@/hooks/use-workout-days";
 import { signOut } from "@/lib/auth";
+import { describeError } from "@/lib/errors";
 import { getMyProfile, updateMyAvatar, type Profile } from "@/lib/profileRepo";
 import { useSession } from "@/lib/session";
 import { computeStreakStatsFromDays, flameTier, toDayKey } from "@/lib/streak";
@@ -67,8 +68,9 @@ export default function ProfileScreen() {
     setError(null);
     try {
       setProfile(await updateMyAvatar(asset.uri, profile.avatarPath));
-    } catch {
-      setError("Profilbild konnte nicht hochgeladen werden.");
+    } catch (uploadError) {
+      console.error("[profile] Avatar-Upload fehlgeschlagen:", uploadError);
+      setError(`Profilbild konnte nicht hochgeladen werden – ${describeError(uploadError)}`);
     } finally {
       setUploading(false);
     }
