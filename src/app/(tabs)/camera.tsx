@@ -1,9 +1,10 @@
 import Ionicons from "@expo/vector-icons/Ionicons";
 import { CameraView, useCameraPermissions, type CameraType } from "expo-camera";
 import * as ImagePicker from "expo-image-picker";
-import { router, useFocusEffect, useIsFocused } from "expo-router";
+import { useFocusEffect, useIsFocused, useNavigation } from "expo-router";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { ActivityIndicator, Pressable, StyleSheet, Text, View } from "react-native";
+import { Gesture, GestureDetector } from "react-native-gesture-handler";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { CameraPermissionPrompt } from "@/components/camera/camera-permission-prompt";
@@ -15,11 +16,18 @@ import type { CapturedPhoto } from "@/types/photo";
 const NOTICE_DURATION_MS = 2500;
 const PHOTO_QUALITY = 0.8;
 
+/** The bits of the tab navigator this screen needs; expo-router doesn't export its tab types. */
+type TabScreenNavigation = {
+  addListener(type: "tabPress", callback: () => void): () => void;
+  isFocused(): boolean;
+};
+
 export default function CameraScreen() {
   const [permission, requestPermission] = useCameraPermissions();
   const isFocused = useIsFocused();
   const insets = useSafeAreaInsets();
   const cameraRef = useRef<CameraView>(null);
+  const navigation = useNavigation<TabScreenNavigation>();
 
   const [facing, setFacing] = useState<CameraType>("back");
   const [cameraReady, setCameraReady] = useState(false);
@@ -35,6 +43,13 @@ export default function CameraScreen() {
       return () => setCameraReady(false);
     }, []),
   );
+
+  // Tapping the camera tab while it is already open discards the photo under review.
+  useEffect(() => {
+    return navigation.addListener("tabPress", () => {
+      if (navigation.isFocused()) discardCapture();
+    });
+  }, [navigation]);
 
   useEffect(() => {
     if (notice === null) return;
@@ -78,10 +93,11 @@ export default function CameraScreen() {
     setSaveError(null);
   }
 
-  function cancelCapture() {
-    discardCapture();
-    router.navigate("/");
+  function flipCamera() {
+    setFacing((f) => (f === "back" ? "front" : "back"));
   }
+
+  const doubleTapToFlip = Gesture.Tap().numberOfTaps(2).runOnJS(true).onStart(flipCamera);
 
   async function confirmPhoto(caption: string) {
     if (captured === null) return;
@@ -106,7 +122,6 @@ export default function CameraScreen() {
         saving={saving}
         error={saveError}
         onRetake={discardCapture}
-        onCancel={cancelCapture}
         onUse={(caption) => void confirmPhoto(caption)}
       />
     );
@@ -132,15 +147,23 @@ export default function CameraScreen() {
 
   return (
     <View style={styles.container}>
-      {isFocused && (
-        <CameraView
-          ref={cameraRef}
+      <GestureDetector gesture={doubleTapToFlip}>
+        <View
           style={StyleSheet.absoluteFill}
-          facing={facing}
-          mirror={facing === "front"}
-          onCameraReady={() => setCameraReady(true)}
-        />
-      )}
+          collapsable={false}
+          accessibilityHint="Doppelt tippen, um die Kamera zu wechseln"
+        >
+          {isFocused && (
+            <CameraView
+              ref={cameraRef}
+              style={StyleSheet.absoluteFill}
+              facing={facing}
+              mirror={facing === "front"}
+              onCameraReady={() => setCameraReady(true)}
+            />
+          )}
+        </View>
+      </GestureDetector>
 
       {notice !== null && (
         <View style={[styles.notice, { top: insets.top + spacing.md }]}>
@@ -178,7 +201,7 @@ export default function CameraScreen() {
           accessibilityLabel={
             facing === "back" ? "Zur Frontkamera wechseln" : "Zur Rückkamera wechseln"
           }
-          onPress={() => setFacing((f) => (f === "back" ? "front" : "back"))}
+          onPress={flipCamera}
           style={styles.iconButton}
           hitSlop={spacing.sm}
         >
