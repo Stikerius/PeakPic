@@ -94,9 +94,7 @@ function hslToRgb(h, s, l) {
 }
 
 /** 4:5 diagonal gradient PNG with soft stripes, so every placeholder photo looks a bit different. */
-function makePlaceholderPng(hue, variant) {
-  const width = 640;
-  const height = 800;
+function makePlaceholderPng(hue, variant, width = 640, height = 800) {
   const raw = Buffer.alloc((width * 3 + 1) * height);
   for (let y = 0; y < height; y++) {
     const row = y * (width * 3 + 1);
@@ -201,6 +199,39 @@ async function seedPosts({ client, userId }, fake) {
   return postIds;
 }
 
+/** 1–3 active portrait stories per fake user, unless they already have active ones. */
+async function seedStories({ client, userId }, fake) {
+  const { count, error: countError } = await client
+    .from("stories")
+    .select("id", { count: "exact", head: true })
+    .eq("user_id", userId)
+    .gt("expires_at", new Date().toISOString());
+  if (countError) fail(`Storys von ${fake.username} zählen`, countError);
+  if ((count ?? 0) > 0) return 0;
+
+  const amount = 1 + (fake.hue % 3);
+  for (let i = 0; i < amount; i++) {
+    const path = `${userId}/stories/seed-${Date.now()}-${i}.png`;
+    const upload = await client.storage
+      .from("photos")
+      .upload(path, makePlaceholderPng((fake.hue + 180) % 360, i + 3, 450, 800), {
+        contentType: "image/png",
+        upsert: true,
+      });
+    if (upload.error) fail(`Story-Upload (${fake.username})`, upload.error);
+    // Spread over the last few hours so the viewer shows different times.
+    const createdAt = new Date(Date.now() - (amount - i) * 2 * 60 * 60 * 1000);
+    const insert = await client.from("stories").insert({
+      user_id: userId,
+      photo_path: path,
+      created_at: createdAt.toISOString(),
+      expires_at: new Date(createdAt.getTime() + 24 * 60 * 60 * 1000).toISOString(),
+    });
+    if (insert.error) fail(`Story anlegen (${fake.username})`, insert.error);
+  }
+  return amount;
+}
+
 async function main() {
   console.log(`Seeding ${FAKE_USERS.length} Fake-User gegen ${new URL(url).host} …`);
   const sessions = [];
@@ -208,7 +239,8 @@ async function main() {
     const session = await signInOrUp(fake);
     process.stdout.write(`\n${session.created ? "＋" : "↻"} @${fake.username} `);
     const postIds = await seedPosts(session, fake);
-    sessions.push({ ...session, fake, postIds });
+    const storyCount = await seedStories(session, fake);
+    sessions.push({ ...session, fake, postIds, storyCount });
   }
 
   // Everyone follows everyone, plus every real account (so you get followers right away).
@@ -252,7 +284,7 @@ async function main() {
 
   console.log("\n\n✔ Fertig. Fake-User (Passwort für alle: " + PASSWORD + "):");
   for (const s of sessions) {
-    console.log(`  @${s.fake.username.padEnd(12)} ${s.postIds.length} neue Posts`);
+    console.log(`  @${s.fake.username.padEnd(12)} ${s.postIds.length} neue Posts, ${s.storyCount} neue Storys`);
   }
   if (realProfiles.length > 0) {
     console.log(`\nDie Fake-User folgen jetzt: ${realProfiles.map((p) => "@" + p.username).join(", ")}`);
