@@ -1,8 +1,10 @@
+import Ionicons from "@expo/vector-icons/Ionicons";
 import { Image } from "expo-image";
 import { useState } from "react";
 import {
   KeyboardAvoidingView,
   Platform,
+  Pressable,
   StyleSheet,
   Text,
   TextInput,
@@ -21,6 +23,7 @@ type PhotoReviewProps = {
   saving: boolean;
   error: string | null;
   onRetake: () => void;
+  onCancel: () => void;
   onUse: (caption: string) => void;
 };
 
@@ -29,6 +32,7 @@ export function PhotoReview({
   saving,
   error,
   onRetake,
+  onCancel,
   onUse,
 }: PhotoReviewProps) {
   const [caption, setCaption] = useState("");
@@ -39,6 +43,19 @@ export function PhotoReview({
       style={[styles.container, { paddingTop: insets.top + spacing.md }]}
       behavior={Platform.OS === "ios" ? "padding" : undefined}
     >
+      <View style={styles.topBar}>
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel="Abbrechen und Kamera verlassen"
+          onPress={onCancel}
+          disabled={saving}
+          hitSlop={spacing.sm}
+          style={({ pressed }) => [styles.cancel, pressed && styles.pressed]}
+        >
+          <Ionicons name="close" size={22} color={colors.text} />
+          <Text style={styles.cancelLabel}>Abbrechen</Text>
+        </Pressable>
+      </View>
       <Image
         source={{ uri: photo.uri }}
         style={styles.image}
@@ -82,6 +99,24 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: colors.background,
+  },
+  topBar: {
+    flexDirection: "row",
+    paddingHorizontal: spacing.md,
+    paddingBottom: spacing.sm,
+  },
+  cancel: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: spacing.xs,
+    paddingVertical: spacing.xs,
+  },
+  pressed: {
+    opacity: 0.6,
+  },
+  cancelLabel: {
+    color: colors.text,
+    fontSize: fontSize.md,
   },
   image: {
     flex: 1,

@@ -1,7 +1,7 @@
 import Ionicons from "@expo/vector-icons/Ionicons";
 import { CameraView, useCameraPermissions, type CameraType } from "expo-camera";
 import * as ImagePicker from "expo-image-picker";
-import { useFocusEffect, useIsFocused } from "expo-router";
+import { router, useFocusEffect, useIsFocused } from "expo-router";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { ActivityIndicator, Pressable, StyleSheet, Text, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -78,6 +78,11 @@ export default function CameraScreen() {
     setSaveError(null);
   }
 
+  function cancelCapture() {
+    discardCapture();
+    router.navigate("/");
+  }
+
   async function confirmPhoto(caption: string) {
     if (captured === null) return;
     setSaving(true);
@@ -101,6 +106,7 @@ export default function CameraScreen() {
         saving={saving}
         error={saveError}
         onRetake={discardCapture}
+        onCancel={cancelCapture}
         onUse={(caption) => void confirmPhoto(caption)}
       />
     );
