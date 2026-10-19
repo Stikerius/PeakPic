@@ -1,9 +1,10 @@
 import Ionicons from "@expo/vector-icons/Ionicons";
 import { Link, Tabs } from "expo-router";
 import type { ComponentProps } from "react";
-import { Pressable, StyleSheet, type ColorValue } from "react-native";
+import { Pressable, StyleSheet, View, type ColorValue } from "react-native";
 
-import { colors, spacing } from "@/constants/theme";
+import { colors, radius, spacing } from "@/constants/theme";
+import { useUnreadChatCount } from "@/hooks/use-unread-chats";
 
 type IoniconName = ComponentProps<typeof Ionicons>["name"];
 
@@ -21,18 +22,26 @@ function tabIcon(active: IoniconName, inactive: IoniconName) {
   };
 }
 
-function SearchButton() {
+function FeedHeaderActions() {
+  const unreadChats = useUnreadChatCount();
   return (
-    <Link href="/search" asChild>
-      <Pressable
-        accessibilityRole="button"
-        accessibilityLabel="Leute finden"
-        hitSlop={spacing.sm}
-        style={styles.headerButton}
-      >
-        <Ionicons name="person-add-outline" size={22} color={colors.text} />
-      </Pressable>
-    </Link>
+    <View style={styles.headerActions}>
+      <Link href="/search" asChild>
+        <Pressable accessibilityRole="button" accessibilityLabel="Leute finden" hitSlop={spacing.sm}>
+          <Ionicons name="person-add-outline" size={22} color={colors.text} />
+        </Pressable>
+      </Link>
+      <Link href="/chats" asChild>
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel={unreadChats > 0 ? `Chats, ${unreadChats} ungelesen` : "Chats"}
+          hitSlop={spacing.sm}
+        >
+          <Ionicons name="paper-plane-outline" size={23} color={colors.text} />
+          {unreadChats > 0 && <View style={styles.unreadDot} />}
+        </Pressable>
+      </Link>
+    </View>
   );
 }
 
@@ -59,7 +68,7 @@ export default function TabLayout() {
         options={{
           title: "Feed",
           tabBarIcon: tabIcon("people", "people-outline"),
-          headerRight: SearchButton,
+          headerRight: FeedHeaderActions,
         }}
       />
       <Tabs.Screen
@@ -79,7 +88,21 @@ export default function TabLayout() {
 }
 
 const styles = StyleSheet.create({
-  headerButton: {
+  headerActions: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: spacing.lg,
     paddingHorizontal: spacing.md,
+  },
+  unreadDot: {
+    position: "absolute",
+    top: -2,
+    right: -4,
+    width: 10,
+    height: 10,
+    borderRadius: radius.full,
+    backgroundColor: colors.danger,
+    borderWidth: 2,
+    borderColor: colors.surface,
   },
 });
