@@ -13,28 +13,21 @@ export type FeedPage = {
   nextCursor: string | null;
 };
 
-/**
- * Posts by people I follow plus my own, newest first.
- * RLS would also return posts shared with me in chats, so authors are filtered explicitly.
- */
-export async function fetchFeedPage(cursor: string | null): Promise<FeedPage> {
-  const userId = await requireUserId();
-  const authorIds = [userId, ...(await getFollowingIds())];
+const POST_SELECT =
+  "id, photo_path, caption, workout_date, created_at, author:profiles!posts_user_id_fkey(id, username, avatar_path)";
 
-  let query = supabase
-    .from("posts")
-    .select(
-      "id, photo_path, caption, workout_date, created_at, author:profiles!posts_user_id_fkey(id, username, avatar_path)",
-    )
-    .in("user_id", authorIds)
-    .order("created_at", { ascending: false })
-    .limit(FEED_PAGE_SIZE);
-  if (cursor !== null) query = query.lt("created_at", cursor);
+type PostRow = {
+  id: string;
+  photo_path: string;
+  caption: string | null;
+  workout_date: string;
+  created_at: string;
+  author: { id: string; username: string; avatar_path: string | null };
+};
 
-  const { data: rows, error } = await query;
-  if (error) throw error;
-  if (rows.length === 0) return { posts: [], nextCursor: null };
-
+/** Adds author avatar, signed photo URL, like and comment counts to post rows. */
+async function hydratePosts(rows: PostRow[], userId: string): Promise<FeedPost[]> {
+  if (rows.length === 0) return [];
   const postIds = rows.map((r) => r.id);
   const [likesResult, commentsResult, photoUrls, authors] = await Promise.all([
     supabase.from("post_likes").select("post_id, user_id").in("post_id", postIds),
@@ -56,7 +49,7 @@ export async function fetchFeedPage(cursor: string | null): Promise<FeedPage> {
     commentCounts.set(comment.post_id, (commentCounts.get(comment.post_id) ?? 0) + 1);
   }
 
-  const posts: FeedPost[] = rows.map((r) => ({
+  return rows.map((r) => ({
     id: r.id,
     author: authors.get(r.author.id) ?? { id: r.author.id, username: r.author.username, avatarUrl: null },
     photoUrl: photoUrls.get(r.photo_path) ?? null,
@@ -67,11 +60,40 @@ export async function fetchFeedPage(cursor: string | null): Promise<FeedPage> {
     likedByMe: likedByMe.has(r.id),
     commentCount: commentCounts.get(r.id) ?? 0,
   }));
+}
+
+/**
+ * Posts by people I follow plus my own, newest first.
+ * RLS would also return posts shared with me in chats, so authors are filtered explicitly.
+ */
+export async function fetchFeedPage(cursor: string | null): Promise<FeedPage> {
+  const userId = await requireUserId();
+  const authorIds = [userId, ...(await getFollowingIds())];
+
+  let query = supabase
+    .from("posts")
+    .select(POST_SELECT)
+    .in("user_id", authorIds)
+    .order("created_at", { ascending: false })
+    .limit(FEED_PAGE_SIZE);
+  if (cursor !== null) query = query.lt("created_at", cursor);
+
+  const { data: rows, error } = await query;
+  if (error) throw error;
 
   return {
-    posts,
+    posts: await hydratePosts(rows, userId),
     nextCursor: rows.length === FEED_PAGE_SIZE ? (rows[rows.length - 1]?.created_at ?? null) : null,
   };
+}
+
+/** A single post (e.g. opened from a chat). Null if it was deleted or isn't visible to me. */
+export async function fetchPost(postId: string): Promise<FeedPost | null> {
+  const userId = await requireUserId();
+  const { data, error } = await supabase.from("posts").select(POST_SELECT).eq("id", postId).maybeSingle();
+  if (error) throw error;
+  if (data === null) return null;
+  return (await hydratePosts([data], userId))[0] ?? null;
 }
 
 export async function setPostLiked(postId: string, liked: boolean): Promise<void> {
