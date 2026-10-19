@@ -23,6 +23,21 @@ function tabIcon(active: IoniconName, inactive: IoniconName) {
   };
 }
 
+function SettingsButton() {
+  return (
+    <Link href="/settings" asChild>
+      <Pressable
+        accessibilityRole="button"
+        accessibilityLabel="Einstellungen"
+        hitSlop={spacing.sm}
+        style={styles.headerActions}
+      >
+        <Ionicons name="settings-outline" size={22} color={colors.text} />
+      </Pressable>
+    </Link>
+  );
+}
+
 function FeedHeaderActions() {
   return (
     <View style={styles.headerActions}>
@@ -82,7 +97,11 @@ export default function TabLayout() {
       />
       <Tabs.Screen
         name="profile"
-        options={{ title: "Profil", tabBarIcon: tabIcon("person", "person-outline") }}
+        options={{
+          title: "Profil",
+          tabBarIcon: tabIcon("person", "person-outline"),
+          headerRight: SettingsButton,
+        }}
       />
     </Tabs>
   );
