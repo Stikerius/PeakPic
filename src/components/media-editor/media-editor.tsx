@@ -42,7 +42,10 @@ const STORY_EXPORT_MAX_WIDTH = 1080;
 const POST_CHROME_HEIGHT = 340;
 
 export type MediaEditorResult = {
-  /** Edited photos as local JPEG files, in carousel order. */
+  /**
+   * Photos in carousel order: edited ones as new local JPEG files, untouched post photos
+   * with their original URI (so existing photos can be kept without re-uploading).
+   */
   fileUris: string[];
   /** Everyone tagged on any of the photos. */
   mentionIds: string[];
@@ -187,7 +190,11 @@ export function MediaEditor({
         ? Math.min(STORY_EXPORT_MAX_WIDTH, Math.round(width * PixelRatio.get()))
         : POST_EXPORT_WIDTH;
       const fileUris: string[] = [];
-      for (const p of photos) fileUris.push(await renderEditedPhoto(p, size, fonts, outputWidth));
+      for (const p of photos) {
+        // Stories are always rendered (they're cropped to the screen); post photos only if edited.
+        const untouched = p.filterIndex === 0 && p.items.length === 0;
+        fileUris.push(!isStory && untouched ? p.uri : await renderEditedPhoto(p, size, fonts, outputWidth));
+      }
       const error = await onSubmit({ fileUris, mentionIds, caption: caption.trim() });
       if (error !== null) Alert.alert("Hochladen fehlgeschlagen", error);
     } catch (error) {

@@ -58,11 +58,13 @@ export async function fetchUserWorkoutDays(userId: string): Promise<DayKey[]> {
   return data.map((row) => row.workout_date);
 }
 
+/** Recent posts for the profile grid; streak-only proofs (not in the feed) are left out. */
 export async function fetchUserRecentPosts(userId: string): Promise<PostThumbnail[]> {
   const { data, error } = await supabase
     .from("posts")
     .select("id, photo_path")
     .eq("user_id", userId)
+    .eq("in_feed", true)
     .order("created_at", { ascending: false })
     .limit(RECENT_POSTS_LIMIT);
   if (error) throw error;

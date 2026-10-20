@@ -46,6 +46,7 @@ export default function PostCreateScreen() {
         } else {
           await updatePost(postId, {
             photoUris: fileUris,
+            existingPaths: Object.fromEntries((existing?.photos ?? []).map((p) => [p.url, p.path])),
             caption,
             inFeed: publishing || existing?.inFeed === true,
             tagIds: mentionIds,
@@ -89,7 +90,7 @@ export default function PostCreateScreen() {
         <StatusBar style="light" />
         <MediaEditor
           variant="post"
-          initialUris={existing.photoUrls}
+          initialUris={existing.photos.map((p) => p.url)}
           initialCaption={existing.caption}
           maxPhotos={MAX_PHOTOS}
           showCaption

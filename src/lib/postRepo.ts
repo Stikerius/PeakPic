@@ -130,7 +130,12 @@ export async function addToDayPost(postId: string, photoUris: string[], tagIds: 
   await insertTags(postId, tagIds);
 }
 
-export type EditablePost = { photoUrls: string[]; caption: string; inFeed: boolean };
+export type EditablePost = {
+  /** Current photos: signed URL for the editor, storage path to keep them unchanged. */
+  photos: { url: string; path: string }[];
+  caption: string;
+  inFeed: boolean;
+};
 
 /** One of my posts with its photos, to open it in the editor again. */
 export async function fetchPostForEdit(postId: string): Promise<EditablePost> {
@@ -142,13 +147,29 @@ export async function fetchPostForEdit(postId: string): Promise<EditablePost> {
     .eq("user_id", userId)
     .single();
   if (error) throw error;
-  const urls = await fetchPostPhotoUrls([data]);
-  return { photoUrls: urls.get(data.id) ?? [], caption: data.caption ?? "", inFeed: data.in_feed };
+  const { data: media, error: mediaError } = await supabase
+    .from("post_media")
+    .select("photo_path")
+    .eq("post_id", postId)
+    .order("position", { ascending: true });
+  if (mediaError) throw mediaError;
+  const paths = media.length > 0 ? media.map((m) => m.photo_path) : [data.photo_path];
+  const urls = await getSignedPhotoUrls(paths);
+  return {
+    photos: paths.flatMap((path) => {
+      const url = urls.get(path);
+      return url !== undefined ? [{ url, path }] : [];
+    }),
+    caption: data.caption ?? "",
+    inFeed: data.in_feed,
+  };
 }
 
 export type PostUpdate = {
-  /** The new set of photos (edited), in carousel order; replaces the old ones. */
+  /** The new set of photos in carousel order; replaces the old ones. */
   photoUris: string[];
+  /** URIs that are existing photos of the post, mapped to their storage path (kept as is). */
+  existingPaths: Record<string, string>;
   caption: string;
   inFeed: boolean;
   /** Added to the existing tags. */
@@ -156,8 +177,9 @@ export type PostUpdate = {
 };
 
 /**
- * Replaces photos and caption of one of my posts, e.g. to publish a streak-only proof to
- * the feed after editing it. Old photo files are removed once the new ones are saved.
+ * Replaces photos and caption of one of my posts: photos can be added, removed, reordered
+ * or edited, and a streak-only proof can be published to the feed. Unchanged photos keep
+ * their file; files that are no longer used are removed once the new set is saved.
  */
 export async function updatePost(postId: string, update: PostUpdate): Promise<void> {
   const userId = await requireUserId();
@@ -169,7 +191,13 @@ export async function updatePost(postId: string, update: PostUpdate): Promise<vo
   if (media.error) throw media.error;
   const oldPaths = [...new Set([post.data.photo_path, ...media.data.map((m) => m.photo_path)])];
 
-  const paths = await uploadAll(userId, update.photoUris);
+  const newUris = update.photoUris.filter((uri) => update.existingPaths[uri] === undefined);
+  const uploaded = await uploadAll(userId, newUris);
+  const uploadedByUri = new Map(newUris.map((uri, index) => [uri, uploaded[index]]));
+  const paths = update.photoUris.flatMap((uri) => {
+    const path = update.existingPaths[uri] ?? uploadedByUri.get(uri);
+    return path !== undefined ? [path] : [];
+  });
   const cover = paths[0];
   if (cover === undefined) throw new StepError("Post speichern", "Kein Bild ausgewählt.");
 
@@ -183,7 +211,7 @@ export async function updatePost(postId: string, update: PostUpdate): Promise<vo
     .eq("id", postId)
     .eq("user_id", userId);
   if (error) {
-    await removePhotos(paths).catch(() => undefined);
+    await removePhotos(uploaded).catch(() => undefined);
     throw new StepError("Post speichern", error.message);
   }
 

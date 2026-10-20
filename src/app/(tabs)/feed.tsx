@@ -16,6 +16,8 @@ import { PostCard } from "@/components/feed/post-card";
 import { StoryBar } from "@/components/stories/story-bar";
 import { colors, fontSize, radius, spacing } from "@/constants/theme";
 import { useOpenProfile } from "@/hooks/use-open-profile";
+import { usePostActions } from "@/hooks/use-post-actions";
+import { useSession } from "@/lib/session";
 import { useFeed } from "@/hooks/use-feed";
 import { refreshStories } from "@/lib/storyStore";
 import type { FeedPost } from "@/types/social";
@@ -31,6 +33,8 @@ export default function FeedScreen() {
   const listRef = useRef<FlatList<FeedPost>>(null);
   const navigation = useNavigation<TabScreenNavigation>();
   const openProfile = useOpenProfile();
+  const showPostActions = usePostActions();
+  const myId = useSession().session?.user.id;
 
   // Tapping the feed tab while it's open scrolls to the top and refreshes, like Instagram.
   useEffect(() => {
@@ -71,6 +75,7 @@ export default function FeedScreen() {
             }
             onOpenProfile={openProfile}
             onShare={(id) => router.push({ pathname: "/share/[postId]", params: { postId: id } })}
+            onMore={item.author.id === myId ? showPostActions : undefined}
           />
         )}
         onEndReached={() => {

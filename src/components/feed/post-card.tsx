@@ -13,23 +13,38 @@ type PostCardProps = {
   onOpenComments: (postId: string) => void;
   onShare: (postId: string) => void;
   onOpenProfile: (userId: string) => void;
+  /** Shown for my own posts: opens the edit/delete menu. */
+  onMore?: (postId: string) => void;
 };
 
-export function PostCard({ post, onToggleLike, onOpenComments, onShare, onOpenProfile }: PostCardProps) {
+export function PostCard({ post, onToggleLike, onOpenComments, onShare, onOpenProfile, onMore }: PostCardProps) {
   return (
     <View style={styles.card}>
-      <Pressable
-        onPress={() => onOpenProfile(post.author.id)}
-        accessibilityRole="button"
-        accessibilityLabel={`Profil von ${post.author.username}`}
-        style={styles.header}
-      >
-        <Avatar uri={post.author.avatarUrl} username={post.author.username} size={36} />
-        <View style={styles.headerText}>
-          <Text style={styles.username}>@{post.author.username}</Text>
-          <Text style={styles.meta}>{formatRelativeTime(post.createdAt)}</Text>
-        </View>
-      </Pressable>
+      <View style={styles.headerRow}>
+        <Pressable
+          onPress={() => onOpenProfile(post.author.id)}
+          accessibilityRole="button"
+          accessibilityLabel={`Profil von ${post.author.username}`}
+          style={styles.header}
+        >
+          <Avatar uri={post.author.avatarUrl} username={post.author.username} size={36} />
+          <View style={styles.headerText}>
+            <Text style={styles.username}>@{post.author.username}</Text>
+            <Text style={styles.meta}>{formatRelativeTime(post.createdAt)}</Text>
+          </View>
+        </Pressable>
+        {onMore !== undefined && (
+          <Pressable
+            onPress={() => onMore(post.id)}
+            accessibilityRole="button"
+            accessibilityLabel="Post bearbeiten oder löschen"
+            hitSlop={spacing.sm}
+            style={styles.more}
+          >
+            <Ionicons name="ellipsis-horizontal" size={22} color={colors.text} />
+          </Pressable>
+        )}
+      </View>
 
       <PhotoCarousel
         photoUrls={post.photoUrls}
@@ -109,10 +124,19 @@ const styles = StyleSheet.create({
   card: {
     paddingBottom: spacing.lg,
   },
+  headerRow: {
+    flexDirection: "row",
+    alignItems: "center",
+  },
   header: {
+    flex: 1,
     flexDirection: "row",
     alignItems: "center",
     gap: spacing.sm,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm,
+  },
+  more: {
     paddingHorizontal: spacing.md,
     paddingVertical: spacing.sm,
   },

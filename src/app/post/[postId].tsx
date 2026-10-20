@@ -6,6 +6,8 @@ import { ActivityIndicator, ScrollView, StyleSheet, Text, View } from "react-nat
 import { PostCard } from "@/components/feed/post-card";
 import { colors, fontSize, spacing } from "@/constants/theme";
 import { useOpenProfile } from "@/hooks/use-open-profile";
+import { usePostActions } from "@/hooks/use-post-actions";
+import { useSession } from "@/lib/session";
 import { onAppEvent } from "@/lib/events";
 import { fetchPost, setPostLiked } from "@/lib/feedRepo";
 import type { FeedPost } from "@/types/social";
@@ -18,6 +20,10 @@ export default function PostScreen() {
   const [state, setState] = useState<LoadState>({ status: "loading" });
   const [liking, setLiking] = useState(false);
   const openProfile = useOpenProfile();
+  const myId = useSession().session?.user.id;
+  const showPostActions = usePostActions({ onDeleted: () => router.back() });
+  // Bumped after the post was edited, to reload it.
+  const [version, setVersion] = useState(0);
 
   useEffect(() => {
     let active = true;
@@ -28,6 +34,7 @@ export default function PostScreen() {
       .catch(() => {
         if (active) setState({ status: "error" });
       });
+    const unsubscribeEdits = onAppEvent("postCreated", () => setVersion((v) => v + 1));
     const unsubscribe = onAppEvent("commentAdded", (event) => {
       if (event.postId !== postId) return;
       setState((s) =>
@@ -37,8 +44,9 @@ export default function PostScreen() {
     return () => {
       active = false;
       unsubscribe();
+      unsubscribeEdits();
     };
-  }, [postId]);
+  }, [postId, version]);
 
   async function toggleLike() {
     if (state.status !== "ready" || liking) return;
@@ -87,6 +95,7 @@ export default function PostScreen() {
         onOpenComments={(id) => router.push({ pathname: "/comments/[postId]", params: { postId: id } })}
         onOpenProfile={openProfile}
         onShare={(id) => router.push({ pathname: "/share/[postId]", params: { postId: id } })}
+        onMore={state.post.author.id === myId ? showPostActions : undefined}
       />
     </ScrollView>
   );
