@@ -108,8 +108,10 @@ export default function CommentsScreen() {
 
   const sheetHeight = height * SHEET_HEIGHT;
   const swipe = useSwipeToDismiss({ onDismiss: () => router.back(), fadeTo: 1 });
+  // Only the shared value may go into the worklet; the swipe object also holds the gesture.
+  const { translateY } = swipe;
   const backdropStyle = useAnimatedStyle(() => ({
-    opacity: interpolate(swipe.translateY.value, [0, sheetHeight], [1, 0], "clamp"),
+    opacity: interpolate(translateY.value, [0, sheetHeight], [1, 0], "clamp"),
   }));
 
   useEffect(() => {
