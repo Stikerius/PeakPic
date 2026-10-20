@@ -16,14 +16,18 @@ type SharedCommentCardProps = {
   post: SharedPost | "deleted" | null;
 };
 
-/** A comment shared in a chat: text and author; tapping opens its post. */
+/** A comment shared in a chat: text and author; tapping opens its post with the comment. */
 export function SharedCommentCard({ comment, post }: SharedCommentCardProps) {
   const photoUrl = post !== null && post !== "deleted" ? post.photoUrl : null;
   return (
     <Pressable
-      onPress={() => router.push({ pathname: "/post/[postId]", params: { postId: comment.postId } })}
+      onPress={() => {
+        // The post underneath, the comments sheet with this comment highlighted on top.
+        router.push({ pathname: "/post/[postId]", params: { postId: comment.postId } });
+        router.push({ pathname: "/comments/[postId]", params: { postId: comment.postId, commentId: comment.id } });
+      }}
       accessibilityRole="button"
-      accessibilityLabel={`Kommentar von ${comment.author.username}: ${comment.body}. Post öffnen`}
+      accessibilityLabel={`Kommentar von ${comment.author.username}: ${comment.body}. Kommentar öffnen`}
       style={({ pressed }) => [styles.card, pressed && styles.pressed]}
     >
       <View style={styles.header}>
@@ -38,7 +42,7 @@ export function SharedCommentCard({ comment, post }: SharedCommentCardProps) {
       </Text>
       <View style={styles.footer}>
         <Ionicons name="chatbubble-outline" size={14} color={colors.textMuted} />
-        <Text style={styles.footerText}>Kommentar · Post ansehen</Text>
+        <Text style={styles.footerText}>Kommentar ansehen</Text>
         <Ionicons name="chevron-forward" size={14} color={colors.textMuted} />
       </View>
     </Pressable>

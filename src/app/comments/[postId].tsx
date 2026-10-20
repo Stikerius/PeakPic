@@ -2,7 +2,9 @@ import Ionicons from "@expo/vector-icons/Ionicons";
 import { router, useLocalSearchParams } from "expo-router";
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
+  ActionSheetIOS,
   ActivityIndicator,
+  Alert,
   FlatList,
   KeyboardAvoidingView,
   Platform,
@@ -28,21 +30,32 @@ import type { PostComment } from "@/types/social";
 
 /** Sheet height as a fraction of the screen. */
 const SHEET_HEIGHT = 0.75;
+/** How long a comment opened from a chat stays highlighted. */
+const HIGHLIGHT_MS = 2500;
 
 type ReplyTarget = { parentId: string; username: string };
 
 type CommentRowProps = {
   comment: PostComment;
   isReply: boolean;
+  highlighted: boolean;
   onOpenProfile: (userId: string) => void;
   onToggleLike: (comment: PostComment) => void;
   onReply: (comment: PostComment) => void;
-  onShare: (comment: PostComment) => void;
+  onLongPress: (comment: PostComment) => void;
 };
 
-function CommentRow({ comment, isReply, onOpenProfile, onToggleLike, onReply, onShare }: CommentRowProps) {
+function CommentRow({ comment, isReply, highlighted, onOpenProfile, onToggleLike, onReply, onLongPress }: CommentRowProps) {
   return (
-    <View style={[styles.comment, isReply && styles.reply]}>
+    <Pressable
+      onLongPress={() => onLongPress(comment)}
+      accessibilityHint="Lange drücken für weitere Aktionen"
+      style={({ pressed }) => [
+        styles.comment,
+        isReply && styles.reply,
+        (pressed || highlighted) && styles.commentHighlighted,
+      ]}
+    >
       <Pressable
         onPress={() => onOpenProfile(comment.author.id)}
         accessibilityRole="button"
@@ -62,14 +75,6 @@ function CommentRow({ comment, isReply, onOpenProfile, onToggleLike, onReply, on
           <Pressable onPress={() => onReply(comment)} accessibilityRole="button" hitSlop={spacing.xs}>
             <Text style={styles.metaAction}>Antworten</Text>
           </Pressable>
-          <Pressable
-            onPress={() => onShare(comment)}
-            accessibilityRole="button"
-            accessibilityLabel="Kommentar an Chat senden"
-            hitSlop={spacing.xs}
-          >
-            <Text style={styles.metaAction}>Senden</Text>
-          </Pressable>
         </View>
       </View>
       <Pressable
@@ -87,12 +92,13 @@ function CommentRow({ comment, isReply, onOpenProfile, onToggleLike, onReply, on
         />
         {comment.likeCount > 0 && <Text style={styles.likeCount}>{comment.likeCount}</Text>}
       </Pressable>
-    </View>
+    </Pressable>
   );
 }
 
 export default function CommentsScreen() {
-  const { postId } = useLocalSearchParams<{ postId: string }>();
+  // commentId: opened from a shared comment in a chat; scroll to it and highlight it.
+  const { postId, commentId } = useLocalSearchParams<{ postId: string; commentId?: string }>();
   const insets = useSafeAreaInsets();
   const { height } = useWindowDimensions();
   const listRef = useRef<FlatList<PostComment>>(null);
@@ -105,6 +111,7 @@ export default function CommentsScreen() {
   const [draft, setDraft] = useState("");
   const [sending, setSending] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [highlightedId, setHighlightedId] = useState<string | null>(null);
 
   const sheetHeight = height * SHEET_HEIGHT;
   const swipe = useSwipeToDismiss({ onDismiss: () => router.back(), fadeTo: 1 });
@@ -141,6 +148,23 @@ export default function CommentsScreen() {
     return { topLevel: roots, replies: byParent };
   }, [comments]);
 
+  // Opened from a chat: expand the thread, scroll to the comment and highlight it once.
+  const focusedOnce = useRef(false);
+  useEffect(() => {
+    if (focusedOnce.current || commentId === undefined || comments === null) return;
+    focusedOnce.current = true;
+    const target = comments.find((c) => c.id === commentId);
+    if (target === undefined) return; // deleted meanwhile
+    const rootId = target.parentId ?? target.id;
+    if (target.parentId !== null) setExpanded((prev) => new Set(prev).add(rootId));
+    setHighlightedId(target.id);
+    const index = topLevel.findIndex((c) => c.id === rootId);
+    if (index > 0) {
+      requestAnimationFrame(() => listRef.current?.scrollToIndex({ index, viewPosition: 0.3, animated: true }));
+    }
+    setTimeout(() => setHighlightedId(null), HIGHLIGHT_MS);
+  }, [commentId, comments, topLevel]);
+
   function updateComment(id: string, change: (comment: PostComment) => PostComment) {
     setComments((prev) => prev?.map((c) => (c.id === id ? change(c) : c)) ?? prev);
   }
@@ -166,6 +190,25 @@ export default function CommentsScreen() {
 
   function shareComment(comment: PostComment) {
     router.push({ pathname: "/share/[postId]", params: { postId, commentId: comment.id } });
+  }
+
+  function showActions(comment: PostComment) {
+    const title = `@${comment.author.username}`;
+    if (Platform.OS === "ios") {
+      ActionSheetIOS.showActionSheetWithOptions(
+        { title, options: ["An Chat senden", "Antworten", "Abbrechen"], cancelButtonIndex: 2 },
+        (index) => {
+          if (index === 0) shareComment(comment);
+          else if (index === 1) startReply(comment);
+        },
+      );
+    } else {
+      Alert.alert(title, undefined, [
+        { text: "An Chat senden", onPress: () => shareComment(comment) },
+        { text: "Antworten", onPress: () => startReply(comment) },
+        { text: "Abbrechen", style: "cancel" },
+      ]);
+    }
   }
 
   function toggleReplies(parentId: string) {
@@ -206,7 +249,7 @@ export default function CommentsScreen() {
     onOpenProfile: openProfile,
     onToggleLike: toggleLike,
     onReply: startReply,
-    onShare: shareComment,
+    onLongPress: showActions,
   };
 
   return (
@@ -249,12 +292,22 @@ export default function CommentsScreen() {
                 keyExtractor={(comment) => comment.id}
                 contentContainerStyle={topLevel.length === 0 ? styles.emptyContainer : styles.list}
                 keyboardShouldPersistTaps="handled"
+                onScrollToIndexFailed={({ index, averageItemLength }) => {
+                  // Rows have different heights: jump close, then retry once they are measured.
+                  listRef.current?.scrollToOffset({ offset: index * averageItemLength, animated: false });
+                  setTimeout(() => listRef.current?.scrollToIndex({ index, viewPosition: 0.3 }), 100);
+                }}
                 renderItem={({ item }) => {
                   const threadReplies = replies.get(item.id) ?? [];
                   const open = expanded.has(item.id);
                   return (
                     <View>
-                      <CommentRow comment={item} isReply={false} {...rowProps} />
+                      <CommentRow
+                        comment={item}
+                        isReply={false}
+                        highlighted={item.id === highlightedId}
+                        {...rowProps}
+                      />
                       {threadReplies.length > 0 && (
                         <Pressable
                           onPress={() => toggleReplies(item.id)}
@@ -269,7 +322,13 @@ export default function CommentsScreen() {
                       )}
                       {open &&
                         threadReplies.map((reply) => (
-                          <CommentRow key={reply.id} comment={reply} isReply {...rowProps} />
+                          <CommentRow
+                            key={reply.id}
+                            comment={reply}
+                            isReply
+                            highlighted={reply.id === highlightedId}
+                            {...rowProps}
+                          />
                         ))}
                     </View>
                   );
@@ -397,6 +456,9 @@ const styles = StyleSheet.create({
   reply: {
     paddingLeft: spacing.md + 32 + spacing.sm,
     paddingVertical: spacing.xs,
+  },
+  commentHighlighted: {
+    backgroundColor: colors.surfaceElevated,
   },
   commentBody: {
     flex: 1,
