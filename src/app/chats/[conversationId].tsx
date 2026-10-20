@@ -230,11 +230,13 @@ export default function ChatScreen() {
     const previous = message.pinnedAt;
     const pin = previous === null;
     updateMessage(message.id, (m) => ({ ...m, pinnedAt: pin ? new Date().toISOString() : null })); // optimistic
+    if (!pin) setPinned((current) => current.filter((m) => m.id !== message.id));
     try {
       await setMessagePinned(message.id, pin);
       reloadPinned();
     } catch {
       updateMessage(message.id, (m) => ({ ...m, pinnedAt: previous }));
+      reloadPinned();
       setError(pin ? "Nachricht konnte nicht angeheftet werden." : "Nachricht konnte nicht gelöst werden.");
     }
   }
@@ -317,22 +319,32 @@ export default function ChatScreen() {
         keyboardVerticalOffset={headerHeight}
       >
         {currentPinned !== undefined && (
-          <Pressable
-            onPress={openPinned}
-            accessibilityRole="button"
-            accessibilityLabel="Zur angehefteten Nachricht springen"
-            style={styles.pinnedBanner}
-          >
-            <Ionicons name="pin" size={18} color={colors.primary} />
-            <View style={styles.pinnedTextBox}>
-              <Text style={styles.pinnedLabel}>
-                Angeheftet{pinned.length > 1 ? ` · ${(pinnedIndex % pinned.length) + 1}/${pinned.length}` : ""}
-              </Text>
-              <Text style={styles.pinnedText} numberOfLines={1}>
-                {messagePreview(currentPinned)}
-              </Text>
-            </View>
-          </Pressable>
+          <View style={styles.pinnedBanner}>
+            <Pressable
+              onPress={openPinned}
+              accessibilityRole="button"
+              accessibilityLabel="Zur angehefteten Nachricht springen"
+              style={styles.pinnedOpen}
+            >
+              <Ionicons name="pin" size={18} color={colors.primary} />
+              <View style={styles.pinnedTextBox}>
+                <Text style={styles.pinnedLabel}>
+                  Angeheftet{pinned.length > 1 ? ` · ${(pinnedIndex % pinned.length) + 1}/${pinned.length}` : ""}
+                </Text>
+                <Text style={styles.pinnedText} numberOfLines={1}>
+                  {messagePreview(currentPinned)}
+                </Text>
+              </View>
+            </Pressable>
+            <Pressable
+              onPress={() => void togglePin(currentPinned)}
+              accessibilityRole="button"
+              accessibilityLabel="Nachricht lösen"
+              hitSlop={spacing.sm}
+            >
+              <Ionicons name="close" size={20} color={colors.textMuted} />
+            </Pressable>
+          </View>
         )}
 
         {messages === null ? (
@@ -472,12 +484,18 @@ const styles = StyleSheet.create({
   pinnedBanner: {
     flexDirection: "row",
     alignItems: "center",
-    gap: spacing.sm,
+    gap: spacing.md,
     paddingHorizontal: spacing.md,
     paddingVertical: spacing.sm,
     borderBottomWidth: StyleSheet.hairlineWidth,
     borderBottomColor: colors.border,
     backgroundColor: colors.surface,
+  },
+  pinnedOpen: {
+    flex: 1,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: spacing.sm,
   },
   pinnedTextBox: {
     flex: 1,
