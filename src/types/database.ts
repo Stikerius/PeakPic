@@ -181,6 +181,9 @@ export type Database = {
           body: string | null;
           post_id: Uuid | null;
           comment_id: Uuid | null;
+          reply_to_id: Uuid | null;
+          pinned_at: Timestamp | null;
+          pinned_by: Uuid | null;
           created_at: Timestamp;
         };
         Insert: {
@@ -190,6 +193,7 @@ export type Database = {
           body?: string | null;
           post_id?: Uuid | null;
           comment_id?: Uuid | null;
+          reply_to_id?: Uuid | null;
           created_at?: Timestamp;
         };
         Update: Record<string, never>;
@@ -198,6 +202,30 @@ export type Database = {
           Rel<"messages_sender_id_fkey", "sender_id", "profiles">,
           Rel<"messages_post_id_fkey", "post_id", "posts">,
           Rel<"messages_comment_id_fkey", "comment_id", "comments">,
+          Rel<"messages_reply_to_id_fkey", "reply_to_id", "messages">,
+        ];
+      };
+      message_reactions: {
+        Row: {
+          message_id: Uuid;
+          user_id: Uuid;
+          conversation_id: Uuid;
+          /** null = reaction removed. */
+          emoji: string | null;
+          updated_at: Timestamp;
+        };
+        Insert: {
+          message_id: Uuid;
+          user_id: Uuid;
+          conversation_id: Uuid;
+          emoji: string | null;
+          updated_at?: Timestamp;
+        };
+        Update: { emoji?: string | null; updated_at?: Timestamp };
+        Relationships: [
+          Rel<"message_reactions_message_id_fkey", "message_id", "messages">,
+          Rel<"message_reactions_user_id_fkey", "user_id", "profiles">,
+          Rel<"message_reactions_conversation_id_fkey", "conversation_id", "conversations">,
         ];
       };
     };
@@ -205,6 +233,7 @@ export type Database = {
     Functions: {
       username_available: { Args: { name: string }; Returns: boolean };
       get_or_create_direct_conversation: { Args: { other_user: Uuid }; Returns: Uuid };
+      set_message_pinned: { Args: { message: Uuid; pinned: boolean }; Returns: undefined };
     };
     Enums: Record<string, never>;
     CompositeTypes: Record<string, never>;

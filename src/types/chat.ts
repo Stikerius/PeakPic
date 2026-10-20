@@ -16,6 +16,15 @@ export type SharedComment = {
   body: string;
 };
 
+/** Quote shown above a reply. */
+export type ReplyPreview = {
+  id: string;
+  senderId: string;
+  text: string;
+};
+
+export type MessageReaction = { userId: string; emoji: string };
+
 export type ChatMessage = {
   id: string;
   conversationId: string;
@@ -25,6 +34,10 @@ export type ChatMessage = {
   post: SharedPost | "deleted" | null;
   /** Shared comment (its post is in `post`); null if none or if it was deleted. */
   comment: SharedComment | null;
+  /** The message this one answers; "deleted" if that one is gone, null if no reply. */
+  replyTo: ReplyPreview | "deleted" | null;
+  pinnedAt: string | null;
+  reactions: MessageReaction[];
   createdAt: string;
   /** Optimistic message that the server hasn't confirmed yet. */
   pending?: boolean;

@@ -160,6 +160,30 @@ create index if not exists messages_post_idx on public.messages (post_id) where 
 -- post); if the comment is deleted later, the message falls back to the post card.
 alter table public.messages
   add column if not exists comment_id uuid references public.comments (id) on delete set null;
+-- Reply to another message of the same chat (enforced by the insert policy).
+alter table public.messages
+  add column if not exists reply_to_id uuid references public.messages (id) on delete set null;
+-- Pinned messages, per chat. Only changed through set_message_pinned(), never directly.
+alter table public.messages add column if not exists pinned_at timestamptz;
+alter table public.messages
+  add column if not exists pinned_by uuid references public.profiles (id) on delete set null;
+create index if not exists messages_pinned_idx
+  on public.messages (conversation_id, pinned_at desc) where pinned_at is not null;
+
+-- One reaction per person and message. Removing a reaction sets emoji to null instead of
+-- deleting the row: Realtime delivers updates with RLS and per-chat filters, deletes not.
+-- conversation_id is copied from the message (checked by the policies) so Realtime can
+-- filter by chat.
+create table if not exists public.message_reactions (
+  message_id      uuid not null references public.messages (id) on delete cascade,
+  user_id         uuid not null references public.profiles (id) on delete cascade,
+  conversation_id uuid not null references public.conversations (id) on delete cascade,
+  emoji           text check (emoji is null or char_length(emoji) between 1 and 32),
+  updated_at      timestamptz not null default now(),
+  primary key (message_id, user_id)
+);
+create index if not exists message_reactions_conversation_idx
+  on public.message_reactions (conversation_id);
 
 
 -- -----------------------------------------------------------------------------
@@ -313,6 +337,35 @@ as $$
     );
 $$;
 
+-- True if `message` belongs to `conversation`.
+create or replace function public.message_in_conversation(message uuid, conversation uuid)
+returns boolean
+language sql stable security definer set search_path = ''
+as $$
+  select exists (
+    select 1 from public.messages m where m.id = message and m.conversation_id = conversation
+  );
+$$;
+
+-- Pins or unpins a message. Any member of its chat may do that.
+create or replace function public.set_message_pinned(message uuid, pinned boolean)
+returns void
+language plpgsql security definer set search_path = ''
+as $$
+declare
+  conversation uuid;
+begin
+  select m.conversation_id into conversation from public.messages m where m.id = message;
+  if conversation is null or not public.is_conversation_member(conversation) then
+    raise exception 'message not found';
+  end if;
+  update public.messages
+  set pinned_at = case when pinned then now() end,
+      pinned_by = case when pinned then auth.uid() end
+  where id = message;
+end;
+$$;
+
 -- Lets the sign-up screen check a username before an account exists.
 create or replace function public.username_available(name text)
 returns boolean
@@ -387,6 +440,8 @@ create trigger on_auth_user_created
 revoke all on function public.get_or_create_direct_conversation(uuid) from public, anon;
 grant execute on function public.get_or_create_direct_conversation(uuid) to authenticated;
 grant execute on function public.username_available(text) to anon, authenticated;
+revoke all on function public.set_message_pinned(uuid, boolean) from public, anon;
+grant execute on function public.set_message_pinned(uuid, boolean) to authenticated;
 
 
 -- -----------------------------------------------------------------------------
@@ -396,7 +451,7 @@ grant execute on function public.username_available(text) to anon, authenticated
 grant select, insert, update, delete on
   public.profiles, public.posts, public.post_likes, public.comments, public.comment_likes, public.follows,
   public.stories, public.story_likes, public.story_views, public.audience_restrictions,
-  public.conversations, public.conversation_members, public.messages
+  public.conversations, public.conversation_members, public.messages, public.message_reactions
 to authenticated;
 
 
@@ -417,6 +472,7 @@ alter table public.audience_restrictions enable row level security;
 alter table public.conversations        enable row level security;
 alter table public.conversation_members enable row level security;
 alter table public.messages             enable row level security;
+alter table public.message_reactions    enable row level security;
 
 -- profiles: everyone signed in can read, only you can change your own row.
 -- Rows are created by the handle_new_user trigger.
@@ -640,15 +696,47 @@ create policy "messages: members send" on public.messages
     and (body is not null or post_id is not null)
     and (post_id is null or public.can_view_post(post_id))
     and (comment_id is null or (post_id is not null and public.comment_belongs_to_post(comment_id, post_id)))
+    and (reply_to_id is null or public.message_in_conversation(reply_to_id, conversation_id))
+    and pinned_at is null
+    and pinned_by is null
   );
 
 drop policy if exists "messages: delete own" on public.messages;
 create policy "messages: delete own" on public.messages
   for delete to authenticated using (sender_id = (select auth.uid()));
+-- No update policy: pins change only through set_message_pinned().
+
+-- message_reactions: members of the chat read them; you only set or remove your own.
+drop policy if exists "message_reactions: members read" on public.message_reactions;
+create policy "message_reactions: members read" on public.message_reactions
+  for select to authenticated using (public.is_conversation_member(conversation_id));
+
+drop policy if exists "message_reactions: react as yourself" on public.message_reactions;
+create policy "message_reactions: react as yourself" on public.message_reactions
+  for insert to authenticated
+  with check (
+    user_id = (select auth.uid())
+    and public.is_conversation_member(conversation_id)
+    and public.message_in_conversation(message_id, conversation_id)
+  );
+
+drop policy if exists "message_reactions: change own" on public.message_reactions;
+create policy "message_reactions: change own" on public.message_reactions
+  for update to authenticated
+  using (user_id = (select auth.uid()))
+  with check (
+    user_id = (select auth.uid())
+    and public.is_conversation_member(conversation_id)
+    and public.message_in_conversation(message_id, conversation_id)
+  );
+
+drop policy if exists "message_reactions: delete own" on public.message_reactions;
+create policy "message_reactions: delete own" on public.message_reactions
+  for delete to authenticated using (user_id = (select auth.uid()));
 
 
 -- -----------------------------------------------------------------------------
--- Realtime (used by chats in a later phase)
+-- Realtime: new messages, pins (updates of messages) and reactions
 -- -----------------------------------------------------------------------------
 
 do $$
@@ -658,6 +746,12 @@ begin
     where pubname = 'supabase_realtime' and schemaname = 'public' and tablename = 'messages'
   ) then
     alter publication supabase_realtime add table public.messages;
+  end if;
+  if not exists (
+    select 1 from pg_publication_tables
+    where pubname = 'supabase_realtime' and schemaname = 'public' and tablename = 'message_reactions'
+  ) then
+    alter publication supabase_realtime add table public.message_reactions;
   end if;
 end;
 $$;

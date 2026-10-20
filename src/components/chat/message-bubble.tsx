@@ -1,4 +1,5 @@
-import { StyleSheet, Text, View } from "react-native";
+import Ionicons from "@expo/vector-icons/Ionicons";
+import { Pressable, StyleSheet, Text, View } from "react-native";
 
 import { SharedCommentCard } from "@/components/chat/shared-comment-card";
 import { SharedPostCard } from "@/components/chat/shared-post-card";
@@ -6,9 +7,68 @@ import { colors, fontSize, radius, spacing } from "@/constants/theme";
 import { formatTime } from "@/lib/format";
 import type { ChatMessage } from "@/types/chat";
 
-export function MessageBubble({ message, mine }: { message: ChatMessage; mine: boolean }) {
+type MessageBubbleProps = {
+  message: ChatMessage;
+  mine: boolean;
+  myId: string | undefined;
+  partnerName: string;
+  /** Briefly highlighted after jumping to it (quote or pinned banner). */
+  highlighted?: boolean;
+  onPressQuote?: (messageId: string) => void;
+  onPressReaction?: (emoji: string) => void;
+};
+
+/** Reactions grouped by emoji, in the order they were first used. */
+function groupReactions(message: ChatMessage, myId: string | undefined) {
+  const groups = new Map<string, { count: number; mine: boolean }>();
+  for (const reaction of message.reactions) {
+    const group = groups.get(reaction.emoji) ?? { count: 0, mine: false };
+    groups.set(reaction.emoji, { count: group.count + 1, mine: group.mine || reaction.userId === myId });
+  }
+  return [...groups.entries()];
+}
+
+export function MessageBubble({
+  message,
+  mine,
+  myId,
+  partnerName,
+  highlighted = false,
+  onPressQuote,
+  onPressReaction,
+}: MessageBubbleProps) {
+  const reactions = groupReactions(message, myId);
+  const quote = message.replyTo;
+
   return (
-    <View style={[styles.row, mine ? styles.rowMine : styles.rowTheirs, message.pending && styles.pending]}>
+    <View
+      style={[
+        styles.row,
+        mine ? styles.rowMine : styles.rowTheirs,
+        message.pending && styles.pending,
+        highlighted && styles.highlighted,
+      ]}
+    >
+      {quote !== null && (
+        <Pressable
+          onPress={() => quote !== "deleted" && onPressQuote?.(quote.id)}
+          disabled={quote === "deleted"}
+          accessibilityRole="button"
+          accessibilityLabel="Zur ursprünglichen Nachricht springen"
+          style={[styles.quote, mine ? styles.quoteMine : styles.quoteTheirs]}
+        >
+          {quote === "deleted" ? (
+            <Text style={styles.quoteText}>Nachricht gelöscht</Text>
+          ) : (
+            <>
+              <Text style={styles.quoteSender}>{quote.senderId === myId ? "Du" : partnerName}</Text>
+              <Text style={styles.quoteText} numberOfLines={2}>
+                {quote.text}
+              </Text>
+            </>
+          )}
+        </Pressable>
+      )}
       {message.comment !== null ? (
         <SharedCommentCard comment={message.comment} post={message.post} />
       ) : (
@@ -19,7 +79,28 @@ export function MessageBubble({ message, mine }: { message: ChatMessage; mine: b
           <Text style={styles.body}>{message.body}</Text>
         </View>
       )}
-      <Text style={styles.time}>{message.pending ? "Wird gesendet…" : formatTime(message.createdAt)}</Text>
+      {reactions.length > 0 && (
+        <View style={[styles.reactions, mine && styles.reactionsMine]}>
+          {reactions.map(([emoji, { count, mine: reactedByMe }]) => (
+            <Pressable
+              key={emoji}
+              onPress={() => onPressReaction?.(emoji)}
+              accessibilityRole="button"
+              accessibilityLabel={`${emoji} ${count}${reactedByMe ? ", deine Reaktion" : ""}`}
+              style={[styles.chip, reactedByMe && styles.chipMine]}
+            >
+              <Text style={styles.chipEmoji}>{emoji}</Text>
+              {count > 1 && <Text style={styles.chipCount}>{count}</Text>}
+            </Pressable>
+          ))}
+        </View>
+      )}
+      <View style={styles.meta}>
+        {message.pinnedAt !== null && (
+          <Ionicons name="pin" size={11} color={colors.textMuted} accessibilityLabel="Angeheftet" />
+        )}
+        <Text style={styles.time}>{message.pending ? "Wird gesendet…" : formatTime(message.createdAt)}</Text>
+      </View>
     </View>
   );
 }
@@ -29,6 +110,7 @@ const styles = StyleSheet.create({
     maxWidth: "80%",
     gap: 2,
     marginVertical: 3,
+    borderRadius: radius.lg,
   },
   rowMine: {
     alignSelf: "flex-end",
@@ -40,6 +122,32 @@ const styles = StyleSheet.create({
   },
   pending: {
     opacity: 0.6,
+  },
+  highlighted: {
+    backgroundColor: colors.primaryMuted,
+  },
+  quote: {
+    maxWidth: "100%",
+    paddingHorizontal: spacing.sm,
+    paddingVertical: spacing.xs,
+    borderLeftWidth: 3,
+    borderRadius: radius.sm,
+    backgroundColor: colors.surface,
+  },
+  quoteMine: {
+    borderLeftColor: colors.primary,
+  },
+  quoteTheirs: {
+    borderLeftColor: colors.textMuted,
+  },
+  quoteSender: {
+    color: colors.text,
+    fontSize: fontSize.sm - 1,
+    fontWeight: "700",
+  },
+  quoteText: {
+    color: colors.textMuted,
+    fontSize: fontSize.sm,
   },
   bubble: {
     paddingHorizontal: spacing.md,
@@ -59,9 +167,45 @@ const styles = StyleSheet.create({
     fontSize: fontSize.md,
     lineHeight: 21,
   },
+  reactions: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: spacing.xs,
+    marginTop: -spacing.xs,
+  },
+  reactionsMine: {
+    justifyContent: "flex-end",
+  },
+  chip: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 2,
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: radius.full,
+    backgroundColor: colors.surfaceElevated,
+    borderWidth: 1,
+    borderColor: colors.background,
+  },
+  chipMine: {
+    borderColor: colors.primary,
+  },
+  chipEmoji: {
+    fontSize: 14,
+  },
+  chipCount: {
+    color: colors.text,
+    fontSize: 11,
+    fontWeight: "700",
+  },
+  meta: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 3,
+    paddingHorizontal: spacing.xs,
+  },
   time: {
     color: colors.textMuted,
     fontSize: 11,
-    paddingHorizontal: spacing.xs,
   },
 });

@@ -1,10 +1,20 @@
-import type { RealtimePostgresInsertPayload } from "@supabase/supabase-js";
+import type {
+  RealtimePostgresInsertPayload,
+  RealtimePostgresUpdatePayload,
+} from "@supabase/supabase-js";
 
 import { getSignedPhotoUrls } from "@/lib/photoUpload";
 import { PROFILE_COLUMNS, toPublicProfiles } from "@/lib/profiles";
 import { requireUserId } from "@/lib/session";
 import { supabase } from "@/lib/supabase";
-import type { ChatMessage, ConversationSummary, SharedComment, SharedPost } from "@/types/chat";
+import type {
+  ChatMessage,
+  ConversationSummary,
+  MessageReaction,
+  ReplyPreview,
+  SharedComment,
+  SharedPost,
+} from "@/types/chat";
 import type { Tables } from "@/types/database";
 import type { PublicProfile } from "@/types/social";
 
@@ -13,10 +23,19 @@ export const MESSAGE_MAX_LENGTH = 2000;
 
 type MessageRow = Pick<
   Tables<"messages">,
-  "id" | "conversation_id" | "sender_id" | "body" | "post_id" | "comment_id" | "created_at"
+  | "id"
+  | "conversation_id"
+  | "sender_id"
+  | "body"
+  | "post_id"
+  | "comment_id"
+  | "reply_to_id"
+  | "pinned_at"
+  | "created_at"
 >;
 
-const MESSAGE_COLUMNS = "id, conversation_id, sender_id, body, post_id, comment_id, created_at";
+const MESSAGE_COLUMNS =
+  "id, conversation_id, sender_id, body, post_id, comment_id, reply_to_id, pinned_at, created_at";
 
 /** Returns the 1:1 conversation with `otherUserId`, creating it if needed (must follow them). */
 export async function getOrCreateDirectConversation(otherUserId: string): Promise<string> {
@@ -59,6 +78,13 @@ export async function shareCommentWithUser(
     body: noteBody(note),
   });
   if (error) throw error;
+}
+
+/** Short text for quotes, banners and previews of an already loaded message. */
+export function messagePreview(message: ChatMessage): string {
+  if (message.body !== null) return message.body;
+  if (message.comment !== null) return "💬 Kommentar geteilt";
+  return message.post !== null && message.post !== "deleted" ? "📷 Post geteilt" : "Post nicht mehr verfügbar";
 }
 
 function previewText(row: MessageRow): string {
@@ -185,6 +211,20 @@ async function hydrateMessages(rows: MessageRow[]): Promise<ChatMessage[]> {
       });
     }
   }
+  // Quotes for replies; the quoted message is often not in this batch.
+  const quotes = new Map<string, ReplyPreview>();
+  for (const r of rows) quotes.set(r.id, { id: r.id, senderId: r.sender_id, text: previewText(r) });
+  const missingQuoteIds = [
+    ...new Set(rows.flatMap((r) => (r.reply_to_id !== null && !quotes.has(r.reply_to_id) ? [r.reply_to_id] : []))),
+  ];
+  if (missingQuoteIds.length > 0) {
+    const { data, error } = await supabase.from("messages").select(MESSAGE_COLUMNS).in("id", missingQuoteIds);
+    if (error) throw error;
+    for (const q of data) quotes.set(q.id, { id: q.id, senderId: q.sender_id, text: previewText(q) });
+  }
+
+  const reactions = await fetchReactions(rows.map((r) => r.id));
+
   return rows.map((r) => ({
     id: r.id,
     conversationId: r.conversation_id,
@@ -192,8 +232,28 @@ async function hydrateMessages(rows: MessageRow[]): Promise<ChatMessage[]> {
     body: r.body,
     post: r.post_id !== null ? (posts.get(r.post_id) ?? "deleted") : r.body === null ? "deleted" : null,
     comment: r.comment_id !== null ? (comments.get(r.comment_id) ?? null) : null,
+    replyTo: r.reply_to_id !== null ? (quotes.get(r.reply_to_id) ?? "deleted") : null,
+    pinnedAt: r.pinned_at,
+    reactions: reactions.get(r.id) ?? [],
     createdAt: r.created_at,
   }));
+}
+
+async function fetchReactions(messageIds: string[]): Promise<Map<string, MessageReaction[]>> {
+  const byMessage = new Map<string, MessageReaction[]>();
+  if (messageIds.length === 0) return byMessage;
+  const { data, error } = await supabase
+    .from("message_reactions")
+    .select("message_id, user_id, emoji")
+    .in("message_id", messageIds)
+    .not("emoji", "is", null)
+    .order("updated_at", { ascending: true });
+  if (error) throw error;
+  for (const row of data) {
+    if (row.emoji === null) continue;
+    byMessage.set(row.message_id, [...(byMessage.get(row.message_id) ?? []), { userId: row.user_id, emoji: row.emoji }]);
+  }
+  return byMessage;
 }
 
 /** Newest first. Pass the createdAt of the oldest loaded message to page backwards. */
@@ -210,11 +270,48 @@ export async function fetchMessages(conversationId: string, before: string | nul
   return hydrateMessages(data);
 }
 
-export async function sendTextMessage(conversationId: string, body: string): Promise<ChatMessage> {
+/** Pinned messages of a chat, most recently pinned first. */
+export async function fetchPinnedMessages(conversationId: string): Promise<ChatMessage[]> {
+  const { data, error } = await supabase
+    .from("messages")
+    .select(MESSAGE_COLUMNS)
+    .eq("conversation_id", conversationId)
+    .not("pinned_at", "is", null)
+    .order("pinned_at", { ascending: false });
+  if (error) throw error;
+  return hydrateMessages(data);
+}
+
+export async function setMessagePinned(messageId: string, pinned: boolean): Promise<void> {
+  const { error } = await supabase.rpc("set_message_pinned", { message: messageId, pinned });
+  if (error) throw error;
+}
+
+/** Sets my reaction on a message; null removes it. */
+export async function setReaction(
+  message: { id: string; conversationId: string },
+  emoji: string | null,
+): Promise<void> {
+  const userId = await requireUserId();
+  const { error } = await supabase.from("message_reactions").upsert({
+    message_id: message.id,
+    user_id: userId,
+    conversation_id: message.conversationId,
+    emoji,
+    updated_at: new Date().toISOString(),
+  });
+  if (error) throw error;
+}
+
+export async function sendTextMessage(
+  conversationId: string,
+  body: string,
+  replyToId: string | null = null,
+): Promise<ChatMessage> {
   const userId = await requireUserId();
   const { data, error } = await supabase
     .from("messages")
-    .insert({ conversation_id: conversationId, sender_id: userId, body: body.trim() })
+    .insert({ conversation_id: conversationId, sender_id: userId, body: body.trim(), reply_to_id: replyToId })
     .select(MESSAGE_COLUMNS)
     .single();
   if (error) throw error;
@@ -258,6 +355,39 @@ export function subscribeToMessages(
           })
           .catch((error: unknown) => console.warn("[chat] Nachricht konnte nicht geladen werden:", error));
       },
+    )
+    .subscribe();
+  return () => {
+    void supabase.removeChannel(channel);
+  };
+}
+
+export type ChatChange =
+  | { kind: "pin"; messageId: string; pinnedAt: string | null }
+  | { kind: "reaction"; messageId: string; userId: string; emoji: string | null };
+
+/** Live pins and reactions in one chat (RLS limits both to chats I'm a member of). */
+export function subscribeToChatChanges(conversationId: string, onChange: (change: ChatChange) => void): () => void {
+  const filter = `conversation_id=eq.${conversationId}`;
+  const onReaction = (row: Tables<"message_reactions">) =>
+    onChange({ kind: "reaction", messageId: row.message_id, userId: row.user_id, emoji: row.emoji });
+  const channel = supabase
+    .channel(`chat-changes:${conversationId}:${Date.now()}`)
+    .on(
+      "postgres_changes",
+      { event: "UPDATE", schema: "public", table: "messages", filter },
+      (payload: RealtimePostgresUpdatePayload<Tables<"messages">>) =>
+        onChange({ kind: "pin", messageId: payload.new.id, pinnedAt: payload.new.pinned_at }),
+    )
+    .on(
+      "postgres_changes",
+      { event: "INSERT", schema: "public", table: "message_reactions", filter },
+      (payload: RealtimePostgresInsertPayload<Tables<"message_reactions">>) => onReaction(payload.new),
+    )
+    .on(
+      "postgres_changes",
+      { event: "UPDATE", schema: "public", table: "message_reactions", filter },
+      (payload: RealtimePostgresUpdatePayload<Tables<"message_reactions">>) => onReaction(payload.new),
     )
     .subscribe();
   return () => {
