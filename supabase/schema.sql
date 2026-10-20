@@ -24,6 +24,15 @@
 --                   stories from specific people (audience_restrictions); that always wins.
 --   * highlights    readable by the owner and followers; stories in a highlight stay
 --                   readable for them after expiring (other expired stories: owner only)
+--   * tagging       who may tag whom is decided by can_tag() (target's setting, an accepted
+--                   follow in either direction or public content, max 10 per post / story).
+--                   Tags create notifications and chat cards server-side (triggers).
+--   * notifications only the recipient reads them and marks them read; rows are created
+--                   only by triggers / security definer functions, never by clients
+--   * workout links workout_shares: the post owner asks, only the tagged person accepts or
+--                   declines (until the end of the next day); only accepted links count
+--   * reposts       readable only if the viewer may read the original post AND the
+--                   reposter's posts; only accepted, linked people may repost feed posts
 --   * chats         only members can read conversations, members and messages
 --   * storage       bucket "photos" (private), objects live under {user_id}/{kind}/...;
 --                   a photo is readable exactly when its post/story is (avatars: everyone)
@@ -58,6 +67,19 @@ begin
   if not exists (select 1 from pg_constraint where conname = 'profiles_post_visibility_check') then
     alter table public.profiles
       add constraint profiles_post_visibility_check check (post_visibility in ('everyone', 'followers'));
+  end if;
+end;
+$$;
+-- Tagging: who may tag me ('everyone' | 'connections' = people I follow or who follow me |
+-- 'nobody'), and whether tags notify me and appear as chat cards.
+alter table public.profiles add column if not exists tag_permission text not null default 'everyone';
+alter table public.profiles add column if not exists tag_notifications boolean not null default true;
+alter table public.profiles add column if not exists tag_chat_messages boolean not null default true;
+do $$
+begin
+  if not exists (select 1 from pg_constraint where conname = 'profiles_tag_permission_check') then
+    alter table public.profiles
+      add constraint profiles_tag_permission_check check (tag_permission in ('everyone', 'connections', 'nobody'));
   end if;
 end;
 $$;
@@ -191,6 +213,14 @@ create index if not exists stories_user_expires_idx on public.stories (user_id, 
 alter table public.stories add column if not exists mentioned_user_ids uuid[] not null default '{}';
 create index if not exists stories_mentions_idx on public.stories using gin (mentioned_user_ids);
 create index if not exists stories_photo_path_idx on public.stories (photo_path);
+do $$
+begin
+  if not exists (select 1 from pg_constraint where conname = 'stories_mentions_limit') then
+    alter table public.stories
+      add constraint stories_mentions_limit check (cardinality(mentioned_user_ids) <= 10);
+  end if;
+end;
+$$;
 
 create table if not exists public.story_likes (
   story_id   uuid not null references public.stories (id) on delete cascade,
@@ -279,6 +309,18 @@ alter table public.messages
   add column if not exists pinned_by uuid references public.profiles (id) on delete set null;
 create index if not exists messages_pinned_idx
   on public.messages (conversation_id, pinned_at desc) where pinned_at is not null;
+-- Server-made messages: kind 'tag' = "X hat dich markiert" card (post, story or comment).
+-- Clients can't insert them (messages insert policy requires kind and story_id to be null).
+alter table public.messages add column if not exists kind text;
+alter table public.messages
+  add column if not exists story_id uuid references public.stories (id) on delete set null;
+do $$
+begin
+  if not exists (select 1 from pg_constraint where conname = 'messages_kind_check') then
+    alter table public.messages add constraint messages_kind_check check (kind is null or kind = 'tag');
+  end if;
+end;
+$$;
 
 -- One reaction per person and message. Removing a reaction sets emoji to null instead of
 -- deleting the row: Realtime delivers updates with RLS and per-chat filters, deletes not.
@@ -294,6 +336,49 @@ create table if not exists public.message_reactions (
 );
 create index if not exists message_reactions_conversation_idx
   on public.message_reactions (conversation_id);
+
+-- "Auch fürs Workout verlinken": the post owner asks a tagged person; only that person
+-- answers. An accepted link counts as their training day (workout_days()).
+create table if not exists public.workout_shares (
+  id             uuid primary key default gen_random_uuid(),
+  post_id        uuid not null references public.posts (id) on delete cascade,
+  tagged_user_id uuid not null references public.profiles (id) on delete cascade,
+  status         text not null default 'pending' check (status in ('pending', 'accepted', 'declined')),
+  created_at     timestamptz not null default now(),
+  responded_at   timestamptz,
+  unique (post_id, tagged_user_id)
+);
+create index if not exists workout_shares_tagged_idx on public.workout_shares (tagged_user_id, status);
+
+-- Reposts point at the original post; no files are copied.
+create table if not exists public.post_reposts (
+  id               uuid primary key default gen_random_uuid(),
+  original_post_id uuid not null references public.posts (id) on delete cascade,
+  reposter_id      uuid not null references public.profiles (id) on delete cascade,
+  caption          text check (char_length(caption) <= 200),
+  created_at       timestamptz not null default now(),
+  unique (original_post_id, reposter_id)
+);
+create index if not exists post_reposts_reposter_idx on public.post_reposts (reposter_id, created_at desc);
+create index if not exists post_reposts_original_idx on public.post_reposts (original_post_id);
+
+-- In-app notifications that need their own row (tags, workout links, follow requests).
+-- Written only by triggers / security definer functions; recipients read and mark them read.
+create table if not exists public.notifications (
+  id               uuid primary key default gen_random_uuid(),
+  user_id          uuid not null references public.profiles (id) on delete cascade,
+  actor_id         uuid not null references public.profiles (id) on delete cascade,
+  type             text not null
+                   check (type in ('tag', 'workout_tag_request', 'workout_tag_accepted', 'follow_request')),
+  post_id          uuid references public.posts (id) on delete cascade,
+  story_id         uuid references public.stories (id) on delete cascade,
+  comment_id       uuid references public.comments (id) on delete cascade,
+  workout_share_id uuid references public.workout_shares (id) on delete cascade,
+  payload          jsonb not null default '{}',
+  read_at          timestamptz,
+  created_at       timestamptz not null default now()
+);
+create index if not exists notifications_user_created_idx on public.notifications (user_id, created_at desc);
 
 
 -- -----------------------------------------------------------------------------
@@ -636,6 +721,416 @@ begin
 end;
 $$;
 
+-- ---------------------------------------------------------------- tagging
+-- Accepted follow in either direction. Internal (revoked from clients).
+create or replace function public.are_connected(a uuid, b uuid)
+returns boolean
+language sql stable security definer set search_path = ''
+as $$
+  select exists (
+    select 1 from public.follows f
+    where f.status = 'accepted'
+      and ((f.follower_id = a and f.following_id = b) or (f.follower_id = b and f.following_id = a))
+  );
+$$;
+
+-- The tagging rule: the target's setting allows it, and (against spam) there is an accepted
+-- follow in either direction, or the tagged content is public anyway. Internal.
+create or replace function public.tag_allowed(actor uuid, target uuid, content_public boolean)
+returns boolean
+language sql stable security definer set search_path = ''
+as $$
+  select actor is not null and target is not null and actor <> target
+    and exists (
+      select 1 from public.profiles p
+      where p.id = target
+        and (
+          p.tag_permission = 'everyone'
+          or (p.tag_permission = 'connections' and public.are_connected(actor, target))
+        )
+    )
+    and (public.are_connected(actor, target) or content_public);
+$$;
+
+-- For policies and the app: may I tag `target` in my posts / stories ('posts' | 'stories')?
+create or replace function public.can_tag(target uuid, scope text)
+returns boolean
+language sql stable security definer set search_path = ''
+as $$
+  select public.tag_allowed((select auth.uid()), target, public.is_public_content((select auth.uid()), scope));
+$$;
+
+-- The subset of `ids` I may tag (the app checks before adding a tag).
+create or replace function public.taggable_user_ids(ids uuid[], scope text)
+returns uuid[]
+language sql stable security definer set search_path = ''
+as $$
+  select coalesce(array_agg(id), '{}') from unnest(ids) as id where public.can_tag(id, scope);
+$$;
+
+-- Story mentions: at most 10, each one taggable.
+create or replace function public.mentions_allowed(ids uuid[])
+returns boolean
+language sql stable security definer set search_path = ''
+as $$
+  select cardinality(ids) <= 10 and coalesce(bool_and(public.can_tag(id, 'stories')), true)
+  from unnest(ids) as id;
+$$;
+
+-- Could `viewer` read the post (follower, tagged, public; not hidden)? Used for comment
+-- mentions, so a tag never leads someone to a post they couldn't see. Internal.
+create or replace function public.user_can_see_post(viewer uuid, post uuid)
+returns boolean
+language sql stable security definer set search_path = ''
+as $$
+  select exists (
+    select 1 from public.posts p
+    where p.id = post
+      and (
+        p.user_id = viewer
+        or (
+          p.in_feed
+          and (
+            exists (
+              select 1 from public.follows f
+              where f.follower_id = viewer and f.following_id = p.user_id and f.status = 'accepted'
+            )
+            or exists (select 1 from public.post_tags t where t.post_id = p.id and t.user_id = viewer)
+            or public.is_public_content(p.user_id, 'posts')
+          )
+          and not exists (
+            select 1 from public.audience_restrictions r
+            where r.owner_id = p.user_id and r.hidden_user_id = viewer and r.scope = 'posts'
+          )
+        )
+      )
+  );
+$$;
+
+-- ---------------------------------------------------------------- workouts
+-- THE place that decides whether a post counts as a training proof (for its owner and for
+-- linked people). Today every post counts; a later automatic check plugs in here.
+create or replace function public.post_counts_as_workout(post uuid)
+returns boolean
+language sql stable security definer set search_path = ''
+as $$
+  select exists (select 1 from public.posts p where p.id = post);
+$$;
+
+-- Workout links can be answered until the end of the day after the workout (Europe/Zurich).
+create or replace function public.workout_share_deadline(day date)
+returns timestamptz
+language sql stable set search_path = ''
+as $$
+  select ((day + 2)::timestamp at time zone 'Europe/Zurich');
+$$;
+
+-- May the caller see `target`'s calendar (own, follower or public posts; not hidden)?
+create or replace function public.can_view_calendar(target uuid)
+returns boolean
+language sql stable security definer set search_path = ''
+as $$
+  select target = (select auth.uid())
+    or (
+      (public.is_following(target) or public.is_public_content(target, 'posts'))
+      and not public.is_hidden_from_me(target, 'posts')
+    );
+$$;
+
+-- Training days of `target`: own posts that count, plus accepted workout links (shared_by =
+-- the post owner). Duplicate days are fine; the streak counts each day once.
+create or replace function public.workout_days(target uuid)
+returns table (day date, post_id uuid, shared_by uuid)
+language sql stable security definer set search_path = ''
+as $$
+  select p.workout_date, p.id, null::uuid
+  from public.posts p
+  where p.user_id = target and public.can_view_calendar(target) and public.post_counts_as_workout(p.id)
+  union all
+  select p.workout_date, p.id, p.user_id
+  from public.workout_shares ws
+  join public.posts p on p.id = ws.post_id
+  where ws.tagged_user_id = target
+    and ws.status = 'accepted'
+    and public.can_view_calendar(target)
+    and public.post_counts_as_workout(p.id);
+$$;
+
+-- The owner may ask a tagged person to link a counting workout, before the deadline.
+create or replace function public.can_request_workout_link(post uuid, target uuid)
+returns boolean
+language sql stable security definer set search_path = ''
+as $$
+  select exists (
+    select 1 from public.posts p
+    join public.post_tags t on t.post_id = p.id and t.user_id = target
+    where p.id = post
+      and p.user_id = (select auth.uid())
+      and public.post_counts_as_workout(p.id)
+      and now() < public.workout_share_deadline(p.workout_date)
+  );
+$$;
+
+-- Only an accepted, linked person may repost, and only posts that are in the feed.
+create or replace function public.can_repost(post uuid)
+returns boolean
+language sql stable security definer set search_path = ''
+as $$
+  select exists (
+    select 1 from public.workout_shares ws
+    join public.posts p on p.id = ws.post_id
+    where ws.post_id = post
+      and ws.tagged_user_id = (select auth.uid())
+      and ws.status = 'accepted'
+      and p.in_feed
+  );
+$$;
+
+-- ---------------------------------------------------------------- server-side writers
+-- 1:1 conversation between a and b, created if needed. Internal: callers check the chat rules.
+create or replace function public.direct_conversation_between(a uuid, b uuid)
+returns uuid
+language plpgsql security definer set search_path = ''
+as $$
+declare
+  conversation uuid;
+begin
+  select cm.conversation_id into conversation
+  from public.conversation_members cm
+  join public.conversation_members other
+    on other.conversation_id = cm.conversation_id and other.user_id = b
+  where cm.user_id = a
+    and (select count(*) from public.conversation_members all_m
+         where all_m.conversation_id = cm.conversation_id) = 2
+  limit 1;
+
+  if conversation is null then
+    insert into public.conversations (created_by) values (a) returning id into conversation;
+    insert into public.conversation_members (conversation_id, user_id) values (conversation, a), (conversation, b);
+  end if;
+  return conversation;
+end;
+$$;
+
+-- Internal: the only way notifications are created.
+create or replace function public.create_notification(
+  n_recipient uuid,
+  n_actor uuid,
+  n_type text,
+  n_post uuid,
+  n_story uuid,
+  n_comment uuid,
+  n_share uuid
+)
+returns void
+language plpgsql security definer set search_path = ''
+as $$
+begin
+  if n_recipient is null or n_actor is null or n_recipient = n_actor then
+    return;
+  end if;
+  insert into public.notifications (user_id, actor_id, type, post_id, story_id, comment_id, workout_share_id)
+  values (n_recipient, n_actor, n_type, n_post, n_story, n_comment, n_share);
+end;
+$$;
+
+-- Internal: a tag notifies the tagged person and, where a chat is allowed by the existing
+-- rules (the tagger follows them, accepted), adds a "hat dich markiert" card to their chat.
+-- Both respect the tagged person's settings.
+create or replace function public.handle_tag(t_actor uuid, t_target uuid, t_post uuid, t_story uuid, t_comment uuid)
+returns void
+language plpgsql security definer set search_path = ''
+as $$
+declare
+  wants_notification boolean;
+  wants_chat boolean;
+begin
+  if t_actor is null or t_target is null or t_actor = t_target then
+    return;
+  end if;
+  select p.tag_notifications, p.tag_chat_messages into wants_notification, wants_chat
+  from public.profiles p where p.id = t_target;
+  if not found then
+    return;
+  end if;
+  if wants_notification then
+    perform public.create_notification(t_target, t_actor, 'tag', t_post, t_story, t_comment, null);
+  end if;
+  if wants_chat and exists (
+    select 1 from public.follows f
+    where f.follower_id = t_actor and f.following_id = t_target and f.status = 'accepted'
+  ) then
+    insert into public.messages (conversation_id, sender_id, post_id, story_id, comment_id, kind)
+    values (public.direct_conversation_between(t_actor, t_target), t_actor, t_post, t_story, t_comment, 'tag');
+  end if;
+end;
+$$;
+
+-- ---------------------------------------------------------------- triggers
+create or replace function public.on_post_tag_created()
+returns trigger
+language plpgsql security definer set search_path = ''
+as $$
+begin
+  -- After the statement's rows are in: at most 10 tags per post.
+  if (select count(*) from public.post_tags t where t.post_id = new.post_id) > 10 then
+    raise exception 'too many tags (max 10 per post)';
+  end if;
+  perform public.handle_tag(
+    (select p.user_id from public.posts p where p.id = new.post_id), new.user_id, new.post_id, null, null
+  );
+  return null;
+end;
+$$;
+
+create or replace function public.on_story_created()
+returns trigger
+language plpgsql security definer set search_path = ''
+as $$
+declare
+  mentioned uuid;
+begin
+  foreach mentioned in array new.mentioned_user_ids loop
+    perform public.handle_tag(new.user_id, mentioned, null, new.id, null);
+  end loop;
+  return null;
+end;
+$$;
+
+-- @username in a comment tags that person, if they may be tagged and could see the post.
+create or replace function public.on_comment_created()
+returns trigger
+language plpgsql security definer set search_path = ''
+as $$
+declare
+  mentioned uuid;
+  post_public boolean;
+begin
+  select public.is_public_content(p.user_id, 'posts') into post_public
+  from public.posts p where p.id = new.post_id;
+  for mentioned in
+    select distinct pr.id
+    from regexp_matches(new.body, '@([a-z0-9_.]{3,20})', 'gi') as m(parts)
+    join public.profiles pr on pr.username = lower(m.parts[1])
+    limit 10
+  loop
+    if public.tag_allowed(new.user_id, mentioned, coalesce(post_public, false))
+      and public.user_can_see_post(mentioned, new.post_id) then
+      perform public.handle_tag(new.user_id, mentioned, new.post_id, null, new.id);
+    end if;
+  end loop;
+  return null;
+end;
+$$;
+
+-- Workout links: always created as 'pending', whatever the client sends.
+create or replace function public.on_workout_share_insert()
+returns trigger
+language plpgsql security definer set search_path = ''
+as $$
+begin
+  new.status := 'pending';
+  new.created_at := now();
+  new.responded_at := null;
+  return new;
+end;
+$$;
+
+-- Answered once, pending -> accepted / declined, before the deadline; nothing else changes.
+create or replace function public.on_workout_share_update()
+returns trigger
+language plpgsql security definer set search_path = ''
+as $$
+declare
+  workout_day date;
+begin
+  if new.post_id <> old.post_id or new.tagged_user_id <> old.tagged_user_id or new.created_at <> old.created_at then
+    raise exception 'only the status of a workout link can change';
+  end if;
+  if old.status <> 'pending' or new.status not in ('accepted', 'declined') then
+    raise exception 'a workout link can only be answered once';
+  end if;
+  select p.workout_date into workout_day from public.posts p where p.id = new.post_id;
+  if now() >= public.workout_share_deadline(workout_day) then
+    raise exception 'this workout link has expired';
+  end if;
+  new.responded_at := now();
+  return new;
+end;
+$$;
+
+create or replace function public.on_workout_share_created()
+returns trigger
+language plpgsql security definer set search_path = ''
+as $$
+begin
+  perform public.create_notification(
+    new.tagged_user_id, (select p.user_id from public.posts p where p.id = new.post_id),
+    'workout_tag_request', new.post_id, null, null, new.id
+  );
+  return null;
+end;
+$$;
+
+-- Answer: the request counts as read; acceptance notifies the owner, declining doesn't.
+create or replace function public.on_workout_share_answered()
+returns trigger
+language plpgsql security definer set search_path = ''
+as $$
+begin
+  update public.notifications set read_at = coalesce(read_at, now())
+  where workout_share_id = new.id and type = 'workout_tag_request';
+  if new.status = 'accepted' then
+    perform public.create_notification(
+      (select p.user_id from public.posts p where p.id = new.post_id), new.tagged_user_id,
+      'workout_tag_accepted', new.post_id, null, null, new.id
+    );
+  end if;
+  return null;
+end;
+$$;
+
+-- Follow requests (phase F) as notifications; they disappear once answered or withdrawn.
+create or replace function public.on_follow_created()
+returns trigger
+language plpgsql security definer set search_path = ''
+as $$
+begin
+  if new.status = 'pending' then
+    perform public.create_notification(new.following_id, new.follower_id, 'follow_request', null, null, null, null);
+  end if;
+  return null;
+end;
+$$;
+
+create or replace function public.on_follow_request_closed()
+returns trigger
+language plpgsql security definer set search_path = ''
+as $$
+begin
+  delete from public.notifications
+  where type = 'follow_request' and user_id = old.following_id and actor_id = old.follower_id;
+  return null;
+end;
+$$;
+
+-- Recipients may only mark notifications as read.
+create or replace function public.on_notification_update()
+returns trigger
+language plpgsql security definer set search_path = ''
+as $$
+begin
+  if new.user_id <> old.user_id or new.actor_id <> old.actor_id or new.type <> old.type
+    or new.post_id is distinct from old.post_id or new.story_id is distinct from old.story_id
+    or new.comment_id is distinct from old.comment_id
+    or new.workout_share_id is distinct from old.workout_share_id
+    or new.payload <> old.payload or new.created_at <> old.created_at then
+    raise exception 'notifications can only be marked as read';
+  end if;
+  return new;
+end;
+$$;
+
 -- Lets the sign-up screen check a username before an account exists.
 create or replace function public.username_available(name text)
 returns boolean
@@ -664,23 +1159,7 @@ begin
   if not public.is_following(other_user) then
     raise exception 'you can only start chats with people you follow';
   end if;
-
-  select cm.conversation_id into conversation
-  from public.conversation_members cm
-  join public.conversation_members other
-    on other.conversation_id = cm.conversation_id and other.user_id = other_user
-  where cm.user_id = me
-    and (select count(*) from public.conversation_members all_m
-         where all_m.conversation_id = cm.conversation_id) = 2
-  limit 1;
-
-  if conversation is null then
-    insert into public.conversations (created_by) values (me) returning id into conversation;
-    insert into public.conversation_members (conversation_id, user_id)
-    values (conversation, me), (conversation, other_user);
-  end if;
-
-  return conversation;
+  return public.direct_conversation_between(me, other_user);
 end;
 $$;
 
@@ -717,6 +1196,61 @@ create trigger follows_guard_update
   before update on public.follows
   for each row execute function public.handle_follow_update();
 
+drop trigger if exists post_tags_created on public.post_tags;
+create trigger post_tags_created
+  after insert on public.post_tags
+  for each row execute function public.on_post_tag_created();
+
+drop trigger if exists stories_created on public.stories;
+create trigger stories_created
+  after insert on public.stories
+  for each row execute function public.on_story_created();
+
+drop trigger if exists comments_created on public.comments;
+create trigger comments_created
+  after insert on public.comments
+  for each row execute function public.on_comment_created();
+
+drop trigger if exists workout_shares_force_pending on public.workout_shares;
+create trigger workout_shares_force_pending
+  before insert on public.workout_shares
+  for each row execute function public.on_workout_share_insert();
+
+drop trigger if exists workout_shares_guard_update on public.workout_shares;
+create trigger workout_shares_guard_update
+  before update on public.workout_shares
+  for each row execute function public.on_workout_share_update();
+
+drop trigger if exists workout_shares_created on public.workout_shares;
+create trigger workout_shares_created
+  after insert on public.workout_shares
+  for each row execute function public.on_workout_share_created();
+
+drop trigger if exists workout_shares_answered on public.workout_shares;
+create trigger workout_shares_answered
+  after update on public.workout_shares
+  for each row execute function public.on_workout_share_answered();
+
+drop trigger if exists follows_created on public.follows;
+create trigger follows_created
+  after insert on public.follows
+  for each row execute function public.on_follow_created();
+
+drop trigger if exists follows_request_accepted on public.follows;
+create trigger follows_request_accepted
+  after update on public.follows
+  for each row execute function public.on_follow_request_closed();
+
+drop trigger if exists follows_request_removed on public.follows;
+create trigger follows_request_removed
+  after delete on public.follows
+  for each row execute function public.on_follow_request_closed();
+
+drop trigger if exists notifications_guard_update on public.notifications;
+create trigger notifications_guard_update
+  before update on public.notifications
+  for each row execute function public.on_notification_update();
+
 drop trigger if exists profiles_privacy_changed on public.profiles;
 create trigger profiles_privacy_changed
   after update of is_private on public.profiles
@@ -734,6 +1268,29 @@ revoke all on function public.is_public_content(uuid, text) from public, anon;
 grant execute on function public.is_public_content(uuid, text) to authenticated;
 revoke all on function public.can_view_follow_lists(uuid) from public, anon;
 grant execute on function public.can_view_follow_lists(uuid) to authenticated;
+-- Phase G. Internal helpers: only callable from other security definer functions.
+revoke all on function public.are_connected(uuid, uuid) from public, anon, authenticated;
+revoke all on function public.tag_allowed(uuid, uuid, boolean) from public, anon, authenticated;
+revoke all on function public.user_can_see_post(uuid, uuid) from public, anon, authenticated;
+revoke all on function public.direct_conversation_between(uuid, uuid) from public, anon, authenticated;
+revoke all on function public.create_notification(uuid, uuid, text, uuid, uuid, uuid, uuid)
+  from public, anon, authenticated;
+revoke all on function public.handle_tag(uuid, uuid, uuid, uuid, uuid) from public, anon, authenticated;
+-- Used by policies and the app; signed-in users only.
+revoke all on function public.can_tag(uuid, text) from public, anon;
+grant execute on function public.can_tag(uuid, text) to authenticated;
+revoke all on function public.taggable_user_ids(uuid[], text) from public, anon;
+grant execute on function public.taggable_user_ids(uuid[], text) to authenticated;
+revoke all on function public.mentions_allowed(uuid[]) from public, anon;
+grant execute on function public.mentions_allowed(uuid[]) to authenticated;
+revoke all on function public.workout_days(uuid) from public, anon;
+grant execute on function public.workout_days(uuid) to authenticated;
+revoke all on function public.can_view_calendar(uuid) from public, anon;
+grant execute on function public.can_view_calendar(uuid) to authenticated;
+revoke all on function public.can_request_workout_link(uuid, uuid) from public, anon;
+grant execute on function public.can_request_workout_link(uuid, uuid) to authenticated;
+revoke all on function public.can_repost(uuid) from public, anon;
+grant execute on function public.can_repost(uuid) to authenticated;
 
 
 -- -----------------------------------------------------------------------------
@@ -744,8 +1301,12 @@ grant select, insert, update, delete on
   public.profiles, public.posts, public.post_media, public.post_tags, public.post_likes, public.comments, public.comment_likes, public.follows,
   public.stories, public.story_likes, public.story_views, public.audience_restrictions,
   public.highlights, public.highlight_items,
-  public.conversations, public.conversation_members, public.messages, public.message_reactions
+  public.conversations, public.conversation_members, public.messages, public.message_reactions,
+  public.workout_shares, public.post_reposts
 to authenticated;
+-- Notifications: read and mark as read only; inserts come from security definer functions.
+revoke all on public.notifications from anon, authenticated;
+grant select, update on public.notifications to authenticated;
 
 
 -- -----------------------------------------------------------------------------
@@ -770,6 +1331,9 @@ alter table public.conversations        enable row level security;
 alter table public.conversation_members enable row level security;
 alter table public.messages             enable row level security;
 alter table public.message_reactions    enable row level security;
+alter table public.workout_shares       enable row level security;
+alter table public.post_reposts         enable row level security;
+alter table public.notifications        enable row level security;
 
 -- profiles: everyone signed in can read, only you can change your own row.
 -- Rows are created by the handle_new_user trigger.
@@ -853,10 +1417,13 @@ drop policy if exists "post_tags: read on visible posts" on public.post_tags;
 create policy "post_tags: read on visible posts" on public.post_tags
   for select to authenticated using (public.can_view_post(post_id));
 
+-- Tagging follows can_tag (the person's setting, a connection or public posts); the limit of
+-- 10 per post is checked by the post_tags_created trigger.
 drop policy if exists "post_tags: owner tags people they follow" on public.post_tags;
-create policy "post_tags: owner tags people they follow" on public.post_tags
+drop policy if exists "post_tags: owner tags taggable people" on public.post_tags;
+create policy "post_tags: owner tags taggable people" on public.post_tags
   for insert to authenticated
-  with check (public.is_my_post(post_id) and public.is_following(user_id));
+  with check (public.is_my_post(post_id) and public.can_tag(user_id, 'posts'));
 
 drop policy if exists "post_tags: owner or tagged person removes" on public.post_tags;
 create policy "post_tags: owner or tagged person removes" on public.post_tags
@@ -969,14 +1536,14 @@ create policy "stories: read active from followed, own always" on public.stories
     or public.is_in_visible_highlight(id)
   );
 
--- You can only tag people you follow.
+-- Mentions follow can_tag, at most 10.
 drop policy if exists "stories: insert own" on public.stories;
 create policy "stories: insert own" on public.stories
   for insert to authenticated
   with check (
     user_id = (select auth.uid())
     and (storage.foldername(photo_path))[1] = (select auth.uid())::text
-    and public.follows_all(mentioned_user_ids)
+    and public.mentions_allowed(mentioned_user_ids)
   );
 
 drop policy if exists "stories: delete own" on public.stories;
@@ -1120,6 +1687,9 @@ create policy "messages: members send" on public.messages
     and (reply_to_id is null or public.message_in_conversation(reply_to_id, conversation_id))
     and pinned_at is null
     and pinned_by is null
+    -- tag cards are made by the server only
+    and kind is null
+    and story_id is null
   );
 
 drop policy if exists "messages: delete own" on public.messages;
@@ -1155,6 +1725,73 @@ drop policy if exists "message_reactions: delete own" on public.message_reaction
 create policy "message_reactions: delete own" on public.message_reactions
   for delete to authenticated using (user_id = (select auth.uid()));
 
+-- workout_shares: the post owner and the tagged person see it.
+drop policy if exists "workout_shares: owner and tagged read" on public.workout_shares;
+create policy "workout_shares: owner and tagged read" on public.workout_shares
+  for select to authenticated
+  using (tagged_user_id = (select auth.uid()) or public.is_my_post(post_id));
+
+-- Only the owner asks (the person must be tagged in the post; status forced to 'pending').
+drop policy if exists "workout_shares: owner requests" on public.workout_shares;
+create policy "workout_shares: owner requests" on public.workout_shares
+  for insert to authenticated
+  with check (public.can_request_workout_link(post_id, tagged_user_id));
+
+-- Only the tagged person answers (pending -> accepted / declined, before the deadline).
+drop policy if exists "workout_shares: tagged person answers" on public.workout_shares;
+create policy "workout_shares: tagged person answers" on public.workout_shares
+  for update to authenticated
+  using (tagged_user_id = (select auth.uid()) and status = 'pending')
+  with check (tagged_user_id = (select auth.uid()) and status in ('accepted', 'declined'));
+
+-- The owner may withdraw a request while it is still open.
+drop policy if exists "workout_shares: owner withdraws pending" on public.workout_shares;
+create policy "workout_shares: owner withdraws pending" on public.workout_shares
+  for delete to authenticated
+  using (public.is_my_post(post_id) and status = 'pending');
+
+-- post_reposts: readable when the viewer may read the original post AND the reposter's posts
+-- (so a repost never shows the original to anyone else); the reposter and the original's
+-- owner always see it.
+drop policy if exists "post_reposts: read" on public.post_reposts;
+create policy "post_reposts: read" on public.post_reposts
+  for select to authenticated
+  using (
+    reposter_id = (select auth.uid())
+    or public.is_my_post(original_post_id)
+    or (
+      public.can_view_post(original_post_id)
+      and (public.is_following(reposter_id) or public.is_public_content(reposter_id, 'posts'))
+      and not public.is_hidden_from_me(reposter_id, 'posts')
+    )
+  );
+
+drop policy if exists "post_reposts: linked person reposts" on public.post_reposts;
+create policy "post_reposts: linked person reposts" on public.post_reposts
+  for insert to authenticated
+  with check (reposter_id = (select auth.uid()) and public.can_repost(original_post_id));
+
+drop policy if exists "post_reposts: reposter edits caption" on public.post_reposts;
+create policy "post_reposts: reposter edits caption" on public.post_reposts
+  for update to authenticated
+  using (reposter_id = (select auth.uid()))
+  with check (reposter_id = (select auth.uid()) and public.can_repost(original_post_id));
+
+drop policy if exists "post_reposts: reposter deletes" on public.post_reposts;
+create policy "post_reposts: reposter deletes" on public.post_reposts
+  for delete to authenticated using (reposter_id = (select auth.uid()));
+
+-- notifications: only the recipient, only reading and marking as read.
+drop policy if exists "notifications: recipient reads" on public.notifications;
+create policy "notifications: recipient reads" on public.notifications
+  for select to authenticated using (user_id = (select auth.uid()));
+
+drop policy if exists "notifications: recipient marks read" on public.notifications;
+create policy "notifications: recipient marks read" on public.notifications
+  for update to authenticated
+  using (user_id = (select auth.uid()))
+  with check (user_id = (select auth.uid()));
+
 
 -- -----------------------------------------------------------------------------
 -- Realtime: new messages, pins (updates of messages) and reactions
@@ -1173,6 +1810,12 @@ begin
     where pubname = 'supabase_realtime' and schemaname = 'public' and tablename = 'message_reactions'
   ) then
     alter publication supabase_realtime add table public.message_reactions;
+  end if;
+  if not exists (
+    select 1 from pg_publication_tables
+    where pubname = 'supabase_realtime' and schemaname = 'public' and tablename = 'notifications'
+  ) then
+    alter publication supabase_realtime add table public.notifications;
   end if;
 end;
 $$;

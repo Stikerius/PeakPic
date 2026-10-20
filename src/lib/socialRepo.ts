@@ -25,6 +25,14 @@ export async function listFollowing(): Promise<PublicProfile[]> {
   return listFollowingOf(await requireUserId());
 }
 
+/** People I follow or who follow me (accepted), alphabetically: who I can usually tag. */
+export async function listConnections(): Promise<PublicProfile[]> {
+  const userId = await requireUserId();
+  const [following, followers] = await Promise.all([listFollowingOf(userId), listFollowersOf(userId)]);
+  const byId = new Map([...following, ...followers].map((p) => [p.id, p]));
+  return [...byId.values()].sort((a, b) => a.username.localeCompare(b.username));
+}
+
 /** My follow status towards each of `userIds`. */
 export async function getMyFollowStatuses(userIds: string[]): Promise<Map<string, FollowStatus>> {
   const result = new Map<string, FollowStatus>(userIds.map((id) => [id, "none"]));

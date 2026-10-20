@@ -6,6 +6,9 @@
 type Timestamp = string;
 export type Visibility = "everyone" | "followers";
 export type FollowRowStatus = "pending" | "accepted";
+export type TagPermission = "everyone" | "connections" | "nobody";
+export type WorkoutShareStatus = "pending" | "accepted" | "declined";
+export type NotificationType = "tag" | "workout_tag_request" | "workout_tag_accepted" | "follow_request";
 export type Json = string | number | boolean | null | Json[] | { [key: string]: Json };
 export type AudienceScope = "stories" | "posts";
 type Uuid = string;
@@ -31,6 +34,9 @@ export type Database = {
           is_private: boolean;
           story_visibility: Visibility;
           post_visibility: Visibility;
+          tag_permission: TagPermission;
+          tag_notifications: boolean;
+          tag_chat_messages: boolean;
         };
         Insert: { id: Uuid; username: string; avatar_path?: string | null; created_at?: Timestamp };
         Update: {
@@ -40,6 +46,9 @@ export type Database = {
           is_private?: boolean;
           story_visibility?: Visibility;
           post_visibility?: Visibility;
+          tag_permission?: TagPermission;
+          tag_notifications?: boolean;
+          tag_chat_messages?: boolean;
         };
         Relationships: [];
       };
@@ -259,6 +268,9 @@ export type Database = {
           reply_to_id: Uuid | null;
           pinned_at: Timestamp | null;
           pinned_by: Uuid | null;
+          /** "tag" for server-made "hat dich markiert" cards. */
+          kind: "tag" | null;
+          story_id: Uuid | null;
           created_at: Timestamp;
         };
         Insert: {
@@ -278,6 +290,58 @@ export type Database = {
           Rel<"messages_post_id_fkey", "post_id", "posts">,
           Rel<"messages_comment_id_fkey", "comment_id", "comments">,
           Rel<"messages_reply_to_id_fkey", "reply_to_id", "messages">,
+        ];
+      };
+      workout_shares: {
+        Row: {
+          id: Uuid;
+          post_id: Uuid;
+          tagged_user_id: Uuid;
+          status: WorkoutShareStatus;
+          created_at: Timestamp;
+          responded_at: Timestamp | null;
+        };
+        /** status is forced to "pending" by a trigger. */
+        Insert: { post_id: Uuid; tagged_user_id: Uuid };
+        /** Only the tagged person, only from pending. */
+        Update: { status?: "accepted" | "declined" };
+        Relationships: [
+          Rel<"workout_shares_post_id_fkey", "post_id", "posts">,
+          Rel<"workout_shares_tagged_user_id_fkey", "tagged_user_id", "profiles">,
+        ];
+      };
+      post_reposts: {
+        Row: { id: Uuid; original_post_id: Uuid; reposter_id: Uuid; caption: string | null; created_at: Timestamp };
+        Insert: { original_post_id: Uuid; reposter_id: Uuid; caption?: string | null };
+        Update: { caption?: string | null };
+        Relationships: [
+          Rel<"post_reposts_original_post_id_fkey", "original_post_id", "posts">,
+          Rel<"post_reposts_reposter_id_fkey", "reposter_id", "profiles">,
+        ];
+      };
+      notifications: {
+        Row: {
+          id: Uuid;
+          user_id: Uuid;
+          actor_id: Uuid;
+          type: NotificationType;
+          post_id: Uuid | null;
+          story_id: Uuid | null;
+          comment_id: Uuid | null;
+          workout_share_id: Uuid | null;
+          payload: Json;
+          read_at: Timestamp | null;
+          created_at: Timestamp;
+        };
+        /** Created only by the database. */
+        Insert: Record<string, never>;
+        Update: { read_at?: Timestamp };
+        Relationships: [
+          Rel<"notifications_actor_id_fkey", "actor_id", "profiles">,
+          Rel<"notifications_post_id_fkey", "post_id", "posts">,
+          Rel<"notifications_story_id_fkey", "story_id", "stories">,
+          Rel<"notifications_comment_id_fkey", "comment_id", "comments">,
+          Rel<"notifications_workout_share_id_fkey", "workout_share_id", "workout_shares">,
         ];
       };
       message_reactions: {
@@ -310,6 +374,8 @@ export type Database = {
       get_or_create_direct_conversation: { Args: { other_user: Uuid }; Returns: Uuid };
       set_message_pinned: { Args: { message: Uuid; pinned: boolean }; Returns: undefined };
       follow_counts: { Args: { target: Uuid }; Returns: { followers: number; following: number }[] };
+      taggable_user_ids: { Args: { ids: Uuid[]; scope: "posts" | "stories" }; Returns: Uuid[] };
+      workout_days: { Args: { target: Uuid }; Returns: { day: string; post_id: Uuid; shared_by: Uuid | null }[] };
     };
     Enums: Record<string, never>;
     CompositeTypes: Record<string, never>;

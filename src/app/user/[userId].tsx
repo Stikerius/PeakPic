@@ -37,6 +37,7 @@ const AVATAR_SIZE = 88;
 
 type Content = {
   days: DayKey[];
+  sharedDays: ReadonlySet<DayKey>;
   posts: PostThumbnail[];
   highlights: Highlight[];
   /** Active stories I may see (followed, or public with "everyone"). */
@@ -84,13 +85,14 @@ export default function UserProfileScreen() {
       if (result !== null && (result.canSeePosts || result.canSeeStories)) {
         // Only ask for what the settings allow; RLS enforces the same rules anyway.
         const [days, posts, highlights, stories] = await Promise.all([
-          result.canSeePosts ? fetchUserWorkoutDays(userId) : Promise.resolve([]),
+          result.canSeePosts ? fetchUserWorkoutDays(userId) : Promise.resolve({ days: [], shared: [] }),
           result.canSeePosts ? fetchProfileGrid(userId) : Promise.resolve([]),
           result.canSeeStories ? listHighlights(userId) : Promise.resolve([]),
           result.canSeeStories ? fetchUserStoryGroup(userId) : Promise.resolve(null),
         ]);
         setContent({
-          days,
+          days: days.days,
+          sharedDays: new Set(days.shared.map((s) => s.day)),
           posts,
           highlights,
           hasStories: stories !== null,
@@ -255,6 +257,7 @@ export default function UserProfileScreen() {
                   month={visibleMonth.month}
                   today={today}
                   runLengths={runLengths}
+                  sharedDays={content.sharedDays}
                   canGoNext={canGoNext}
                   onPrev={() => setVisibleMonth((m) => addMonths(m.year, m.month, -1))}
                   onNext={() => setVisibleMonth((m) => addMonths(m.year, m.month, 1))}

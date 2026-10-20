@@ -1,20 +1,16 @@
 import { StepError } from "@/lib/errors";
 import { removePhotos, uploadPhoto } from "@/lib/photoUpload";
 import { fetchPostPhotoUrls } from "@/lib/postRepo";
+import { fetchWorkoutDays } from "@/lib/workoutDaysRepo";
 import { requireUserId } from "@/lib/session";
 import { toDayKey } from "@/lib/streak";
 import { supabase } from "@/lib/supabase";
 import type { WorkoutRepo } from "@/lib/workoutRepo";
 
 export const supabaseWorkoutRepo: WorkoutRepo = {
+  // Own counting posts plus accepted workout links, from the database (workout_days).
   async listWorkoutDays() {
-    const userId = await requireUserId();
-    const { data, error } = await supabase
-      .from("posts")
-      .select("workout_date")
-      .eq("user_id", userId);
-    if (error) throw error;
-    return data.map((row) => row.workout_date);
+    return (await fetchWorkoutDays()).days;
   },
 
   async listWorkoutsOnDay(day) {

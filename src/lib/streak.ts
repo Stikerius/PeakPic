@@ -122,6 +122,14 @@ export type StreakStats = {
   longest: number;
 };
 
+/**
+ * Training days from all sources: own training proofs plus days from accepted workout
+ * links (another person's post the user was linked to). Each day counts once.
+ */
+export function combineTrainingDays(own: readonly DayKey[], shared: readonly DayKey[]): DayKey[] {
+  return [...new Set([...own, ...shared])].sort();
+}
+
 /** Stats from training day keys (e.g. posts.workout_date); duplicates are fine. */
 export function computeStreakStatsFromDays(
   days: readonly DayKey[],

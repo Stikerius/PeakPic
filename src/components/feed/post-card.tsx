@@ -18,8 +18,25 @@ type PostCardProps = {
 };
 
 export function PostCard({ post, onToggleLike, onOpenComments, onShare, onOpenProfile, onMore }: PostCardProps) {
+  const repost = post.repost;
   return (
     <View style={styles.card}>
+      {repost !== null && (
+        <View style={styles.repostBox}>
+          <Pressable
+            onPress={() => onOpenProfile(repost.reposter.id)}
+            accessibilityRole="button"
+            accessibilityLabel={`Profil von ${repost.reposter.username}`}
+            style={styles.repostLine}
+          >
+            <Ionicons name="repeat" size={16} color={colors.textMuted} />
+            <Text style={styles.repostText}>
+              <Text style={styles.repostName}>@{repost.reposter.username}</Text> hat repostet
+            </Text>
+          </Pressable>
+          {repost.caption !== null && <Text style={styles.repostCaption}>{repost.caption}</Text>}
+        </View>
+      )}
       <View style={styles.headerRow}>
         <Pressable
           onPress={() => onOpenProfile(post.author.id)}
@@ -30,7 +47,10 @@ export function PostCard({ post, onToggleLike, onOpenComments, onShare, onOpenPr
           <Avatar uri={post.author.avatarUrl} username={post.author.username} size={36} />
           <View style={styles.headerText}>
             <Text style={styles.username}>@{post.author.username}</Text>
-            <Text style={styles.meta}>{formatRelativeTime(post.createdAt)}</Text>
+            <Text style={styles.meta}>
+              {repost !== null ? "Original · " : ""}
+              {formatRelativeTime(post.createdAt)}
+            </Text>
           </View>
         </Pressable>
         {onMore !== undefined && (
@@ -123,6 +143,29 @@ export function PostCard({ post, onToggleLike, onOpenComments, onShare, onOpenPr
 const styles = StyleSheet.create({
   card: {
     paddingBottom: spacing.lg,
+  },
+  repostBox: {
+    gap: spacing.xs,
+    paddingHorizontal: spacing.md,
+    paddingTop: spacing.sm,
+  },
+  repostLine: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: spacing.xs,
+  },
+  repostText: {
+    color: colors.textMuted,
+    fontSize: fontSize.sm,
+  },
+  repostName: {
+    color: colors.text,
+    fontWeight: "700",
+  },
+  repostCaption: {
+    color: colors.text,
+    fontSize: fontSize.md,
+    lineHeight: 21,
   },
   headerRow: {
     flexDirection: "row",

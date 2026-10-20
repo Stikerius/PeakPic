@@ -3,6 +3,7 @@ import { fetchPostPhotoUrls } from "@/lib/postRepo";
 import { PROFILE_COLUMNS, toPublicProfiles } from "@/lib/profiles";
 import { requireUserId } from "@/lib/session";
 import { fetchFollowCounts, type FollowStatus } from "@/lib/socialRepo";
+import { fetchWorkoutDays, type WorkoutDays } from "@/lib/workoutDaysRepo";
 import type { DayKey } from "@/lib/streak";
 import { supabase } from "@/lib/supabase";
 import type { PublicProfile } from "@/types/social";
@@ -23,7 +24,16 @@ export type UserProfileSummary = {
   canSeeLists: boolean;
 };
 
-export type PostThumbnail = { id: string; photoUrl: string | null; photoCount: number };
+export type PostThumbnail = {
+  /** Post id (for reposts: the original post's id). */
+  id: string;
+  /** Unique per tile. */
+  key: string;
+  photoUrl: string | null;
+  photoCount: number;
+  /** A repost of someone else's post (shown with a repost icon). */
+  isRepost: boolean;
+};
 
 const GRID_POSTS_LIMIT = 60;
 
@@ -67,45 +77,75 @@ export async function fetchUserProfile(userId: string): Promise<UserProfileSumma
   };
 }
 
-/** Training days of another user, as far as their privacy settings let me see. */
-export async function fetchUserWorkoutDays(userId: string): Promise<DayKey[]> {
-  const { data, error } = await supabase.from("posts").select("workout_date").eq("user_id", userId);
-  if (error) throw error;
-  return data.map((row) => row.workout_date);
+/** Training days of another user (own posts and accepted workout links), as far as I may see them. */
+export async function fetchUserWorkoutDays(userId: string): Promise<WorkoutDays> {
+  return fetchWorkoutDays(userId);
 }
 
 /**
- * Posts for the profile grid, newest first: only posts in the feed with "Im Profil anzeigen"
- * (streak-only proofs stay out). RLS decides what other people may see at all.
+ * Posts and reposts for the profile grid, newest first: only posts in the feed with "Im
+ * Profil anzeigen" (streak-only proofs stay out). RLS decides what other people may see;
+ * a repost only shows up where its original is readable.
  */
 export async function fetchProfileGrid(userId: string): Promise<PostThumbnail[]> {
-  const { data, error } = await supabase
-    .from("posts")
-    .select("id, photo_path")
-    .eq("user_id", userId)
-    .eq("in_feed", true)
-    .eq("show_in_profile", true)
-    .order("created_at", { ascending: false })
-    .limit(GRID_POSTS_LIMIT);
-  if (error) throw error;
-  if (data.length === 0) return [];
+  const [own, reposts] = await Promise.all([
+    supabase
+      .from("posts")
+      .select("id, photo_path, created_at")
+      .eq("user_id", userId)
+      .eq("in_feed", true)
+      .eq("show_in_profile", true)
+      .order("created_at", { ascending: false })
+      .limit(GRID_POSTS_LIMIT),
+    supabase
+      .from("post_reposts")
+      .select("id, original_post_id, created_at")
+      .eq("reposter_id", userId)
+      .order("created_at", { ascending: false })
+      .limit(GRID_POSTS_LIMIT),
+  ]);
+  if (own.error) throw own.error;
+  if (reposts.error) throw reposts.error;
+
+  const originalIds = [...new Set(reposts.data.map((r) => r.original_post_id))];
+  const originals =
+    originalIds.length > 0 ? await supabase.from("posts").select("id, photo_path").in("id", originalIds) : null;
+  if (originals?.error) throw originals.error;
+  const originalById = new Map((originals?.data ?? []).map((p) => [p.id, p]));
+
+  type Tile = { key: string; id: string; photoPath: string; at: string; isRepost: boolean };
+  const tiles: Tile[] = [
+    ...own.data.map((p) => ({ key: p.id, id: p.id, photoPath: p.photo_path, at: p.created_at, isRepost: false })),
+    ...reposts.data.flatMap((r): Tile[] => {
+      const original = originalById.get(r.original_post_id);
+      return original !== undefined
+        ? [{ key: `repost:${r.id}`, id: original.id, photoPath: original.photo_path, at: r.created_at, isRepost: true }]
+        : [];
+    }),
+  ]
+    .sort((a, b) => b.at.localeCompare(a.at))
+    .slice(0, GRID_POSTS_LIMIT);
+  if (tiles.length === 0) return [];
+
   const [urls, media] = await Promise.all([
-    getSignedPhotoUrls(data.map((row) => row.photo_path)),
+    getSignedPhotoUrls(tiles.map((t) => t.photoPath)),
     supabase
       .from("post_media")
       .select("post_id")
       .in(
         "post_id",
-        data.map((row) => row.id),
+        tiles.map((t) => t.id),
       ),
   ]);
   if (media.error) throw media.error;
   const counts = new Map<string, number>();
   for (const row of media.data) counts.set(row.post_id, (counts.get(row.post_id) ?? 0) + 1);
-  return data.map((row) => ({
-    id: row.id,
-    photoUrl: urls.get(row.photo_path) ?? null,
-    photoCount: counts.get(row.id) ?? 1,
+  return tiles.map((t) => ({
+    id: t.id,
+    key: t.key,
+    photoUrl: urls.get(t.photoPath) ?? null,
+    photoCount: counts.get(t.id) ?? 1,
+    isRepost: t.isRepost,
   }));
 }
 

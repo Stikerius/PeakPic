@@ -15,7 +15,7 @@ import {
 } from "@/lib/streak";
 
 export default function HomeScreen() {
-  const { days, loading, error } = useWorkoutDays();
+  const { days, sharedDays, loading, error } = useWorkoutDays();
 
   const today = toDayKey(new Date());
   const { year: currentYear, month: currentMonth } = parseDayKey(today);
@@ -50,6 +50,7 @@ export default function HomeScreen() {
         month={visibleMonth.month}
         today={today}
         runLengths={runLengths}
+        sharedDays={sharedDays}
         canGoNext={canGoNext}
         onPrev={() => setVisibleMonth((m) => addMonths(m.year, m.month, -1))}
         onNext={() => setVisibleMonth((m) => addMonths(m.year, m.month, 1))}

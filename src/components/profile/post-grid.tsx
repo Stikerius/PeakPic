@@ -14,7 +14,10 @@ type PostGridProps = {
   emptyText: string;
 };
 
-/** 3-column profile grid (4:5 tiles); slideshows get a carousel icon. Tap opens the post. */
+/**
+ * 3-column profile grid (4:5 tiles); slideshows get a carousel icon, reposts a repost icon.
+ * Tap opens the post (for reposts the original).
+ */
 export function PostGrid({ posts, emptyText }: PostGridProps) {
   const { width } = useWindowDimensions();
   const tileWidth = (width - GAP * (COLUMNS - 1)) / COLUMNS;
@@ -25,10 +28,16 @@ export function PostGrid({ posts, emptyText }: PostGridProps) {
     <View style={styles.grid}>
       {posts.map((post) => (
         <Pressable
-          key={post.id}
+          key={post.key}
           onPress={() => router.push({ pathname: "/post/[postId]", params: { postId: post.id } })}
           accessibilityRole="button"
-          accessibilityLabel={post.photoCount > 1 ? `Slideshow mit ${post.photoCount} Bildern öffnen` : "Post öffnen"}
+          accessibilityLabel={
+            post.isRepost
+              ? "Repost öffnen"
+              : post.photoCount > 1
+                ? `Slideshow mit ${post.photoCount} Bildern öffnen`
+                : "Post öffnen"
+          }
           style={{ width: tileWidth, height: tileWidth * 1.25 }}
         >
           {post.photoUrl !== null ? (
@@ -36,9 +45,9 @@ export function PostGrid({ posts, emptyText }: PostGridProps) {
           ) : (
             <View style={[styles.tile, styles.missing]} />
           )}
-          {post.photoCount > 1 && (
+          {(post.isRepost || post.photoCount > 1) && (
             <View style={styles.badge} pointerEvents="none">
-              <Ionicons name="copy" size={16} color={colors.text} />
+              <Ionicons name={post.isRepost ? "repeat" : "copy"} size={16} color={colors.text} />
             </View>
           )}
         </Pressable>

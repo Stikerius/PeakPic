@@ -11,15 +11,19 @@ import {
   View,
 } from "react-native";
 
+import { Avatar } from "@/components/avatar";
 import { PhotoCarousel } from "@/components/feed/photo-carousel";
 import { PhotoViewer } from "@/components/photo-viewer";
 import { colors, fontSize, radius, spacing } from "@/constants/theme";
 import { describeError } from "@/lib/errors";
 import { emitAppEvent, onAppEvent } from "@/lib/events";
 import { formatDayTitle, formatTime } from "@/lib/format";
+import { fetchPost } from "@/lib/feedRepo";
 import { useSession } from "@/lib/session";
+import { fetchWorkoutDays } from "@/lib/workoutDaysRepo";
 import { fetchUserPostsOnDay } from "@/lib/userProfileRepo";
 import { workoutRepo } from "@/lib/workoutRepo";
+import type { FeedPost } from "@/types/social";
 import type { WorkoutWithPhoto } from "@/types/workout";
 
 export default function DayScreen() {
@@ -31,6 +35,8 @@ export default function DayScreen() {
   const [error, setError] = useState<string | null>(null);
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [viewer, setViewer] = useState<{ photoUrls: string[]; index: number } | null>(null);
+  // Workouts of other people this user is linked to on this day (accepted workout links).
+  const [linked, setLinked] = useState<FeedPost[]>([]);
   // Bumped after a post was edited or published, to reload the day.
   const [version, setVersion] = useState(0);
 
@@ -45,6 +51,12 @@ export default function DayScreen() {
       .catch(() => {
         if (active) setError("Fotos konnten nicht geladen werden.");
       });
+    fetchWorkoutDays(isMine ? undefined : userId)
+      .then(async ({ shared }) => {
+        const posts = await Promise.all(shared.filter((s) => s.day === date).map((s) => fetchPost(s.postId)));
+        if (active) setLinked(posts.flatMap((post) => (post !== null ? [post] : [])));
+      })
+      .catch(() => undefined);
     return () => {
       active = false;
     };
@@ -103,7 +115,23 @@ export default function DayScreen() {
       ) : (
         <ScrollView style={styles.screen} contentContainerStyle={styles.content}>
           {error !== null && <Text style={styles.error}>{error}</Text>}
-          {workouts.length === 0 && (
+          {linked.map((post) => (
+            <Pressable
+              key={`linked-${post.id}`}
+              onPress={() => router.push({ pathname: "/post/[postId]", params: { postId: post.id } })}
+              accessibilityRole="button"
+              accessibilityLabel={`Verlinktes Workout mit ${post.author.username} öffnen`}
+              style={styles.card}
+            >
+              <View style={styles.linkedHeader}>
+                <Avatar uri={post.author.avatarUrl} username={post.author.username} size={28} />
+                <Text style={styles.linkedTitle}>Mit @{post.author.username}</Text>
+                <Ionicons name="link" size={16} color={colors.primary} />
+              </View>
+              <PhotoCarousel photoUrls={post.photoUrls} label={`Workout von ${post.author.username}`} />
+            </Pressable>
+          ))}
+          {workouts.length === 0 && linked.length === 0 && (
             <Text style={styles.empty}>
               {isMine ? "An diesem Tag gibt es keine Fotos." : "An diesem Tag wurde trainiert, aber keine Fotos geteilt."}
             </Text>
@@ -212,6 +240,18 @@ const styles = StyleSheet.create({
   caption: {
     color: colors.text,
     fontSize: fontSize.md,
+  },
+  linkedHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: spacing.sm,
+    padding: spacing.md,
+  },
+  linkedTitle: {
+    flex: 1,
+    color: colors.text,
+    fontSize: fontSize.md,
+    fontWeight: "700",
   },
   editButton: {
     flexDirection: "row",

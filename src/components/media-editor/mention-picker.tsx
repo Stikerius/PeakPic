@@ -13,7 +13,7 @@ import {
 
 import { ProfileRow } from "@/components/profile-row";
 import { colors, fontSize, radius, spacing } from "@/constants/theme";
-import { listFollowing } from "@/lib/socialRepo";
+import { listConnections } from "@/lib/socialRepo";
 import type { PublicProfile } from "@/types/social";
 
 type MentionPickerProps = {
@@ -23,7 +23,7 @@ type MentionPickerProps = {
   onClose: () => void;
 };
 
-/** Sheet to pick someone you follow to tag in a story. */
+/** Sheet to pick someone to tag: people I follow or who follow me (the database decides the rest). */
 export function MentionPicker({ visible, excludeIds, onSelect, onClose }: MentionPickerProps) {
   const [people, setPeople] = useState<PublicProfile[] | null>(null);
   const [query, setQuery] = useState("");
@@ -31,7 +31,7 @@ export function MentionPicker({ visible, excludeIds, onSelect, onClose }: Mentio
 
   useEffect(() => {
     if (!visible || people !== null) return;
-    listFollowing()
+    listConnections()
       .then(setPeople)
       .catch(() => setFailed(true));
   }, [visible, people]);

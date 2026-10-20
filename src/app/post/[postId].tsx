@@ -1,15 +1,22 @@
 import Ionicons from "@expo/vector-icons/Ionicons";
 import { router, useLocalSearchParams } from "expo-router";
 import { useEffect, useState } from "react";
-import { ActivityIndicator, ScrollView, StyleSheet, Text, View } from "react-native";
+import { ActivityIndicator, Alert, ScrollView, StyleSheet, Text, View } from "react-native";
 
+import { Button } from "@/components/button";
 import { PostCard } from "@/components/feed/post-card";
 import { colors, fontSize, spacing } from "@/constants/theme";
 import { useOpenProfile } from "@/hooks/use-open-profile";
 import { usePostActions } from "@/hooks/use-post-actions";
 import { useSession } from "@/lib/session";
 import { onAppEvent } from "@/lib/events";
+import { describeError } from "@/lib/errors";
 import { fetchPost, setPostLiked } from "@/lib/feedRepo";
+import { getMyRepost } from "@/lib/repostRepo";
+import { toDayKey } from "@/lib/streak";
+import { isWorkoutLinkExpired } from "@/lib/workoutLinks";
+import { answerWorkoutLink, getMyWorkoutLink } from "@/lib/workoutLinkRepo";
+import type { WorkoutShareStatus } from "@/types/database";
 import type { FeedPost } from "@/types/social";
 
 type LoadState = { status: "loading" } | { status: "missing" } | { status: "error" } | { status: "ready"; post: FeedPost };
@@ -24,6 +31,34 @@ export default function PostScreen() {
   const showPostActions = usePostActions({ onDeleted: () => router.back() });
   // Bumped after the post was edited, to reload it.
   const [version, setVersion] = useState(0);
+  // My workout link to this post (someone else's) and whether I reposted it.
+  const [link, setLink] = useState<{ id: string; status: WorkoutShareStatus; reposted: boolean } | null>(null);
+  const [answering, setAnswering] = useState(false);
+
+  useEffect(() => {
+    let active = true;
+    Promise.all([getMyWorkoutLink(postId), getMyRepost(postId)])
+      .then(([mine, repost]) => {
+        if (active) setLink(mine !== null ? { ...mine, reposted: repost !== null } : null);
+      })
+      .catch(() => undefined);
+    return () => {
+      active = false;
+    };
+  }, [postId, version]);
+
+  async function answer(accept: boolean) {
+    if (link === null) return;
+    setAnswering(true);
+    try {
+      await answerWorkoutLink(link.id, accept);
+      setLink({ ...link, status: accept ? "accepted" : "declined" });
+    } catch (error) {
+      Alert.alert("Das hat nicht geklappt", describeError(error));
+    } finally {
+      setAnswering(false);
+    }
+  }
 
   useEffect(() => {
     let active = true;
@@ -87,8 +122,34 @@ export default function PostScreen() {
     );
   }
 
+  const expired = isWorkoutLinkExpired(state.post.workoutDate, toDayKey(new Date()));
+
   return (
     <ScrollView style={styles.screen}>
+      {link !== null && link.status !== "declined" && (
+        <View style={styles.linkBanner}>
+          <Text style={styles.linkText}>
+            {link.status === "accepted"
+              ? `Dieses Workout zählt für deinen Streak (mit @${state.post.author.username}).`
+              : expired
+                ? "Die Workout-Verlinkung ist abgelaufen."
+                : `@${state.post.author.username} möchte dich fürs Workout verlinken.`}
+          </Text>
+          {link.status === "pending" && !expired && (
+            <View style={styles.linkActions}>
+              <Button label="Annehmen" size="sm" loading={answering} onPress={() => void answer(true)} />
+              <Button label="Ablehnen" size="sm" variant="secondary" disabled={answering} onPress={() => void answer(false)} />
+            </View>
+          )}
+          {link.status === "accepted" && !link.reposted && (
+            <Button
+              label="Selbst posten"
+              size="sm"
+              onPress={() => router.push({ pathname: "/repost/[postId]", params: { postId } })}
+            />
+          )}
+        </View>
+      )}
       <PostCard
         post={state.post}
         onToggleLike={() => void toggleLike()}
@@ -105,6 +166,21 @@ const styles = StyleSheet.create({
   screen: {
     flex: 1,
     backgroundColor: colors.background,
+  },
+  linkBanner: {
+    gap: spacing.sm,
+    margin: spacing.md,
+    padding: spacing.md,
+    borderRadius: 12,
+    backgroundColor: colors.surface,
+  },
+  linkText: {
+    color: colors.text,
+    fontSize: fontSize.md,
+  },
+  linkActions: {
+    flexDirection: "row",
+    gap: spacing.sm,
   },
   centered: {
     flex: 1,

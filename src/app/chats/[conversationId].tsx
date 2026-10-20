@@ -270,6 +270,7 @@ export default function ChatScreen() {
       replyTo: quoted !== null ? { id: quoted.id, senderId: quoted.senderId, text: messagePreview(quoted) } : null,
       pinnedAt: null,
       reactions: [],
+      tag: null,
       createdAt: new Date().toISOString(),
       pending: true,
     };

@@ -33,6 +33,8 @@ import { sameEdits, toPhotoEdits, type PhotoEdits } from "@/lib/photoEdits";
 import { TextOverlayEditor, type TextOverlayValue } from "@/components/media-editor/text-overlay-editor";
 import { colors, fontSize, radius, spacing } from "@/constants/theme";
 import { describeError } from "@/lib/errors";
+import { filterTaggable } from "@/lib/inboxRepo";
+import { MAX_TAGS } from "@/lib/workoutLinks";
 import { STORY_FILTERS } from "@/lib/storyFilters";
 import type { PublicProfile } from "@/types/social";
 
@@ -61,6 +63,8 @@ export type MediaEditorResult = {
   photos: EditorPhoto[];
   /** Everyone tagged: on the photos, plus earlier tags that weren't removed. */
   mentionIds: string[];
+  /** Tagged people who should also get this workout for their streak (asked per person). */
+  workoutLinkIds: string[];
   caption: string;
   /** "Im Profil anzeigen" (post variant with the switch shown). */
   showInProfile: boolean;
@@ -127,6 +131,7 @@ export function MediaEditor({
   ]);
   // Earlier tags without a mention on any photo (e.g. posts edited before edits were stored).
   const [extraTags, setExtraTags] = useState<PublicProfile[]>(initialTags);
+  const [workoutLinks, setWorkoutLinks] = useState<ReadonlySet<string>>(new Set());
   const [current, setCurrent] = useState(0);
   const [caption, setCaption] = useState(initialCaption);
   const [showInProfile, setShowInProfile] = useState(initialShowInProfile ?? true);
@@ -187,14 +192,41 @@ export function MediaEditor({
       prev.map((p) => ({ ...p, items: p.items.filter((i) => !(i.kind === "mention" && i.user.id === userId)) })),
     );
     setExtraTags((prev) => prev.filter((u) => u.id !== userId));
+    setWorkoutLinks((prev) => {
+      const next = new Set(prev);
+      next.delete(userId);
+      return next;
+    });
   }
 
-  function addMention(user: PublicProfile) {
+  async function addMention(user: PublicProfile) {
     setMentionPickerOpen(false);
+    const alreadyTagged = mentionIds.includes(user.id);
+    if (!alreadyTagged && mentionIds.length >= MAX_TAGS) {
+      Alert.alert("Zu viele Markierungen", `Du kannst höchstens ${MAX_TAGS} Personen markieren.`);
+      return;
+    }
+    try {
+      // Same rule as the database: their setting, a connection, or public content.
+      const allowed = await filterTaggable([user.id], isStory ? "stories" : "posts");
+      if (!allowed.has(user.id)) {
+        Alert.alert("Markieren nicht möglich", `@${user.username} lässt sich von dir nicht markieren.`);
+        return;
+      }
+    } catch (error) {
+      Alert.alert("Markieren fehlgeschlagen", describeError(error));
+      return;
+    }
     updateItems((items) => [
       ...items,
       { id: createId(), kind: "mention", user, x: center.x, y: center.y + 60 * (items.length % 4) },
     ]);
+    if (!isStory && !alreadyTagged) {
+      Alert.alert("Auch fürs Workout verlinken?", `@${user.username} kann das Workout dann für den eigenen Streak annehmen.`, [
+        { text: "Nein", style: "cancel" },
+        { text: "Ja", onPress: () => setWorkoutLinks((prev) => new Set(prev).add(user.id)) },
+      ]);
+    }
   }
 
   async function addPhotos() {
@@ -252,7 +284,13 @@ export function MediaEditor({
           changed,
         });
       }
-      const error = await onSubmit({ photos: result, mentionIds, caption: caption.trim(), showInProfile });
+      const error = await onSubmit({
+        photos: result,
+        mentionIds,
+        workoutLinkIds: mentionIds.filter((id) => workoutLinks.has(id)),
+        caption: caption.trim(),
+        showInProfile,
+      });
       if (error !== null) Alert.alert("Hochladen fehlgeschlagen", error);
     } catch (error) {
       Alert.alert("Bild konnte nicht erstellt werden", describeError(error));
@@ -335,7 +373,7 @@ export function MediaEditor({
       <MentionPicker
         visible={mentionPickerOpen}
         excludeIds={photo?.items.flatMap((i) => (i.kind === "mention" ? [i.user.id] : [])) ?? []}
-        onSelect={addMention}
+        onSelect={(user) => void addMention(user)}
         onClose={() => setMentionPickerOpen(false)}
       />
     </>
@@ -478,6 +516,9 @@ export function MediaEditor({
                   accessibilityLabel={`Markierung @${user.username} entfernen`}
                   style={styles.tagChip}
                 >
+                  {workoutLinks.has(user.id) && (
+                    <Ionicons name="link" size={14} color={colors.primary} accessibilityLabel="fürs Workout verlinkt" />
+                  )}
                   <Text style={styles.tagChipText}>@{user.username}</Text>
                   <Ionicons name="close" size={14} color={colors.textMuted} />
                 </Pressable>

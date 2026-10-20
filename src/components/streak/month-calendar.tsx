@@ -19,6 +19,8 @@ type MonthCalendarProps = {
   today: DayKey;
   /** Streak length ending on each training day; absent = no training. */
   runLengths: ReadonlyMap<DayKey, number>;
+  /** Days that count through a workout link to someone else's post (small link mark). */
+  sharedDays?: ReadonlySet<DayKey>;
   canGoNext: boolean;
   onPrev: () => void;
   onNext: () => void;
@@ -31,6 +33,7 @@ export function MonthCalendar({
   month,
   today,
   runLengths,
+  sharedDays,
   canGoNext,
   onPrev,
   onNext,
@@ -90,13 +93,19 @@ export function MonthCalendar({
             const run = runLengths.get(day);
             const isToday = day === today;
             const isFuture = day > today;
-            const label = `${parseDayKey(day).day}. ${monthName}${run !== undefined ? ", trainiert" : ""}${isToday ? ", heute" : ""}`;
+            const shared = sharedDays?.has(day) === true;
+            const label = `${parseDayKey(day).day}. ${monthName}${run !== undefined ? ", trainiert" : ""}${shared ? ", verlinktes Workout" : ""}${isToday ? ", heute" : ""}`;
             const content = (
               <>
                 <Text style={[styles.dayNumber, isFuture && styles.future]}>
                   {parseDayKey(day).day}
                 </Text>
                 {run !== undefined && <FlameIcon tier={flameTier(run)} baseSize={16} />}
+                {shared && (
+                  <View style={styles.sharedMark}>
+                    <Ionicons name="link" size={9} color={colors.text} />
+                  </View>
+                )}
               </>
             );
             if (run === undefined) {
@@ -197,6 +206,17 @@ const styles = StyleSheet.create({
   },
   pressedCell: {
     opacity: 0.6,
+  },
+  sharedMark: {
+    position: "absolute",
+    top: 2,
+    right: 2,
+    width: 13,
+    height: 13,
+    borderRadius: radius.full,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: colors.primary,
   },
   today: {
     borderColor: colors.primary,

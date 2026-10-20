@@ -5,9 +5,11 @@ import { useEffect, useState } from "react";
 import { ActivityIndicator, FlatList, Pressable, RefreshControl, StyleSheet, Text, View } from "react-native";
 
 import { Avatar } from "@/components/avatar";
+import { InboxRow } from "@/components/notifications/inbox-row";
 import { colors, fontSize, radius, spacing } from "@/constants/theme";
 import { useOpenProfile } from "@/hooks/use-open-profile";
 import { formatRelativeTime } from "@/lib/format";
+import { fetchInbox, markInboxRead, subscribeToInbox, type InboxItem } from "@/lib/inboxRepo";
 import { fetchNotifications, markNotificationsSeen, type NotificationFeed } from "@/lib/notificationRepo";
 import {
   joinNames,
@@ -34,15 +36,18 @@ export default function NotificationsScreen() {
   const myId = useSession().session?.user.id;
   const openProfile = useOpenProfile();
   const [feed, setFeed] = useState<NotificationFeed | null>(null);
+  const [inbox, setInbox] = useState<InboxItem[]>([]);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   async function load() {
     try {
       // Keep the previous "seen" time for this visit, so new items stay highlighted.
-      setFeed(await fetchNotifications());
+      const [activity, stored] = await Promise.all([fetchNotifications(), fetchInbox()]);
+      setFeed(activity);
+      setInbox(stored);
       setError(null);
-      await markNotificationsSeen();
+      await Promise.all([markNotificationsSeen(), markInboxRead()]);
     } catch {
       setError("Mitteilungen konnten nicht geladen werden.");
     }
@@ -51,6 +56,16 @@ export default function NotificationsScreen() {
   useEffect(() => {
     void load();
   }, []);
+
+  // New tags, workout links and follow requests appear live.
+  useEffect(() => {
+    if (myId === undefined) return;
+    return subscribeToInbox(myId, () => {
+      fetchInbox()
+        .then(setInbox)
+        .catch(() => undefined);
+    });
+  }, [myId]);
 
   async function open(group: NotificationGroup) {
     const target = group.target;
@@ -90,7 +105,18 @@ export default function NotificationsScreen() {
       style={styles.screen}
       data={feed.groups}
       keyExtractor={(group) => group.key}
-      contentContainerStyle={feed.groups.length === 0 ? styles.emptyContainer : undefined}
+      contentContainerStyle={feed.groups.length === 0 && inbox.length === 0 ? styles.emptyContainer : undefined}
+      ListHeaderComponent={
+        inbox.length > 0 ? (
+          <View>
+            <Text style={styles.sectionTitle}>Für dich</Text>
+            {inbox.map((item) => (
+              <InboxRow key={item.id} item={item} onChanged={() => void load()} />
+            ))}
+            {feed.groups.length > 0 && <Text style={styles.sectionTitle}>Aktivität</Text>}
+          </View>
+        ) : null
+      }
       refreshControl={
         <RefreshControl
           refreshing={refreshing}
@@ -140,10 +166,12 @@ export default function NotificationsScreen() {
         );
       }}
       ListEmptyComponent={
-        <View style={styles.centered}>
-          <Ionicons name="notifications-off-outline" size={48} color={colors.textMuted} />
-          <Text style={styles.emptyText}>Noch nichts Neues. Folge Freunden, um mitzubekommen, wann sie trainieren.</Text>
-        </View>
+        inbox.length > 0 ? null : (
+          <View style={styles.centered}>
+            <Ionicons name="notifications-off-outline" size={48} color={colors.textMuted} />
+            <Text style={styles.emptyText}>Noch nichts Neues. Folge Freunden, um mitzubekommen, wann sie trainieren.</Text>
+          </View>
+        )
       }
     />
   );
@@ -164,6 +192,14 @@ const styles = StyleSheet.create({
   },
   emptyContainer: {
     flexGrow: 1,
+  },
+  sectionTitle: {
+    color: colors.textMuted,
+    fontSize: fontSize.sm,
+    fontWeight: "700",
+    paddingHorizontal: spacing.md,
+    paddingTop: spacing.md,
+    paddingBottom: spacing.xs,
   },
   row: {
     flexDirection: "row",

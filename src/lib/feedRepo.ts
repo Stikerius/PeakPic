@@ -1,4 +1,5 @@
 import { fetchPostPhotoUrls, fetchPostTags } from "@/lib/postRepo";
+import { fetchRepostsBy } from "@/lib/repostRepo";
 import { toPublicProfiles } from "@/lib/profiles";
 import { requireUserId } from "@/lib/session";
 import { getFollowingIds } from "@/lib/socialRepo";
@@ -53,6 +54,8 @@ async function hydratePosts(rows: PostRow[], userId: string): Promise<FeedPost[]
   }
 
   return rows.map((r) => ({
+    feedKey: r.id,
+    repost: null,
     id: r.id,
     author: authors.get(r.author.id) ?? { id: r.author.id, username: r.author.username, avatarUrl: null },
     photoUrl: photoUrls.get(r.id)?.[0] ?? null,
@@ -70,9 +73,10 @@ async function hydratePosts(rows: PostRow[], userId: string): Promise<FeedPost[]
 }
 
 /**
- * Posts by people I follow plus my own, newest first; training proofs that weren't
- * published to the feed (in_feed = false) are left out.
+ * Posts and reposts by people I follow plus my own, newest first; training proofs that
+ * weren't published to the feed (in_feed = false) are left out.
  * RLS would also return posts shared with me in chats, so authors are filtered explicitly.
+ * Reposts only come back where I may read the original too (RLS on post_reposts).
  */
 export async function fetchFeedPage(cursor: string | null): Promise<FeedPage> {
   const userId = await requireUserId();
@@ -87,12 +91,40 @@ export async function fetchFeedPage(cursor: string | null): Promise<FeedPage> {
     .limit(FEED_PAGE_SIZE);
   if (cursor !== null) query = query.lt("created_at", cursor);
 
-  const { data: rows, error } = await query;
+  const [{ data: rows, error }, reposts] = await Promise.all([
+    query,
+    fetchRepostsBy(authorIds, cursor, FEED_PAGE_SIZE),
+  ]);
   if (error) throw error;
 
+  // Originals of the reposts (unreadable ones are dropped).
+  const originalIds = [...new Set(reposts.map((r) => r.originalPostId))];
+  const originals =
+    originalIds.length > 0 ? await supabase.from("posts").select(POST_SELECT).in("id", originalIds) : null;
+  if (originals?.error) throw originals.error;
+  const hydrated = await hydratePosts([...rows, ...(originals?.data ?? [])], userId);
+  const byId = new Map(hydrated.map((p) => [p.id, p]));
+
+  type Entry = { at: string; post: FeedPost };
+  const entries: Entry[] = [
+    ...rows.flatMap((r): Entry[] => {
+      const post = byId.get(r.id);
+      return post !== undefined ? [{ at: r.created_at, post }] : [];
+    }),
+    ...reposts.flatMap((r): Entry[] => {
+      const original = byId.get(r.originalPostId);
+      return original !== undefined
+        ? [{ at: r.createdAt, post: { ...original, feedKey: `repost:${r.id}`, repost: { ...r } } }]
+        : [];
+    }),
+  ].sort((a, b) => b.at.localeCompare(a.at));
+
+  // Both lists are cut at the page size, so only the first page-size entries are complete.
+  const page = entries.slice(0, FEED_PAGE_SIZE);
+  const more = rows.length === FEED_PAGE_SIZE || reposts.length === FEED_PAGE_SIZE || entries.length > FEED_PAGE_SIZE;
   return {
-    posts: await hydratePosts(rows, userId),
-    nextCursor: rows.length === FEED_PAGE_SIZE ? (rows[rows.length - 1]?.created_at ?? null) : null,
+    posts: page.map((e) => e.post),
+    nextCursor: more ? (page[page.length - 1]?.at ?? null) : null,
   };
 }
 

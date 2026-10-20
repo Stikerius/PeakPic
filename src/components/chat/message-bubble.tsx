@@ -1,4 +1,6 @@
 import Ionicons from "@expo/vector-icons/Ionicons";
+import { Image } from "expo-image";
+import { router } from "expo-router";
 import { Pressable, StyleSheet, Text, View } from "react-native";
 
 import { SharedCommentCard } from "@/components/chat/shared-comment-card";
@@ -69,6 +71,35 @@ export function MessageBubble({
           )}
         </Pressable>
       )}
+      {message.tag !== null && (
+        <View style={[styles.tagHeader, mine ? styles.tagHeaderMine : null]}>
+          <Ionicons name="pricetag" size={14} color={colors.warning} />
+          <Text style={styles.tagText}>
+            {mine
+              ? `Du hast @${partnerName} markiert`
+              : `@${partnerName} hat dich ${message.tag.on === "comment" ? "in einem Kommentar erwähnt" : "markiert"}`}
+          </Text>
+        </View>
+      )}
+      {message.tag?.on === "story" && (
+        <Pressable
+          onPress={() =>
+            router.push({ pathname: "/stories/[userId]", params: { userId: message.senderId, only: "1" } })
+          }
+          disabled={message.tag.photoUrl === null}
+          accessibilityRole="button"
+          accessibilityLabel="Story öffnen"
+          style={styles.storyCard}
+        >
+          {message.tag.photoUrl !== null ? (
+            <Image source={{ uri: message.tag.photoUrl }} style={styles.storyImage} contentFit="cover" />
+          ) : (
+            <View style={[styles.storyImage, styles.storyGone]}>
+              <Text style={styles.storyGoneText}>Story nicht mehr verfügbar</Text>
+            </View>
+          )}
+        </Pressable>
+      )}
       {message.comment !== null ? (
         <SharedCommentCard comment={message.comment} post={message.post} />
       ) : (
@@ -125,6 +156,39 @@ const styles = StyleSheet.create({
   },
   highlighted: {
     backgroundColor: colors.primaryMuted,
+  },
+  tagHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: spacing.xs,
+    paddingHorizontal: spacing.xs,
+  },
+  tagHeaderMine: {
+    alignSelf: "flex-end",
+  },
+  tagText: {
+    color: colors.textMuted,
+    fontSize: fontSize.sm,
+    fontWeight: "600",
+  },
+  storyCard: {
+    borderRadius: radius.lg,
+    overflow: "hidden",
+  },
+  storyImage: {
+    width: 140,
+    height: 224,
+    backgroundColor: colors.surfaceElevated,
+  },
+  storyGone: {
+    alignItems: "center",
+    justifyContent: "center",
+    padding: spacing.sm,
+  },
+  storyGoneText: {
+    color: colors.textMuted,
+    fontSize: fontSize.sm,
+    textAlign: "center",
   },
   quote: {
     maxWidth: "100%",

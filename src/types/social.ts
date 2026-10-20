@@ -7,7 +7,19 @@ export type PublicProfile = {
   avatarUrl: string | null;
 };
 
+/** Shown when a feed entry is someone's repost of the post. */
+export type FeedRepost = {
+  id: string;
+  reposter: PublicProfile;
+  caption: string | null;
+  createdAt: string;
+};
+
 export type FeedPost = {
+  /** Unique per feed entry: the post id, or "repost:<id>" for a repost of it. */
+  feedKey: string;
+  /** Set when this entry is a repost; everything else describes the original post. */
+  repost: FeedRepost | null;
   id: string;
   author: PublicProfile;
   /** Signed cover photo URL; null if it could not be signed. */

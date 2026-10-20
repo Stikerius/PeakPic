@@ -41,8 +41,8 @@ export function useFeed() {
       const page = await fetchFeedPage(cursor);
       if (current !== generation.current) return;
       setPosts((prev) => {
-        const known = new Set(prev.map((p) => p.id));
-        return [...prev, ...page.posts.filter((p) => !known.has(p.id))];
+        const known = new Set(prev.map((p) => p.feedKey));
+        return [...prev, ...page.posts.filter((p) => !known.has(p.feedKey))];
       });
       setCursor(page.nextCursor);
     } catch {

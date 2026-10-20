@@ -1,7 +1,7 @@
 import { router, useLocalSearchParams } from "expo-router";
 import { StatusBar } from "expo-status-bar";
 import { useEffect, useState } from "react";
-import { ActivityIndicator, StyleSheet, Text, View } from "react-native";
+import { ActivityIndicator, Alert, StyleSheet, Text, View } from "react-native";
 
 import { Button } from "@/components/button";
 import { MediaEditor, type MediaEditorResult } from "@/components/media-editor/media-editor";
@@ -16,6 +16,7 @@ import {
   type EditablePost,
   type PostPhotoInput,
 } from "@/lib/postRepo";
+import { requestWorkoutLinks } from "@/lib/workoutLinkRepo";
 
 /** Photos per post (carousel). */
 const MAX_PHOTOS = 10;
@@ -31,6 +32,19 @@ type Mode = "day" | "single" | "append" | "edit";
 
 type Params = { mode: Mode; photoUri?: string; postId?: string; publish?: string };
 
+/**
+ * Asks the chosen people to count the workout. The post is saved already, so a failure here
+ * only warns (saving again would create the post twice).
+ */
+async function linkWorkouts(postId: string, userIds: string[]): Promise<void> {
+  try {
+    await requestWorkoutLinks(postId, userIds);
+  } catch (error) {
+    console.warn("[post] Workout-Verlinkung fehlgeschlagen:", error);
+    Alert.alert("Post gespeichert", `Die Workout-Verlinkung hat nicht geklappt – ${describeError(error)}`);
+  }
+}
+
 export default function PostCreateScreen() {
   const { mode, photoUri, postId, publish } = useLocalSearchParams<Params>();
   const publishing = publish === "1";
@@ -44,7 +58,13 @@ export default function PostCreateScreen() {
       .catch((error: unknown) => setLoadError(describeError(error)));
   }, [mode, postId]);
 
-  async function submit({ photos: edited, mentionIds, caption, showInProfile }: MediaEditorResult): Promise<string | null> {
+  async function submit({
+    photos: edited,
+    mentionIds,
+    workoutLinkIds,
+    caption,
+    showInProfile,
+  }: MediaEditorResult): Promise<string | null> {
     // Editor photos refer to existing ones by their index in `existing.photos`.
     const photos: PostPhotoInput[] = edited.map((photo) => {
       const before = photo.source !== null ? existing?.photos[Number(photo.source)] : undefined;
@@ -61,6 +81,7 @@ export default function PostCreateScreen() {
         if (postId === undefined) return "Der Post wurde nicht gefunden.";
         if (mode === "append") {
           await addToDayPost(postId, photos, mentionIds);
+          await linkWorkouts(postId, workoutLinkIds);
         } else {
           await updatePost(postId, {
             photos,
@@ -69,9 +90,10 @@ export default function PostCreateScreen() {
             inFeed: publishing || existing?.inFeed === true,
             tagIds: mentionIds,
           });
+          await linkWorkouts(postId, workoutLinkIds);
         }
       } else {
-        await createPost({
+        const newPostId = await createPost({
           photos,
           caption,
           inFeed: true,
@@ -79,6 +101,7 @@ export default function PostCreateScreen() {
           showInProfile,
           tagIds: mentionIds,
         });
+        await linkWorkouts(newPostId, workoutLinkIds);
       }
       emitAppEvent("postCreated", undefined);
       router.back();

@@ -25,6 +25,12 @@ export type ReplyPreview = {
 
 export type MessageReaction = { userId: string; emoji: string };
 
+/** A server-made "hat dich markiert" card; what was tagged decides the preview. */
+export type TagCard =
+  | { on: "post" }
+  | { on: "comment" }
+  | { on: "story"; storyId: string; photoUrl: string | null };
+
 export type ChatMessage = {
   id: string;
   conversationId: string;
@@ -38,6 +44,8 @@ export type ChatMessage = {
   replyTo: ReplyPreview | "deleted" | null;
   pinnedAt: string | null;
   reactions: MessageReaction[];
+  /** Set for tag cards (the post / comment previews come from `post` and `comment`). */
+  tag: TagCard | null;
   createdAt: string;
   /** Optimistic message that the server hasn't confirmed yet. */
   pending?: boolean;

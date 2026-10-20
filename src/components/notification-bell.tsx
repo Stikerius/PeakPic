@@ -5,24 +5,28 @@ import { Pressable, StyleSheet, Text, View } from "react-native";
 
 import { colors, radius, spacing } from "@/constants/theme";
 import { onAppEvent } from "@/lib/events";
+import { countUnreadInbox, subscribeToInbox } from "@/lib/inboxRepo";
 import { countUnreadNotifications } from "@/lib/notificationRepo";
+import { useSession } from "@/lib/session";
 
 const REFRESH_INTERVAL_MS = 60_000;
 
 /**
- * Header bell with the number of unread notification groups. Refreshes on mount,
- * every minute and after follows; doesn't rely on screen focus (headers may render
- * outside the screen's navigation context).
+ * Header bell with the number of unread notifications: activity groups plus stored
+ * notifications (tags, workout links, follow requests, live via Realtime). Also refreshes
+ * every minute and after follows; doesn't rely on screen focus (headers may render outside
+ * the screen's navigation context).
  */
 export function NotificationBell() {
   const [unread, setUnread] = useState(0);
+  const myId = useSession().session?.user.id;
 
   useEffect(() => {
     let active = true;
     const reload = () => {
-      countUnreadNotifications()
-        .then((count) => {
-          if (active) setUnread(count);
+      Promise.all([countUnreadNotifications(), countUnreadInbox()])
+        .then(([groups, inbox]) => {
+          if (active) setUnread(groups + inbox);
         })
         .catch(() => undefined);
     };
@@ -31,13 +35,14 @@ export function NotificationBell() {
     const unsubscribers = [
       onAppEvent("notificationsSeen", () => setUnread(0)),
       onAppEvent("followChanged", reload),
+      ...(myId !== undefined ? [subscribeToInbox(myId, reload)] : []),
     ];
     return () => {
       active = false;
       clearInterval(timer);
       unsubscribers.forEach((unsubscribe) => unsubscribe());
     };
-  }, []);
+  }, [myId]);
 
   return (
     <Pressable

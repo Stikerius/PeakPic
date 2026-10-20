@@ -31,11 +31,13 @@ type MessageRow = Pick<
   | "comment_id"
   | "reply_to_id"
   | "pinned_at"
+  | "kind"
+  | "story_id"
   | "created_at"
 >;
 
 const MESSAGE_COLUMNS =
-  "id, conversation_id, sender_id, body, post_id, comment_id, reply_to_id, pinned_at, created_at";
+  "id, conversation_id, sender_id, body, post_id, comment_id, reply_to_id, pinned_at, kind, story_id, created_at";
 
 /** Returns the 1:1 conversation with `otherUserId`, creating it if needed (must follow them). */
 export async function getOrCreateDirectConversation(otherUserId: string): Promise<string> {
@@ -82,12 +84,14 @@ export async function shareCommentWithUser(
 
 /** Short text for quotes, banners and previews of an already loaded message. */
 export function messagePreview(message: ChatMessage): string {
+  if (message.tag !== null) return "🏷️ Markierung";
   if (message.body !== null) return message.body;
   if (message.comment !== null) return "💬 Kommentar geteilt";
   return message.post !== null && message.post !== "deleted" ? "📷 Post geteilt" : "Post nicht mehr verfügbar";
 }
 
 function previewText(row: MessageRow): string {
+  if (row.kind === "tag") return "🏷️ Markierung";
   if (row.body !== null) return row.body;
   if (row.comment_id !== null) return "💬 Kommentar geteilt";
   return row.post_id !== null ? "📷 Post geteilt" : "Post nicht mehr verfügbar";
@@ -225,16 +229,40 @@ async function hydrateMessages(rows: MessageRow[]): Promise<ChatMessage[]> {
 
   const reactions = await fetchReactions(rows.map((r) => r.id));
 
+  // Story photos for tag cards (readable while the story is visible to the reader).
+  const storyIds = [...new Set(rows.flatMap((r) => (r.story_id !== null ? [r.story_id] : [])))];
+  const storyPhotos = new Map<string, string>();
+  if (storyIds.length > 0) {
+    const { data, error } = await supabase.from("stories").select("id, photo_path").in("id", storyIds);
+    if (error) throw error;
+    const urls = await getSignedPhotoUrls(data.map((s) => s.photo_path));
+    for (const s of data) {
+      const url = urls.get(s.photo_path);
+      if (url !== undefined) storyPhotos.set(s.id, url);
+    }
+  }
+  const tagCard = (r: MessageRow): ChatMessage["tag"] => {
+    if (r.kind !== "tag") return null;
+    if (r.story_id !== null) return { on: "story", storyId: r.story_id, photoUrl: storyPhotos.get(r.story_id) ?? null };
+    return r.comment_id !== null ? { on: "comment" } : { on: "post" };
+  };
+
   return rows.map((r) => ({
     id: r.id,
     conversationId: r.conversation_id,
     senderId: r.sender_id,
     body: r.body,
-    post: r.post_id !== null ? (posts.get(r.post_id) ?? "deleted") : r.body === null ? "deleted" : null,
+    post:
+      r.post_id !== null
+        ? (posts.get(r.post_id) ?? "deleted")
+        : r.body === null && r.kind !== "tag"
+          ? "deleted"
+          : null,
     comment: r.comment_id !== null ? (comments.get(r.comment_id) ?? null) : null,
     replyTo: r.reply_to_id !== null ? (quotes.get(r.reply_to_id) ?? "deleted") : null,
     pinnedAt: r.pinned_at,
     reactions: reactions.get(r.id) ?? [],
+    tag: tagCard(r),
     createdAt: r.created_at,
   }));
 }

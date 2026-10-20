@@ -13,8 +13,15 @@ import { signOut } from "@/lib/auth";
 import { describeError } from "@/lib/errors";
 import { emitAppEvent } from "@/lib/events";
 import { listHiddenUserIds } from "@/lib/privacyRepo";
-import { getMyProfile, updatePrivacy, type PrivacySettings } from "@/lib/profileRepo";
-import type { AudienceScope, Visibility } from "@/types/database";
+import {
+  getMyProfile,
+  getMyTagSettings,
+  updatePrivacy,
+  updateTagSettings,
+  type PrivacySettings,
+  type TagSettings,
+} from "@/lib/profileRepo";
+import type { AudienceScope, TagPermission, Visibility } from "@/types/database";
 
 type RowProps = {
   icon: ComponentProps<typeof Ionicons>["name"];
@@ -41,21 +48,17 @@ function SettingsRow({ icon, title, subtitle, onPress }: RowProps) {
   );
 }
 
-type VisibilityChoiceProps = {
+type ChoiceProps<T extends string> = {
   title: string;
-  value: Visibility;
-  disabled: boolean;
-  onChange: (value: Visibility) => void;
+  value: T;
+  options: { value: T; label: string }[];
+  disabled?: boolean;
+  onChange: (value: T) => void;
 };
 
-/** "Alle" / "Nur Follower" segmented choice. */
-function VisibilityChoice({ title, value, disabled, onChange }: VisibilityChoiceProps) {
-  const options: { value: Visibility; label: string }[] = [
-    { value: "everyone", label: "Alle" },
-    { value: "followers", label: "Nur Follower" },
-  ];
-  // A private profile always means followers only, whatever is stored.
-  const shown = disabled ? "followers" : value;
+/** Segmented choice ("Alle" / "Nur Follower", "Wer darf mich markieren", …). */
+function Choice<T extends string>({ title, value, options, disabled = false, onChange }: ChoiceProps<T>) {
+  const shown = value;
   return (
     <View style={[styles.choiceRow, disabled && styles.disabled]}>
       <Text style={styles.rowTitle}>{title}</Text>
@@ -79,6 +82,17 @@ function VisibilityChoice({ title, value, disabled, onChange }: VisibilityChoice
   );
 }
 
+const VISIBILITY_OPTIONS: { value: Visibility; label: string }[] = [
+  { value: "everyone", label: "Alle" },
+  { value: "followers", label: "Nur Follower" },
+];
+
+const TAG_OPTIONS: { value: TagPermission; label: string }[] = [
+  { value: "everyone", label: "Alle" },
+  { value: "connections", label: "Verbindungen" },
+  { value: "nobody", label: "Niemand" },
+];
+
 function countLabel(count: number | undefined): string {
   if (count === undefined) return "…";
   if (count === 0) return "Alle Follower sehen sie";
@@ -89,12 +103,16 @@ export default function SettingsScreen() {
   const [counts, setCounts] = useState<Partial<Record<AudienceScope, number>>>({});
   const [appIconLabel, setAppIconLabel] = useState<string | null>(null);
   const [privacy, setPrivacy] = useState<PrivacySettings | null>(null);
+  const [tags, setTags] = useState<TagSettings | null>(null);
   const requestCount = useFollowRequestCount();
 
   useFocusEffect(
     useCallback(() => {
       getMyProfile()
         .then(({ isPrivate, storyVisibility, postVisibility }) => setPrivacy({ isPrivate, storyVisibility, postVisibility }))
+        .catch(() => undefined);
+      getMyTagSettings()
+        .then(setTags)
         .catch(() => undefined);
       void Promise.all([listHiddenUserIds("stories"), listHiddenUserIds("posts")])
         .then(([stories, posts]) => setCounts({ stories: stories.size, posts: posts.size }))
@@ -124,6 +142,18 @@ export default function SettingsScreen() {
       emitAppEvent("followChanged", undefined);
     } catch (error) {
       setPrivacy(previous);
+      Alert.alert("Speichern fehlgeschlagen", describeError(error));
+    }
+  }
+
+  async function saveTags(change: Partial<TagSettings>) {
+    if (tags === null) return;
+    const previous = tags;
+    setTags({ ...tags, ...change }); // optimistic
+    try {
+      await updateTagSettings(change);
+    } catch (error) {
+      setTags(previous);
       Alert.alert("Speichern fehlgeschlagen", describeError(error));
     }
   }
@@ -169,16 +199,19 @@ export default function SettingsScreen() {
           />
         </View>
         <View style={styles.separator} />
-        <VisibilityChoice
+        <Choice
           title="Wer sieht meine Storys"
-          value={privacy?.storyVisibility ?? "followers"}
+          options={VISIBILITY_OPTIONS}
+          // A private profile always means followers only, whatever is stored.
+          value={privacy?.isPrivate !== false ? "followers" : privacy.storyVisibility}
           disabled={privacy?.isPrivate !== false}
           onChange={(storyVisibility) => void save({ storyVisibility })}
         />
         <View style={styles.separator} />
-        <VisibilityChoice
+        <Choice
           title="Wer sieht meine Beiträge"
-          value={privacy?.postVisibility ?? "followers"}
+          options={VISIBILITY_OPTIONS}
+          value={privacy?.isPrivate !== false ? "followers" : privacy.postVisibility}
           disabled={privacy?.isPrivate !== false}
           onChange={(postVisibility) => void save({ postVisibility })}
         />
@@ -196,6 +229,50 @@ export default function SettingsScreen() {
           : "„Alle“ heisst: jeder angemeldete Nutzer kann es über dein Profil sehen. In fremden Feeds erscheinst du trotzdem nur bei Leuten, die dir folgen."}
         {" "}Wenn du dein Profil öffentlich machst, werden offene Follower-Anfragen automatisch bestätigt. Wenn du es
         wieder privat machst, bleiben deine bisherigen Follower.
+      </Text>
+
+      <Text style={[styles.sectionTitle, styles.sectionSpacing]}>Markieren</Text>
+      <View style={styles.card}>
+        <Choice
+          title="Wer darf mich markieren"
+          options={TAG_OPTIONS}
+          value={tags?.tagPermission ?? "everyone"}
+          disabled={tags === null}
+          onChange={(tagPermission) => void saveTags({ tagPermission })}
+        />
+        <View style={styles.separator} />
+        <View style={styles.row}>
+          <Ionicons name="notifications-outline" size={22} color={colors.text} />
+          <View style={styles.rowText}>
+            <Text style={styles.rowTitle}>Mitteilung bei Markierungen</Text>
+          </View>
+          <Switch
+            value={tags?.tagNotifications ?? true}
+            onValueChange={(tagNotifications) => void saveTags({ tagNotifications })}
+            disabled={tags === null}
+            trackColor={{ true: colors.primary, false: colors.border }}
+            accessibilityLabel="Mitteilung bei Markierungen"
+          />
+        </View>
+        <View style={styles.separator} />
+        <View style={styles.row}>
+          <Ionicons name="chatbubble-outline" size={22} color={colors.text} />
+          <View style={styles.rowText}>
+            <Text style={styles.rowTitle}>Markierungen im Chat</Text>
+            <Text style={styles.rowSubtitle}>„… hat dich markiert“ als Nachricht</Text>
+          </View>
+          <Switch
+            value={tags?.tagChatMessages ?? true}
+            onValueChange={(tagChatMessages) => void saveTags({ tagChatMessages })}
+            disabled={tags === null}
+            trackColor={{ true: colors.primary, false: colors.border }}
+            accessibilityLabel="Markierungen im Chat"
+          />
+        </View>
+      </View>
+      <Text style={styles.footnote}>
+        „Verbindungen“ heisst: Leute, denen du folgst oder die dir folgen. Markieren können dich ausserdem nur Leute,
+        mit denen du verbunden bist oder deren Inhalt öffentlich ist; höchstens 10 Personen pro Beitrag.
       </Text>
 
       <Text style={[styles.sectionTitle, styles.sectionSpacing]}>Darstellung</Text>
