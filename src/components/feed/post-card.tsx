@@ -3,6 +3,7 @@ import { Pressable, StyleSheet, Text, View } from "react-native";
 
 import { Avatar } from "@/components/avatar";
 import { PhotoCarousel } from "@/components/feed/photo-carousel";
+import { TaggedText } from "@/components/tagged-text";
 import { colors, fontSize, spacing } from "@/constants/theme";
 import { formatRelativeTime } from "@/lib/format";
 import type { FeedPost } from "@/types/social";
@@ -34,7 +35,7 @@ export function PostCard({ post, onToggleLike, onOpenComments, onShare, onOpenPr
               <Text style={styles.repostName}>@{repost.reposter.username}</Text> hat repostet
             </Text>
           </Pressable>
-          {repost.caption !== null && <Text style={styles.repostCaption}>{repost.caption}</Text>}
+          {repost.caption !== null && <TaggedText text={repost.caption} style={styles.repostCaption} />}
         </View>
       )}
       <View style={styles.headerRow}>
@@ -69,7 +70,9 @@ export function PostCard({ post, onToggleLike, onOpenComments, onShare, onOpenPr
       <PhotoCarousel
         photoUrls={post.photoUrls}
         label={`Workout-Foto von ${post.author.username}`}
-        recyclingKey={post.id}
+        recyclingKey={post.feedKey}
+        mentions={post.photoMentions}
+        onPressMention={onOpenProfile}
       />
 
       <View style={styles.actions}>
@@ -133,7 +136,7 @@ export function PostCard({ post, onToggleLike, onOpenComments, onShare, onOpenPr
       {post.caption !== null && (
         <Text style={styles.caption}>
           <Text style={styles.username}>@{post.author.username} </Text>
-          {post.caption}
+          <TaggedText text={post.caption} />
         </Text>
       )}
     </View>

@@ -175,6 +175,10 @@ export type Database = {
           created_at: Timestamp;
           expires_at: Timestamp;
           mentioned_user_ids: Uuid[];
+          /** [{ user_id, x, y }] relative to the canvas (0-1). */
+          mention_positions: Json;
+          canvas_aspect: number | null;
+          overlay_text: string | null;
         };
         Insert: {
           id?: Uuid;
@@ -183,6 +187,9 @@ export type Database = {
           created_at?: Timestamp;
           expires_at?: Timestamp;
           mentioned_user_ids?: Uuid[];
+          mention_positions?: Json;
+          canvas_aspect?: number | null;
+          overlay_text?: string | null;
         };
         Update: Record<string, never>;
         Relationships: [Rel<"stories_user_id_fkey", "user_id", "profiles">];
@@ -318,6 +325,25 @@ export type Database = {
           Rel<"post_reposts_original_post_id_fkey", "original_post_id", "posts">,
           Rel<"post_reposts_reposter_id_fkey", "reposter_id", "profiles">,
         ];
+      };
+      hashtags: {
+        Row: { id: Uuid; tag: string; use_count: number; created_at: Timestamp };
+        /** Maintained by database triggers only. */
+        Insert: Record<string, never>;
+        Update: Record<string, never>;
+        Relationships: [];
+      };
+      content_hashtags: {
+        Row: {
+          hashtag_id: Uuid;
+          source: "post" | "comment" | "story";
+          source_id: Uuid;
+          user_id: Uuid;
+          created_at: Timestamp;
+        };
+        Insert: Record<string, never>;
+        Update: Record<string, never>;
+        Relationships: [Rel<"content_hashtags_hashtag_id_fkey", "hashtag_id", "hashtags">];
       };
       notifications: {
         Row: {

@@ -20,6 +20,7 @@ import { Avatar } from "@/components/avatar";
 import { MessageBubble } from "@/components/chat/message-bubble";
 import { ReactionPicker } from "@/components/chat/reaction-picker";
 import { SwipeableMessage } from "@/components/chat/swipeable-message";
+import { TaggedTextInput } from "@/components/tagged-text-input";
 import { colors, fontSize, radius, spacing } from "@/constants/theme";
 import {
   MESSAGE_MAX_LENGTH,
@@ -426,10 +427,11 @@ export default function ChatScreen() {
         )}
 
         <View style={[styles.inputBar, { paddingBottom: Math.max(insets.bottom, spacing.sm) }]}>
-          <TextInput
+          <TaggedTextInput
             ref={inputRef}
             value={draft}
             onChangeText={setDraft}
+            containerStyle={styles.inputBox}
             placeholder={replyTo !== null ? "Antwort…" : "Nachricht…"}
             placeholderTextColor={colors.textMuted}
             maxLength={MESSAGE_MAX_LENGTH}
@@ -574,8 +576,10 @@ const styles = StyleSheet.create({
     borderTopColor: colors.border,
     backgroundColor: colors.surface,
   },
-  input: {
+  inputBox: {
     flex: 1,
+  },
+  input: {
     minHeight: 40,
     maxHeight: 120,
     paddingHorizontal: spacing.md,

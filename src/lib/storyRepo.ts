@@ -4,6 +4,7 @@ import { requireUserId } from "@/lib/session";
 import { getFollowingIds } from "@/lib/socialRepo";
 import { sortStoryGroups } from "@/lib/storyOrder";
 import { supabase } from "@/lib/supabase";
+import type { Json } from "@/types/database";
 import type { PublicProfile, Story, StoryGroup } from "@/types/social";
 
 /**
@@ -11,7 +12,7 @@ import type { PublicProfile, Story, StoryGroup } from "@/types/social";
  * grouped by author, in story bar order (see sortStoryGroups).
  */
 export const STORY_SELECT =
-  "id, user_id, photo_path, created_at, expires_at, mentioned_user_ids, author:profiles!stories_user_id_fkey(id, username, avatar_path)";
+  "id, user_id, photo_path, created_at, expires_at, mentioned_user_ids, mention_positions, canvas_aspect, author:profiles!stories_user_id_fkey(id, username, avatar_path)";
 
 export type StoryRow = {
   id: string;
@@ -20,7 +21,27 @@ export type StoryRow = {
   created_at: string;
   expires_at: string;
   mentioned_user_ids: string[];
+  mention_positions: Json;
+  canvas_aspect: number | null;
   author: { id: string; username: string; avatar_path: string | null };
+};
+
+/** Validates stored mention positions (jsonb); anything unexpected is dropped. */
+function parseMentionSpots(value: Json): Story["mentionSpots"] {
+  if (!Array.isArray(value)) return [];
+  return value.flatMap((entry) => {
+    if (typeof entry !== "object" || entry === null || Array.isArray(entry)) return [];
+    const { user_id: userId, x, y } = entry;
+    return typeof userId === "string" && typeof x === "number" && typeof y === "number" ? [{ userId, x, y }] : [];
+  });
+}
+
+export type StoryExtras = {
+  /** Where the mentions sit on the photo (0-1 of the canvas). */
+  mentionSpots: { userId: string; x: number; y: number }[];
+  canvasAspect: number;
+  /** Text drawn on the photo (the database takes its #hashtags). */
+  overlayText: string;
 };
 
 export async function fetchStoryGroups(): Promise<StoryGroup[]> {
@@ -81,6 +102,8 @@ export async function groupStoryRows(rows: StoryRow[], userId: string): Promise<
       // Your own stories never count as unseen.
       seen: isMine || seen.has(row.id),
       likedByMe: liked.has(row.id),
+      mentionSpots: parseMentionSpots(row.mention_positions),
+      canvasAspect: row.canvas_aspect,
       mentions: row.mentioned_user_ids.flatMap((id) => {
         const profile = mentionedProfiles.get(id);
         return profile !== undefined ? [profile] : [];
@@ -108,12 +131,23 @@ export async function groupStoryRows(rows: StoryRow[], userId: string): Promise<
 }
 
 /** Returns the new story's id. */
-export async function addStory(sourceUri: string, mentionedUserIds: string[]): Promise<string> {
+export async function addStory(sourceUri: string, mentionedUserIds: string[], extras?: StoryExtras): Promise<string> {
   const userId = await requireUserId();
   const photoPath = await uploadPhoto(userId, "stories", sourceUri);
   const { data, error } = await supabase
     .from("stories")
-    .insert({ user_id: userId, photo_path: photoPath, mentioned_user_ids: mentionedUserIds })
+    .insert({
+      user_id: userId,
+      photo_path: photoPath,
+      mentioned_user_ids: mentionedUserIds,
+      ...(extras !== undefined
+        ? {
+            mention_positions: extras.mentionSpots.map((s) => ({ user_id: s.userId, x: s.x, y: s.y })),
+            canvas_aspect: extras.canvasAspect,
+            overlay_text: extras.overlayText.length > 0 ? extras.overlayText : null,
+          }
+        : {}),
+    })
     .select("id")
     .single();
   if (error) {

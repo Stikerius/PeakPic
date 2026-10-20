@@ -18,6 +18,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { scheduleOnRN } from "react-native-worklets";
 
 import { Avatar } from "@/components/avatar";
+import { MentionSpots } from "@/components/mention-spots";
 import { HighlightPicker } from "@/components/stories/highlight-picker";
 import { StoryActivitySheet } from "@/components/stories/story-activity-sheet";
 import { useOpenProfile } from "@/hooks/use-open-profile";
@@ -34,6 +35,7 @@ import {
   type HighlightChoice,
 } from "@/lib/highlightRepo";
 import { fetchStoryActivity, fetchUserStoryGroup, type StoryActivity } from "@/lib/storyRepo";
+import { useSession } from "@/lib/session";
 import { deleteStory, markSeen, resortStories, toggleLike, useStories } from "@/lib/storyStore";
 import type { StoryGroup } from "@/types/social";
 
@@ -123,7 +125,13 @@ function ProgressSegment({ state, progress }: { state: "done" | "active" | "todo
 export default function StoryViewerScreen() {
   // With highlightId: the stories of one highlight (also expired ones), no other people.
   // With only=1: just this person's active stories (e.g. opened from their profile).
-  const { userId, highlightId, only } = useLocalSearchParams<{ userId: string; highlightId?: string; only?: string }>();
+  // With storyId (in those modes): start at exactly that story (links from chats/notifications).
+  const { userId, highlightId, only, storyId } = useLocalSearchParams<{
+    userId: string;
+    highlightId?: string;
+    only?: string;
+    storyId?: string;
+  }>();
   const store = useStories();
   const inHighlight = highlightId !== undefined;
   const singleGroupMode = inHighlight || only === "1";
@@ -132,7 +140,7 @@ export default function StoryViewerScreen() {
   const groups = singleGroupMode ? (highlightGroup ? [highlightGroup] : []) : store.groups;
   const [highlightPickerOpen, setHighlightPickerOpen] = useState(false);
   const insets = useSafeAreaInsets();
-  const { width } = useWindowDimensions();
+  const { width, height } = useWindowDimensions();
 
   const [groupIndex, setGroupIndex] = useState(() =>
     Math.max(0, groups.findIndex((g) => g.author.id === userId)),
@@ -150,15 +158,28 @@ export default function StoryViewerScreen() {
   // Person whose stories are shown; a ref so late animation callbacks can compare against it.
   const currentGroup = useRef(groupIndex);
   const openProfile = useOpenProfile();
+  const myId = useSession().session?.user.id;
   const [activity, setActivity] = useState<StoryActivity | null>(null);
   const [activityOpen, setActivityOpen] = useState(false);
+  // The linked story (storyId) is expired, deleted or not visible to me.
+  const [linkedMissing, setLinkedMissing] = useState(false);
 
   useEffect(() => {
     if (!singleGroupMode) return;
     (highlightId !== undefined ? fetchHighlightGroup(highlightId) : fetchUserStoryGroup(userId))
-      .then(setHighlightGroup)
+      .then((loaded) => {
+        if (storyId !== undefined) {
+          const index = loaded?.stories.findIndex((s) => s.id === storyId) ?? -1;
+          if (index === -1) {
+            setLinkedMissing(true);
+            return;
+          }
+          setStoryIndex(index);
+        }
+        setHighlightGroup(loaded);
+      })
       .catch(() => setHighlightGroup(null));
-  }, [highlightId, userId, singleGroupMode]);
+  }, [highlightId, userId, storyId, singleGroupMode]);
 
   const group = groups[groupIndex];
   const story = group?.stories[Math.min(storyIndex, group.stories.length - 1)];
@@ -168,9 +189,18 @@ export default function StoryViewerScreen() {
     router.back();
   }
 
-  function closeAndOpenProfile(userId: string) {
-    router.back();
-    openProfile(userId);
+  /**
+   * Leaves the viewer for a profile. Replacing the full-screen viewer (instead of closing it
+   * and pushing right away) avoids the push getting lost during the closing animation.
+   */
+  function closeAndOpenProfile(profileId: string) {
+    setPaused(true);
+    if (profileId === myId) {
+      router.back();
+      openProfile(profileId);
+    } else {
+      router.replace({ pathname: "/user/[userId]", params: { userId: profileId } });
+    }
   }
 
   /** Called once the row has settled on `target`. Past the last person the viewer closes. */
@@ -254,7 +284,7 @@ export default function StoryViewerScreen() {
   // Group disappeared (e.g. last own story deleted): leave the viewer.
   useEffect(() => {
     const loadingHighlight = singleGroupMode && highlightGroup === undefined;
-    if (story === undefined && !loadingHighlight) close();
+    if (story === undefined && !loadingHighlight && !linkedMissing) close();
   }, [story]);
 
   const tap = Gesture.Tap()
@@ -323,6 +353,20 @@ export default function StoryViewerScreen() {
     });
 
   const gestures = Gesture.Race(swipeDown.gesture, swipeUp, swipeSideways, holdToPause, tap);
+
+  if (linkedMissing) {
+    return (
+      <View style={[styles.screen, styles.missing, styles.gone]}>
+        <StatusBar hidden />
+        <Ionicons name="time-outline" size={48} color={colors.textMuted} />
+        <Text style={styles.goneTitle}>Diese Story ist nicht mehr verfügbar</Text>
+        <Text style={styles.goneText}>Sie ist abgelaufen oder wurde gelöscht.</Text>
+        <Pressable onPress={close} accessibilityRole="button" style={styles.goneButton}>
+          <Text style={styles.goneButtonText}>Schliessen</Text>
+        </Pressable>
+      </View>
+    );
+  }
 
   if (group === undefined || story === undefined) {
     return (
@@ -427,6 +471,18 @@ export default function StoryViewerScreen() {
               )}
             </View>
           </GestureDetector>
+
+          {/* Above the photo's tap/swipe gestures, so tapping an @label opens that profile. */}
+          <MentionSpots
+            spots={story.mentionSpots.flatMap((spot) => {
+              const person = story.mentions.find((m) => m.id === spot.userId);
+              return person !== undefined ? [{ ...spot, username: person.username }] : [];
+            })}
+            imageAspect={story.canvasAspect ?? width / height}
+            width={width}
+            height={height}
+            onPress={closeAndOpenProfile}
+          />
 
           <View style={[styles.top, { paddingTop: insets.top + spacing.sm }]} pointerEvents="box-none">
             <View style={styles.progressRow}>
@@ -658,6 +714,32 @@ const styles = StyleSheet.create({
   mentionText: {
     color: colors.background,
     fontSize: fontSize.sm,
+    fontWeight: "700",
+  },
+  gone: {
+    gap: spacing.md,
+    padding: spacing.xl,
+  },
+  goneTitle: {
+    color: colors.text,
+    fontSize: fontSize.lg,
+    fontWeight: "700",
+    textAlign: "center",
+  },
+  goneText: {
+    color: colors.textMuted,
+    fontSize: fontSize.md,
+    textAlign: "center",
+  },
+  goneButton: {
+    paddingHorizontal: spacing.lg,
+    paddingVertical: spacing.sm,
+    borderRadius: radius.full,
+    backgroundColor: colors.surfaceElevated,
+  },
+  goneButtonText: {
+    color: colors.text,
+    fontSize: fontSize.md,
     fontWeight: "700",
   },
   ownActions: {

@@ -70,16 +70,24 @@ export default function NotificationsScreen() {
   async function open(group: NotificationGroup) {
     const target = group.target;
     switch (target.type) {
-      case "stories":
-      case "own_story": {
+      case "stories": {
         // The viewer reads from the story store, so make sure it's current.
         await refreshStories();
-        const userId = target.type === "stories" ? target.userId : myId;
-        if (userId !== undefined) router.push({ pathname: "/stories/[userId]", params: { userId } });
+        router.push({ pathname: "/stories/[userId]", params: { userId: target.userId } });
         return;
       }
+      case "own_story":
+        // Straight to the liked story (or a friendly "expired" message).
+        if (myId !== undefined) {
+          router.push({ pathname: "/stories/[userId]", params: { userId: myId, only: "1", storyId: target.storyId } });
+        }
+        return;
       case "post":
         router.push({ pathname: "/post/[postId]", params: { postId: target.postId } });
+        return;
+      case "comment":
+        router.push({ pathname: "/post/[postId]", params: { postId: target.postId } });
+        router.push({ pathname: "/comments/[postId]", params: { postId: target.postId, commentId: target.commentId } });
         return;
       case "profile":
         openProfile(target.userId);

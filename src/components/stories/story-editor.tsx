@@ -52,10 +52,18 @@ export function StoryEditor({ photoUri, onBack, onShared }: StoryEditorProps) {
         submitLabel="Deine Story"
         storyExtras={highlightButton}
         onBack={onBack}
-        onSubmit={async ({ photos, mentionIds }) => {
+        onSubmit={async ({ photos, mentionIds, canvasAspect }) => {
           const [photo] = photos;
           if (photo === undefined) return "Kein Bild.";
-          const error = await addStory(photo.renderedUri ?? photo.originalUri, mentionIds, highlight);
+          const items = photo.edits?.items ?? [];
+          const error = await addStory(photo.renderedUri ?? photo.originalUri, mentionIds, highlight, {
+            // Positions make the @labels on the photo tappable in the viewer.
+            mentionSpots: items.flatMap((item) =>
+              item.kind === "mention" ? [{ userId: item.user.id, x: item.x, y: item.y }] : [],
+            ),
+            canvasAspect,
+            overlayText: items.flatMap((item) => (item.kind === "text" ? [item.text] : [])).join("\n"),
+          });
           if (error === null) onShared();
           return error;
         }}

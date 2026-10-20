@@ -11,7 +11,12 @@ import {
   type NativeSyntheticEvent,
 } from "react-native";
 
+import { MentionSpots } from "@/components/mention-spots";
 import { colors, radius, spacing } from "@/constants/theme";
+import type { PhotoMention } from "@/types/social";
+
+/** Posts are edited on a 4:5 canvas. */
+const POST_ASPECT = 4 / 5;
 
 type PhotoCarouselProps = {
   photoUrls: string[];
@@ -21,10 +26,20 @@ type PhotoCarouselProps = {
   recyclingKey?: string;
   /** Tap on a photo, e.g. to open it full screen. */
   onPressPhoto?: (index: number) => void;
+  /** @mentions drawn on each photo; tapping one calls onPressMention with the user id. */
+  mentions?: PhotoMention[][];
+  onPressMention?: (userId: string) => void;
 };
 
 /** 4:5 photos, swipeable when there are several, with page dots. */
-export function PhotoCarousel({ photoUrls, label, recyclingKey, onPressPhoto }: PhotoCarouselProps) {
+export function PhotoCarousel({
+  photoUrls,
+  label,
+  recyclingKey,
+  onPressPhoto,
+  mentions,
+  onPressMention,
+}: PhotoCarouselProps) {
   const [width, setWidth] = useState(0);
   const [page, setPage] = useState(0);
 
@@ -70,6 +85,15 @@ export function PhotoCarousel({ photoUrls, label, recyclingKey, onPressPhoto }: 
                 recyclingKey={recyclingKey !== undefined ? `${recyclingKey}-${index}` : undefined}
                 accessibilityLabel={photoUrls.length > 1 ? `${label}, Bild ${index + 1} von ${photoUrls.length}` : label}
               />
+              {onPressMention !== undefined && (
+                <MentionSpots
+                  spots={mentions?.[index] ?? []}
+                  imageAspect={POST_ASPECT}
+                  width={width}
+                  height={width * 1.25}
+                  onPress={onPressMention}
+                />
+              )}
             </Pressable>
           )}
         />

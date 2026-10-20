@@ -43,7 +43,7 @@ export async function fetchNotifications(): Promise<NotificationFeed> {
       .gt("created_at", since),
     supabase
       .from("comments")
-      .select("post_id, user_id, body, created_at, post:posts!inner(user_id)")
+      .select("id, post_id, user_id, body, created_at, post:posts!inner(user_id)")
       .eq("post.user_id", me)
       .neq("user_id", me)
       .gt("created_at", since),
@@ -73,7 +73,14 @@ export async function fetchNotifications(): Promise<NotificationFeed> {
       (l): ActivityEvent => ({ kind: "post_like", actorId: l.user_id, at: l.created_at, postId: l.post_id }),
     ),
     ...(comments.data ?? []).map(
-      (c): ActivityEvent => ({ kind: "comment", actorId: c.user_id, at: c.created_at, postId: c.post_id, text: c.body }),
+      (c): ActivityEvent => ({
+        kind: "comment",
+        actorId: c.user_id,
+        at: c.created_at,
+        postId: c.post_id,
+        text: c.body,
+        commentId: c.id,
+      }),
     ),
     ...(follows.data ?? []).map((f): ActivityEvent => ({ kind: "follow", actorId: f.follower_id, at: f.created_at })),
     ...(storyLikes.data ?? []).map(

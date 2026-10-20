@@ -4,6 +4,7 @@ import { describeError } from "@/lib/errors";
 import { applyHighlightChoice, type HighlightChoice } from "@/lib/highlightRepo";
 import {
   addStory as addStoryRemote,
+  type StoryExtras,
   deleteStory as deleteStoryRemote,
   fetchStoryGroups,
   markStorySeen,
@@ -90,10 +91,11 @@ export async function addStory(
   sourceUri: string,
   mentionedUserIds: string[] = [],
   highlight: HighlightChoice | null = null,
+  extras?: StoryExtras,
 ): Promise<string | null> {
   setState({ uploading: true });
   try {
-    const storyId = await addStoryRemote(sourceUri, mentionedUserIds);
+    const storyId = await addStoryRemote(sourceUri, mentionedUserIds, extras);
     await refreshStories();
     if (highlight !== null) {
       try {

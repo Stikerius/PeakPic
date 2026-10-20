@@ -7,6 +7,9 @@ export type PublicProfile = {
   avatarUrl: string | null;
 };
 
+/** An @mention drawn on a photo: who, and where (0-1 of the edited canvas). */
+export type PhotoMention = { userId: string; username: string; x: number; y: number };
+
 /** Shown when a feed entry is someone's repost of the post. */
 export type FeedRepost = {
   id: string;
@@ -26,6 +29,8 @@ export type FeedPost = {
   photoUrl: string | null;
   /** All photos in carousel order (just the cover for single-photo posts). */
   photoUrls: string[];
+  /** @mentions drawn on each photo (same order as photoUrls), for tapping them. */
+  photoMentions: PhotoMention[][];
   /** People tagged in the post. */
   tags: PublicProfile[];
   /** The day's slideshow (several photos of one training day). */
@@ -51,6 +56,10 @@ export type Story = {
   likedByMe: boolean;
   /** People tagged in the story. */
   mentions: PublicProfile[];
+  /** Where the mentions sit on the photo (stories posted since tappable mentions exist). */
+  mentionSpots: { userId: string; x: number; y: number }[];
+  /** Width / height of the canvas the story was made on; null for older stories. */
+  canvasAspect: number | null;
 };
 
 export type StoryGroup = {

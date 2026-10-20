@@ -8,7 +8,7 @@ export type ActivityEvent =
   | { kind: "story"; actorId: string; at: string }
   | { kind: "workout"; actorId: string; at: string; day: DayKey; postId: string }
   | { kind: "post_like"; actorId: string; at: string; postId: string }
-  | { kind: "comment"; actorId: string; at: string; postId: string; text: string }
+  | { kind: "comment"; actorId: string; at: string; postId: string; text: string; commentId?: string }
   | { kind: "follow"; actorId: string; at: string }
   | { kind: "story_like"; actorId: string; at: string; storyId: string }
   | { kind: "mention"; actorId: string; at: string; storyId: string }
@@ -18,8 +18,9 @@ export type NotificationKind = ActivityEvent["kind"];
 
 export type NotificationTarget =
   | { type: "stories"; userId: string }
-  | { type: "own_story" }
+  | { type: "own_story"; storyId: string }
   | { type: "post"; postId: string }
+  | { type: "comment"; postId: string; commentId: string }
   | { type: "profile"; userId: string }
   | { type: "feed" };
 
@@ -65,14 +66,18 @@ function targetFor(event: ActivityEvent, actorCount: number): NotificationTarget
       return { type: "stories", userId: event.actorId };
     case "workout":
       return actorCount === 1 ? { type: "profile", userId: event.actorId } : { type: "feed" };
-    case "post_like":
     case "comment":
+      // The newest comment of the group, so it opens right at that comment.
+      return event.commentId !== undefined
+        ? { type: "comment", postId: event.postId, commentId: event.commentId }
+        : { type: "post", postId: event.postId };
+    case "post_like":
     case "post_tag":
       return { type: "post", postId: event.postId };
     case "follow":
       return { type: "profile", userId: event.actorId };
     case "story_like":
-      return { type: "own_story" };
+      return { type: "own_story", storyId: event.storyId };
   }
 }
 

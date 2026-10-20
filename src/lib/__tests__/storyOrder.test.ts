@@ -17,6 +17,8 @@ function group(id: string, stories: { at: string; seen: boolean }[], isMine = fa
       seen: s.seen,
       likedByMe: false,
       mentions: [],
+      mentionSpots: [],
+      canvasAspect: null,
     })),
   };
 }

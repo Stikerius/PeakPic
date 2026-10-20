@@ -20,6 +20,8 @@ import Animated, { SlideInDown, interpolate, useAnimatedStyle } from "react-nati
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { Avatar } from "@/components/avatar";
+import { TaggedText } from "@/components/tagged-text";
+import { TaggedTextInput } from "@/components/tagged-text-input";
 import { useOpenProfile } from "@/hooks/use-open-profile";
 import { useSwipeToDismiss } from "@/hooks/use-swipe-to-dismiss";
 import { colors, fontSize, radius, spacing } from "@/constants/theme";
@@ -68,7 +70,7 @@ function CommentRow({ comment, isReply, highlighted, onOpenProfile, onToggleLike
           <Text style={styles.username} onPress={() => onOpenProfile(comment.author.id)}>
             @{comment.author.username}{" "}
           </Text>
-          {comment.body}
+          <TaggedText text={comment.body} />
         </Text>
         <View style={styles.metaRow}>
           <Text style={styles.meta}>{formatRelativeTime(comment.createdAt)}</Text>
@@ -112,6 +114,8 @@ export default function CommentsScreen() {
   const [sending, setSending] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [highlightedId, setHighlightedId] = useState<string | null>(null);
+  // The linked comment (commentId) was deleted meanwhile.
+  const [linkedMissing, setLinkedMissing] = useState(false);
 
   const sheetHeight = height * SHEET_HEIGHT;
   const swipe = useSwipeToDismiss({ onDismiss: () => router.back(), fadeTo: 1 });
@@ -154,7 +158,10 @@ export default function CommentsScreen() {
     if (focusedOnce.current || commentId === undefined || comments === null) return;
     focusedOnce.current = true;
     const target = comments.find((c) => c.id === commentId);
-    if (target === undefined) return; // deleted meanwhile
+    if (target === undefined) {
+      setLinkedMissing(true);
+      return;
+    }
     const rootId = target.parentId ?? target.id;
     if (target.parentId !== null) setExpanded((prev) => new Set(prev).add(rootId));
     setHighlightedId(target.id);
@@ -341,6 +348,9 @@ export default function CommentsScreen() {
               />
             )}
 
+            {linkedMissing && (
+              <Text style={styles.inlineError}>Dieser Kommentar ist nicht mehr verfügbar.</Text>
+            )}
             {comments !== null && error !== null && <Text style={styles.inlineError}>{error}</Text>}
 
             {replyTo !== null && (
@@ -363,10 +373,11 @@ export default function CommentsScreen() {
             )}
 
             <View style={[styles.inputBar, { paddingBottom: Math.max(insets.bottom, spacing.sm) }]}>
-              <TextInput
+              <TaggedTextInput
                 ref={inputRef}
                 value={draft}
                 onChangeText={setDraft}
+                containerStyle={styles.inputBox}
                 placeholder={replyTo !== null ? "Antwort schreiben…" : "Kommentar schreiben…"}
                 placeholderTextColor={colors.textMuted}
                 maxLength={COMMENT_MAX_LENGTH}
@@ -550,8 +561,10 @@ const styles = StyleSheet.create({
     borderTopColor: colors.border,
     backgroundColor: colors.surface,
   },
-  input: {
+  inputBox: {
     flex: 1,
+  },
+  input: {
     minHeight: 40,
     maxHeight: 120,
     paddingHorizontal: spacing.md,

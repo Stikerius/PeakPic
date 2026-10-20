@@ -6,12 +6,12 @@ import {
   Pressable,
   StyleSheet,
   Text,
-  TextInput,
   View,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { contrastColor } from "@/components/media-editor/overlay";
+import { TaggedTextInput } from "@/components/tagged-text-input";
 import { colors, fontSize, radius, spacing } from "@/constants/theme";
 
 export const TEXT_COLORS = [
@@ -60,9 +60,12 @@ export function TextOverlayEditor({ initial, onDone }: TextOverlayEditorProps) {
       </View>
 
       <View style={styles.center}>
-        <TextInput
+        <TaggedTextInput
           value={value.text}
           onChangeText={(text) => setValue((v) => ({ ...v, text }))}
+          suggestionsPlacement="below"
+          tone="dark"
+          containerStyle={styles.inputBox}
           autoFocus
           maxLength={MAX_LENGTH}
           placeholder="Text eingeben…"
@@ -131,6 +134,10 @@ const styles = StyleSheet.create({
   center: {
     flex: 1,
     justifyContent: "center",
+    paddingHorizontal: spacing.lg,
+  },
+  inputBox: {
+    alignSelf: "stretch",
     paddingHorizontal: spacing.lg,
   },
   input: {

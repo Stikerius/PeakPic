@@ -1,4 +1,4 @@
-import { fetchPostPhotoUrls, fetchPostTags } from "@/lib/postRepo";
+import { fetchPostPhotos, fetchPostTags } from "@/lib/postRepo";
 import { fetchRepostsBy } from "@/lib/repostRepo";
 import { toPublicProfiles } from "@/lib/profiles";
 import { requireUserId } from "@/lib/session";
@@ -35,7 +35,7 @@ async function hydratePosts(rows: PostRow[], userId: string): Promise<FeedPost[]
   const [likesResult, commentsResult, photoUrls, tags, authors] = await Promise.all([
     supabase.from("post_likes").select("post_id, user_id").in("post_id", postIds),
     supabase.from("comments").select("post_id").in("post_id", postIds),
-    fetchPostPhotoUrls(rows),
+    fetchPostPhotos(rows),
     fetchPostTags(postIds),
     toPublicProfiles(rows.map((r) => r.author)),
   ]);
@@ -58,8 +58,9 @@ async function hydratePosts(rows: PostRow[], userId: string): Promise<FeedPost[]
     repost: null,
     id: r.id,
     author: authors.get(r.author.id) ?? { id: r.author.id, username: r.author.username, avatarUrl: null },
-    photoUrl: photoUrls.get(r.id)?.[0] ?? null,
-    photoUrls: photoUrls.get(r.id) ?? [],
+    photoUrl: photoUrls.get(r.id)?.[0]?.url ?? null,
+    photoUrls: (photoUrls.get(r.id) ?? []).map((p) => p.url),
+    photoMentions: (photoUrls.get(r.id) ?? []).map((p) => p.mentions),
     tags: tags.get(r.id) ?? [],
     isDayPost: r.is_day_post,
     showInProfile: r.show_in_profile,

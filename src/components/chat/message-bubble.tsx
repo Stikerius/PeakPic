@@ -5,6 +5,7 @@ import { Pressable, StyleSheet, Text, View } from "react-native";
 
 import { SharedCommentCard } from "@/components/chat/shared-comment-card";
 import { SharedPostCard } from "@/components/chat/shared-post-card";
+import { TaggedText } from "@/components/tagged-text";
 import { colors, fontSize, radius, spacing } from "@/constants/theme";
 import { formatTime } from "@/lib/format";
 import type { ChatMessage } from "@/types/chat";
@@ -84,9 +85,13 @@ export function MessageBubble({
       {message.tag?.on === "story" && (
         <Pressable
           onPress={() =>
-            router.push({ pathname: "/stories/[userId]", params: { userId: message.senderId, only: "1" } })
+            message.tag?.on === "story" &&
+            router.push({
+              pathname: "/stories/[userId]",
+              params: { userId: message.senderId, only: "1", storyId: message.tag.storyId },
+            })
           }
-          disabled={message.tag.photoUrl === null}
+
           accessibilityRole="button"
           accessibilityLabel="Story öffnen"
           style={styles.storyCard}
@@ -107,7 +112,7 @@ export function MessageBubble({
       )}
       {message.body !== null && (
         <View style={[styles.bubble, mine ? styles.bubbleMine : styles.bubbleTheirs]}>
-          <Text style={styles.body}>{message.body}</Text>
+          <TaggedText text={message.body} style={styles.body} linkStyle={styles.bodyLink} />
         </View>
       )}
       {reactions.length > 0 && (
@@ -225,6 +230,9 @@ const styles = StyleSheet.create({
   bubbleTheirs: {
     backgroundColor: colors.surfaceElevated,
     borderBottomLeftRadius: radius.sm,
+  },
+  bodyLink: {
+    textDecorationLine: "underline",
   },
   body: {
     color: colors.text,

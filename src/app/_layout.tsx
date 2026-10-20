@@ -64,6 +64,7 @@ function RootNavigator() {
         <Stack.Screen name="highlight/[highlightId]" options={{ title: "Highlight", presentation: "modal" }} />
         <Stack.Screen name="follows/[userId]" options={{ title: "", presentation: "modal" }} />
         <Stack.Screen name="follow-requests" options={{ title: "Follower-Anfragen" }} />
+        <Stack.Screen name="hashtag/[tag]" options={{ title: "", presentation: "modal" }} />
         <Stack.Screen name="repost/[postId]" options={{ title: "Selbst posten", presentation: "modal" }} />
         <Stack.Screen name="post-links/[postId]" options={{ title: "Verlinkungen & Reposts", presentation: "modal" }} />
         <Stack.Screen name="user/[userId]" options={{ title: "" }} />

@@ -5,7 +5,7 @@ import { PROFILE_COLUMNS, toPublicProfiles } from "@/lib/profiles";
 import { requireUserId } from "@/lib/session";
 import { toDayKey } from "@/lib/streak";
 import { supabase } from "@/lib/supabase";
-import type { PublicProfile } from "@/types/social";
+import type { PhotoMention, PublicProfile } from "@/types/social";
 
 /** One photo of a post as the editor hands it over. */
 export type PostPhotoInput = {
@@ -309,18 +309,21 @@ export async function setPostShownInProfile(postId: string, show: boolean): Prom
   if (error) throw error;
 }
 
+export type PostPhoto = { url: string; mentions: PhotoMention[] };
+
 /**
- * Signed photo URLs per post, in carousel order. Posts without media rows (created
- * before carousels existed) fall back to their cover photo.
+ * Photos per post in carousel order: signed URL plus the @mentions drawn on it (from the
+ * stored edits, so they can be tapped). Posts without media rows (created before carousels
+ * existed) fall back to their cover photo.
  */
-export async function fetchPostPhotoUrls(
+export async function fetchPostPhotos(
   posts: { id: string; photo_path: string }[],
-): Promise<Map<string, string[]>> {
-  const result = new Map<string, string[]>();
+): Promise<Map<string, PostPhoto[]>> {
+  const result = new Map<string, PostPhoto[]>();
   if (posts.length === 0) return result;
   const { data, error } = await supabase
     .from("post_media")
-    .select("post_id, photo_path")
+    .select("post_id, photo_path, edits")
     .in(
       "post_id",
       posts.map((p) => p.id),
@@ -328,21 +331,35 @@ export async function fetchPostPhotoUrls(
     .order("position", { ascending: true });
   if (error) throw error;
 
-  const pathsByPost = new Map<string, string[]>();
-  for (const row of data) pathsByPost.set(row.post_id, [...(pathsByPost.get(row.post_id) ?? []), row.photo_path]);
-  for (const post of posts) if (!pathsByPost.has(post.id)) pathsByPost.set(post.id, [post.photo_path]);
+  type Entry = { path: string; mentions: PhotoMention[] };
+  const byPost = new Map<string, Entry[]>();
+  for (const row of data) {
+    const mentions = (parsePhotoEdits(row.edits)?.items ?? []).flatMap((item) =>
+      item.kind === "mention" ? [{ userId: item.user.id, username: item.user.username, x: item.x, y: item.y }] : [],
+    );
+    byPost.set(row.post_id, [...(byPost.get(row.post_id) ?? []), { path: row.photo_path, mentions }]);
+  }
+  for (const post of posts) if (!byPost.has(post.id)) byPost.set(post.id, [{ path: post.photo_path, mentions: [] }]);
 
-  const urls = await getSignedPhotoUrls([...pathsByPost.values()].flat());
-  for (const [postId, paths] of pathsByPost) {
+  const urls = await getSignedPhotoUrls([...byPost.values()].flat().map((e) => e.path));
+  for (const [postId, entries] of byPost) {
     result.set(
       postId,
-      paths.flatMap((path) => {
-        const url = urls.get(path);
-        return url !== undefined ? [url] : [];
+      entries.flatMap((entry) => {
+        const url = urls.get(entry.path);
+        return url !== undefined ? [{ url, mentions: entry.mentions }] : [];
       }),
     );
   }
   return result;
+}
+
+/** Signed photo URLs per post, in carousel order. */
+export async function fetchPostPhotoUrls(
+  posts: { id: string; photo_path: string }[],
+): Promise<Map<string, string[]>> {
+  const photos = await fetchPostPhotos(posts);
+  return new Map([...photos].map(([postId, list]) => [postId, list.map((p) => p.url)]));
 }
 
 /** Tagged people per post. */

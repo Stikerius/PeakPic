@@ -13,7 +13,6 @@ import {
   StyleSheet,
   Switch,
   Text,
-  TextInput,
   View,
   useWindowDimensions,
 } from "react-native";
@@ -27,6 +26,7 @@ import {
   type EditedPhoto,
 } from "@/components/media-editor/edited-photo";
 import { MediaCanvas } from "@/components/media-editor/media-canvas";
+import { TaggedTextInput } from "@/components/tagged-text-input";
 import { MentionPicker } from "@/components/media-editor/mention-picker";
 import type { MediaOverlay } from "@/components/media-editor/overlay";
 import { sameEdits, toPhotoEdits, type PhotoEdits } from "@/lib/photoEdits";
@@ -68,6 +68,8 @@ export type MediaEditorResult = {
   caption: string;
   /** "Im Profil anzeigen" (post variant with the switch shown). */
   showInProfile: boolean;
+  /** Width / height of the canvas the edits are relative to. */
+  canvasAspect: number;
 };
 
 /** A photo that already exists, opened for editing again. */
@@ -290,6 +292,7 @@ export function MediaEditor({
         workoutLinkIds: mentionIds.filter((id) => workoutLinks.has(id)),
         caption: caption.trim(),
         showInProfile,
+        canvasAspect: size.width / size.height,
       });
       if (error !== null) Alert.alert("Hochladen fehlgeschlagen", error);
     } catch (error) {
@@ -527,10 +530,10 @@ export function MediaEditor({
           )}
 
           {showCaption && (
-            <TextInput
+            <TaggedTextInput
               value={caption}
               onChangeText={setCaption}
-              placeholder="Beschriftung hinzufügen…"
+              placeholder="Beschriftung hinzufügen… (@ und # möglich)"
               placeholderTextColor={colors.textMuted}
               maxLength={CAPTION_MAX_LENGTH}
               style={styles.caption}

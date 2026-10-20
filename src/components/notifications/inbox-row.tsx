@@ -56,9 +56,11 @@ export function InboxRow({ item, onChanged }: InboxRowProps) {
     if (item.type === "follow_request") {
       router.push({ pathname: "/user/[userId]", params: { userId: item.actor.id } });
     } else if (item.commentId !== null && item.postId !== null) {
+      router.push({ pathname: "/post/[postId]", params: { postId: item.postId } });
       router.push({ pathname: "/comments/[postId]", params: { postId: item.postId, commentId: item.commentId } });
     } else if (item.storyId !== null) {
-      router.push({ pathname: "/stories/[userId]", params: { userId: item.actor.id, only: "1" } });
+      // Exactly the story I was tagged in (the actor owns it).
+      router.push({ pathname: "/stories/[userId]", params: { userId: item.actor.id, only: "1", storyId: item.storyId } });
     } else if (item.postId !== null) {
       router.push({ pathname: "/post/[postId]", params: { postId: item.postId } });
     }

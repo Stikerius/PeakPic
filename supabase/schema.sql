@@ -33,6 +33,8 @@
 --                   declines (until the end of the next day); only accepted links count
 --   * reposts       readable only if the viewer may read the original post AND the
 --                   reposter's posts; only accepted, linked people may repost feed posts
+--   * hashtags      tags and use counts readable by every signed-in user; which content uses a
+--                   tag only as far as that content is readable. Maintained by triggers only.
 --   * chats         only members can read conversations, members and messages
 --   * storage       bucket "photos" (private), objects live under {user_id}/{kind}/...;
 --                   a photo is readable exactly when its post/story is (avatars: everyone)
@@ -213,6 +215,20 @@ create index if not exists stories_user_expires_idx on public.stories (user_id, 
 alter table public.stories add column if not exists mentioned_user_ids uuid[] not null default '{}';
 create index if not exists stories_mentions_idx on public.stories using gin (mentioned_user_ids);
 create index if not exists stories_photo_path_idx on public.stories (photo_path);
+-- Where the @mentions sit on the story photo ([{user_id, x, y}], 0-1 of the canvas) and the
+-- canvas aspect ratio, so the viewer can make them tappable. overlay_text = the text added
+-- on the photo (for hashtags).
+alter table public.stories add column if not exists mention_positions jsonb not null default '[]';
+alter table public.stories add column if not exists canvas_aspect real;
+alter table public.stories add column if not exists overlay_text text;
+do $$
+begin
+  if not exists (select 1 from pg_constraint where conname = 'stories_overlay_text_length') then
+    alter table public.stories
+      add constraint stories_overlay_text_length check (char_length(overlay_text) <= 2000);
+  end if;
+end;
+$$;
 do $$
 begin
   if not exists (select 1 from pg_constraint where conname = 'stories_mentions_limit') then
@@ -361,6 +377,26 @@ create table if not exists public.post_reposts (
 );
 create index if not exists post_reposts_reposter_idx on public.post_reposts (reposter_id, created_at desc);
 create index if not exists post_reposts_original_idx on public.post_reposts (original_post_id);
+
+-- Hashtags with their use count (one use per post / comment / story that contains the tag).
+create table if not exists public.hashtags (
+  id         uuid primary key default gen_random_uuid(),
+  tag        text not null unique check (tag ~ '^[a-z0-9_äöüß]{1,50}$'),
+  use_count  integer not null default 0 check (use_count >= 0),
+  created_at timestamptz not null default now()
+);
+create index if not exists hashtags_use_count_idx on public.hashtags (use_count desc);
+
+-- Which content uses which tag. source_id points at posts / comments / stories by `source`.
+create table if not exists public.content_hashtags (
+  hashtag_id uuid not null references public.hashtags (id) on delete cascade,
+  source     text not null check (source in ('post', 'comment', 'story')),
+  source_id  uuid not null,
+  user_id    uuid not null references public.profiles (id) on delete cascade,
+  created_at timestamptz not null default now(),
+  primary key (source, source_id, hashtag_id)
+);
+create index if not exists content_hashtags_tag_idx on public.content_hashtags (hashtag_id, source, created_at desc);
 
 -- In-app notifications that need their own row (tags, workout links, follow requests).
 -- Written only by triggers / security definer functions; recipients read and mark them read.
@@ -948,6 +984,22 @@ begin
   if t_actor is null or t_target is null or t_actor = t_target then
     return;
   end if;
+  -- Same tag again (e.g. tagged on the photo AND @mentioned in the caption, or a caption
+  -- edited later): no second notification or chat card.
+  if exists (
+    select 1 from public.notifications n
+    where n.type = 'tag' and n.user_id = t_target and n.actor_id = t_actor
+      and n.post_id is not distinct from t_post and n.story_id is not distinct from t_story
+      and n.comment_id is not distinct from t_comment
+  ) or exists (
+    select 1 from public.messages m
+    join public.conversation_members cm on cm.conversation_id = m.conversation_id and cm.user_id = t_target
+    where m.kind = 'tag' and m.sender_id = t_actor
+      and m.post_id is not distinct from t_post and m.story_id is not distinct from t_story
+      and m.comment_id is not distinct from t_comment
+  ) then
+    return;
+  end if;
   select p.tag_notifications, p.tag_chat_messages into wants_notification, wants_chat
   from public.profiles p where p.id = t_target;
   if not found then
@@ -993,6 +1045,7 @@ begin
   foreach mentioned in array new.mentioned_user_ids loop
     perform public.handle_tag(new.user_id, mentioned, null, new.id, null);
   end loop;
+  perform public.sync_hashtags('story', new.id, new.user_id, new.overlay_text);
   return null;
 end;
 $$;
@@ -1006,6 +1059,7 @@ declare
   mentioned uuid;
   post_public boolean;
 begin
+  perform public.sync_hashtags('comment', new.id, new.user_id, new.body);
   select public.is_public_content(p.user_id, 'posts') into post_public
   from public.posts p where p.id = new.post_id;
   for mentioned in
@@ -1019,6 +1073,121 @@ begin
       perform public.handle_tag(new.user_id, mentioned, new.post_id, null, new.id);
     end if;
   end loop;
+  return null;
+end;
+$$;
+
+-- ---------------------------------------------------------------- hashtags
+-- #tags in a text, lowercased; letters (incl. äöüß), digits, _; same rule as lib/taggedText.ts.
+create or replace function public.extract_hashtags(content text)
+returns text[]
+language sql immutable set search_path = ''
+as $$
+  select coalesce(array_agg(distinct lower(m[1])), '{}')
+  from regexp_matches(
+    coalesce(content, ''), '(?:^|[^a-zA-Z0-9_.@#äöüßÄÖÜ])#([a-zA-Z0-9_äöüßÄÖÜ]{1,50})', 'g'
+  ) as m;
+$$;
+
+-- Text of a post that can contain hashtags: caption plus texts drawn on its photos. Internal.
+create or replace function public.post_tag_text(post uuid)
+returns text
+language sql stable security definer set search_path = ''
+as $$
+  select coalesce(p.caption, '') || ' ' || coalesce((
+    select string_agg(item ->> 'text', ' ')
+    from public.post_media m
+    cross join lateral jsonb_array_elements(
+      case when jsonb_typeof(m.edits -> 'items') = 'array' then m.edits -> 'items' else '[]'::jsonb end
+    ) as item
+    where m.post_id = p.id and item ->> 'kind' = 'text'
+  ), '')
+  from public.posts p
+  where p.id = post;
+$$;
+
+-- Makes the content's hashtag links match its text; counters follow via triggers. Internal.
+create or replace function public.sync_hashtags(h_source text, h_source_id uuid, h_user uuid, h_text text)
+returns void
+language plpgsql security definer set search_path = ''
+as $$
+declare
+  tags text[] := public.extract_hashtags(h_text);
+begin
+  delete from public.content_hashtags ch
+  using public.hashtags h
+  where ch.source = h_source and ch.source_id = h_source_id and h.id = ch.hashtag_id
+    and not (h.tag = any (tags));
+  if h_user is null or cardinality(tags) = 0 then
+    return;
+  end if;
+  insert into public.hashtags (tag) select unnest(tags) on conflict (tag) do nothing;
+  insert into public.content_hashtags (hashtag_id, source, source_id, user_id)
+  select h.id, h_source, h_source_id, h_user from public.hashtags h where h.tag = any (tags)
+  on conflict do nothing;
+end;
+$$;
+
+create or replace function public.on_content_hashtag_change()
+returns trigger
+language plpgsql security definer set search_path = ''
+as $$
+begin
+  if tg_op = 'INSERT' then
+    update public.hashtags set use_count = use_count + 1 where id = new.hashtag_id;
+  else
+    update public.hashtags set use_count = greatest(use_count - 1, 0) where id = old.hashtag_id;
+  end if;
+  return null;
+end;
+$$;
+
+create or replace function public.on_post_text_change()
+returns trigger
+language plpgsql security definer set search_path = ''
+as $$
+declare
+  mentioned uuid;
+  post_public boolean := public.is_public_content(new.user_id, 'posts');
+begin
+  perform public.sync_hashtags('post', new.id, new.user_id, public.post_tag_text(new.id));
+  -- @mentions in the caption notify like tags (once; handle_tag skips repeats).
+  for mentioned in
+    select distinct pr.id
+    from regexp_matches(coalesce(new.caption, ''), '@([a-z0-9_.]{3,20})', 'gi') as m(parts)
+    join public.profiles pr on pr.username = lower(rtrim(m.parts[1], '.'))
+    limit 10
+  loop
+    if public.tag_allowed(new.user_id, mentioned, post_public) and public.user_can_see_post(mentioned, new.id) then
+      perform public.handle_tag(new.user_id, mentioned, new.id, null, null);
+    end if;
+  end loop;
+  return null;
+end;
+$$;
+
+-- Texts on photos are part of the post's hashtags too.
+create or replace function public.on_post_media_change()
+returns trigger
+language plpgsql security definer set search_path = ''
+as $$
+declare
+  changed_post uuid := coalesce(new.post_id, old.post_id);
+begin
+  perform public.sync_hashtags(
+    'post', changed_post, (select p.user_id from public.posts p where p.id = changed_post),
+    public.post_tag_text(changed_post)
+  );
+  return null;
+end;
+$$;
+
+create or replace function public.on_tagged_content_deleted()
+returns trigger
+language plpgsql security definer set search_path = ''
+as $$
+begin
+  delete from public.content_hashtags where source = tg_argv[0] and source_id = old.id;
   return null;
 end;
 $$;
@@ -1206,6 +1375,36 @@ create trigger stories_created
   after insert on public.stories
   for each row execute function public.on_story_created();
 
+drop trigger if exists posts_text_changed on public.posts;
+create trigger posts_text_changed
+  after insert or update of caption on public.posts
+  for each row execute function public.on_post_text_change();
+
+drop trigger if exists post_media_changed on public.post_media;
+create trigger post_media_changed
+  after insert or update or delete on public.post_media
+  for each row execute function public.on_post_media_change();
+
+drop trigger if exists posts_deleted_hashtags on public.posts;
+create trigger posts_deleted_hashtags
+  after delete on public.posts
+  for each row execute function public.on_tagged_content_deleted('post');
+
+drop trigger if exists comments_deleted_hashtags on public.comments;
+create trigger comments_deleted_hashtags
+  after delete on public.comments
+  for each row execute function public.on_tagged_content_deleted('comment');
+
+drop trigger if exists stories_deleted_hashtags on public.stories;
+create trigger stories_deleted_hashtags
+  after delete on public.stories
+  for each row execute function public.on_tagged_content_deleted('story');
+
+drop trigger if exists content_hashtags_count on public.content_hashtags;
+create trigger content_hashtags_count
+  after insert or delete on public.content_hashtags
+  for each row execute function public.on_content_hashtag_change();
+
 drop trigger if exists comments_created on public.comments;
 create trigger comments_created
   after insert on public.comments
@@ -1276,6 +1475,8 @@ revoke all on function public.direct_conversation_between(uuid, uuid) from publi
 revoke all on function public.create_notification(uuid, uuid, text, uuid, uuid, uuid, uuid)
   from public, anon, authenticated;
 revoke all on function public.handle_tag(uuid, uuid, uuid, uuid, uuid) from public, anon, authenticated;
+revoke all on function public.post_tag_text(uuid) from public, anon, authenticated;
+revoke all on function public.sync_hashtags(text, uuid, uuid, text) from public, anon, authenticated;
 -- Used by policies and the app; signed-in users only.
 revoke all on function public.can_tag(uuid, text) from public, anon;
 grant execute on function public.can_tag(uuid, text) to authenticated;
@@ -1304,6 +1505,9 @@ grant select, insert, update, delete on
   public.conversations, public.conversation_members, public.messages, public.message_reactions,
   public.workout_shares, public.post_reposts
 to authenticated;
+-- Hashtags: read only; rows and counters are maintained by triggers.
+revoke all on public.hashtags, public.content_hashtags from anon, authenticated;
+grant select on public.hashtags, public.content_hashtags to authenticated;
 -- Notifications: read and mark as read only; inserts come from security definer functions.
 revoke all on public.notifications from anon, authenticated;
 grant select, update on public.notifications to authenticated;
@@ -1334,6 +1538,8 @@ alter table public.message_reactions    enable row level security;
 alter table public.workout_shares       enable row level security;
 alter table public.post_reposts         enable row level security;
 alter table public.notifications        enable row level security;
+alter table public.hashtags             enable row level security;
+alter table public.content_hashtags     enable row level security;
 
 -- profiles: everyone signed in can read, only you can change your own row.
 -- Rows are created by the handle_new_user trigger.
@@ -1780,6 +1986,21 @@ create policy "post_reposts: reposter edits caption" on public.post_reposts
 drop policy if exists "post_reposts: reposter deletes" on public.post_reposts;
 create policy "post_reposts: reposter deletes" on public.post_reposts
   for delete to authenticated using (reposter_id = (select auth.uid()));
+
+-- hashtags: names and counts for every signed-in user.
+drop policy if exists "hashtags: read" on public.hashtags;
+create policy "hashtags: read" on public.hashtags
+  for select to authenticated using (true);
+
+-- content_hashtags: which content uses a tag, only as far as that content is readable.
+drop policy if exists "content_hashtags: read with content" on public.content_hashtags;
+create policy "content_hashtags: read with content" on public.content_hashtags
+  for select to authenticated
+  using (
+    (source = 'post' and public.can_view_post(source_id))
+    or (source = 'comment' and public.can_view_comment(source_id))
+    or (source = 'story' and public.can_view_story(source_id))
+  );
 
 -- notifications: only the recipient, only reading and marking as read.
 drop policy if exists "notifications: recipient reads" on public.notifications;

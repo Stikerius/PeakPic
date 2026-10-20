@@ -7,13 +7,13 @@ import {
   ScrollView,
   StyleSheet,
   Text,
-  TextInput,
   View,
 } from "react-native";
 
 import { Avatar } from "@/components/avatar";
 import { Button } from "@/components/button";
 import { PhotoCarousel } from "@/components/feed/photo-carousel";
+import { TaggedTextInput } from "@/components/tagged-text-input";
 import { colors, fontSize, radius, spacing } from "@/constants/theme";
 import { describeError } from "@/lib/errors";
 import { emitAppEvent } from "@/lib/events";
@@ -78,9 +78,10 @@ export default function RepostScreen() {
           </View>
           <PhotoCarousel photoUrls={post.photoUrls} label={`Workout von ${post.author.username}`} />
         </View>
-        <TextInput
+        <TaggedTextInput
           value={caption}
           onChangeText={setCaption}
+          suggestionsPlacement="below"
           placeholder="Eigene Beschriftung (optional)"
           placeholderTextColor={colors.textMuted}
           maxLength={REPOST_CAPTION_MAX_LENGTH}
