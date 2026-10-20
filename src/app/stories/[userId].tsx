@@ -2,7 +2,7 @@ import Ionicons from "@expo/vector-icons/Ionicons";
 import { Image } from "expo-image";
 import { router, useLocalSearchParams } from "expo-router";
 import { StatusBar } from "expo-status-bar";
-import { useEffect, useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { Alert, Pressable, StyleSheet, Text, View, useWindowDimensions } from "react-native";
 import { Gesture, GestureDetector } from "react-native-gesture-handler";
 import Animated, {
@@ -34,6 +34,9 @@ const PAGE_VELOCITY = 800;
 const PAGE_DURATION_MS = 250;
 /** Resistance when dragging back past the first person. */
 const EDGE_RESISTANCE = 0.25;
+/** Upward drag (px) or velocity (px/s) that opens viewers and likes of my own story. */
+const ACTIVITY_DISTANCE = 60;
+const ACTIVITY_VELOCITY = 500;
 
 /** Where a person's stories start: the first unseen one, or the beginning if all are seen. */
 function entryIndex(group: StoryGroup | undefined): number {
@@ -123,7 +126,11 @@ export default function StoryViewerScreen() {
   const [moving, setMoving] = useState(false);
   const progress = useSharedValue(0);
   const pageX = useSharedValue(-groupIndex * width);
+  // Person the current sideways drag started on (rounded, also if it started mid-slide).
+  const dragStartIndex = useSharedValue(0);
   const dragStartX = useSharedValue(0);
+  // Person whose stories are shown; a ref so late animation callbacks can compare against it.
+  const currentGroup = useRef(groupIndex);
   const openProfile = useOpenProfile();
   const [activity, setActivity] = useState<StoryActivity | null>(null);
   const [activityOpen, setActivityOpen] = useState(false);
@@ -141,10 +148,12 @@ export default function StoryViewerScreen() {
     openProfile(userId);
   }
 
-  /** Called once the row has slid to `target`. Past the last person the viewer closes. */
+  /** Called once the row has settled on `target`. Past the last person the viewer closes. */
   function commitGroup(target: number) {
     setMoving(false);
+    if (target === currentGroup.current) return;
     if (target < 0 || target >= groups.length) return close();
+    currentGroup.current = target;
     setGroupIndex(target);
     setStoryIndex(entryIndex(groups[target]));
   }
@@ -225,7 +234,8 @@ export default function StoryViewerScreen() {
   const tap = Gesture.Tap()
     .runOnJS(true)
     .onEnd((event, success) => {
-      if (!success) return;
+      // Ignore taps while a person switch is still sliding.
+      if (!success || moving) return;
       if (event.x < width / 3) goPrev();
       else goNext();
     });
@@ -242,34 +252,51 @@ export default function StoryViewerScreen() {
     onDragCancel: () => setMoving(false),
   });
 
-  const hasPrevGroup = groupIndex > 0;
+  // Positions come from pageX itself, not from groupIndex: a new swipe can start while the
+  // previous slide is still running, before React has switched to the next person.
   const swipeSideways = Gesture.Pan()
     .activeOffsetX([-10, 10])
     .failOffsetY([-20, 20])
     .onStart(() => {
       dragStartX.value = pageX.value;
+      dragStartIndex.value = Math.round(-pageX.value / width);
       scheduleOnRN(setMoving, true);
     })
     .onUpdate((event) => {
       const dx = event.translationX;
-      pageX.value = dragStartX.value + (dx > 0 && !hasPrevGroup ? dx * EDGE_RESISTANCE : dx);
+      const atFirst = dragStartIndex.value <= 0;
+      pageX.value = dragStartX.value + (dx > 0 && atFirst ? dx * EDGE_RESISTANCE : dx);
     })
     .onEnd((event) => {
+      const base = dragStartIndex.value;
       const forward = event.translationX < -width * PAGE_DISTANCE || event.velocityX < -PAGE_VELOCITY;
       const back = event.translationX > width * PAGE_DISTANCE || event.velocityX > PAGE_VELOCITY;
       // Forward past the last person slides out and closes (commitGroup handles that).
-      const target = forward ? groupIndex + 1 : back && hasPrevGroup ? groupIndex - 1 : groupIndex;
-      if (target === groupIndex) {
-        pageX.value = withSpring(dragStartX.value);
-        scheduleOnRN(setMoving, false);
-        return;
+      const target = forward ? base + 1 : back && base > 0 ? base - 1 : base;
+      // Always settle on a whole page, never on the position where the drag started.
+      if (target === base) {
+        pageX.value = withSpring(-base * width, undefined, (finished) => {
+          if (finished) scheduleOnRN(commitGroup, target);
+        });
+      } else {
+        pageX.value = withTiming(-target * width, { duration: PAGE_DURATION_MS }, (finished) => {
+          if (finished) scheduleOnRN(commitGroup, target);
+        });
       }
-      pageX.value = withTiming(-target * width, { duration: PAGE_DURATION_MS }, (finished) => {
-        if (finished) scheduleOnRN(commitGroup, target);
-      });
     });
 
-  const gestures = Gesture.Race(swipeDown.gesture, swipeSideways, holdToPause, tap);
+  // Own story: swipe up for viewers and likes.
+  const isMine = group?.isMine === true;
+  const swipeUp = Gesture.Pan()
+    .enabled(isMine)
+    .activeOffsetY(-10)
+    .failOffsetX([-20, 20])
+    .runOnJS(true)
+    .onEnd((event) => {
+      if (event.translationY < -ACTIVITY_DISTANCE || event.velocityY < -ACTIVITY_VELOCITY) setActivityOpen(true);
+    });
+
+  const gestures = Gesture.Race(swipeDown.gesture, swipeUp, swipeSideways, holdToPause, tap);
 
   if (group === undefined || story === undefined) return <View style={styles.screen} />;
 
@@ -369,6 +396,7 @@ export default function StoryViewerScreen() {
                   accessibilityLabel={`${activity?.viewCount ?? 0} Aufrufe, ${activity?.likeCount ?? 0} Likes`}
                   style={styles.activityPill}
                 >
+                  <Ionicons name="chevron-up" size={14} color={colors.text} />
                   <Ionicons name="eye-outline" size={16} color={colors.text} />
                   <Text style={styles.activityText}>{activity?.viewCount ?? "–"}</Text>
                   <Ionicons name="heart" size={16} color={colors.danger} />
