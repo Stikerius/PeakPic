@@ -1,16 +1,21 @@
 import { describe, expect, it } from "@jest/globals";
 
-import { QUICK_REACTIONS, isSingleEmoji } from "@/lib/emoji";
+import { EMOJI_SECTIONS, QUICK_REACTIONS } from "@/lib/emoji";
 
-describe("isSingleEmoji", () => {
-  it.each([...QUICK_REACTIONS, "😀", "🏋️‍♀️", "👍🏽", "👨‍👩‍👧", "🇨🇭", "1️⃣", "❤️‍🔥", "🏳️‍🌈", "©️", " 🎉 "])(
-    "accepts %s",
-    (emoji) => {
-      expect(isSingleEmoji(emoji)).toBe(true);
-    },
-  );
+describe("emoji picker data", () => {
+  const all = EMOJI_SECTIONS.flatMap((s) => s.emojis);
 
-  it.each(["", "a", "ab", "😀😀", "😀a", "🇨", "🇨🇭🇩🇪", "1", "👍‍", "hi 👋", "‍😀"])("rejects %j", (text) => {
-    expect(isSingleEmoji(text)).toBe(false);
+  it("has no empty entries", () => {
+    expect(all.every((emoji) => emoji.trim().length > 0)).toBe(true);
+  });
+
+  it("has no duplicates within a section", () => {
+    for (const section of EMOJI_SECTIONS) {
+      expect(new Set(section.emojis).size).toBe(section.emojis.length);
+    }
+  });
+
+  it("fits the database limit of 32 characters per emoji", () => {
+    expect([...all, ...QUICK_REACTIONS].every((emoji) => emoji.length <= 32)).toBe(true);
   });
 });

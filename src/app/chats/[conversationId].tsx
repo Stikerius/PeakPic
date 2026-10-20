@@ -5,6 +5,7 @@ import { useEffect, useRef, useState } from "react";
 import {
   ActivityIndicator,
   FlatList,
+  Keyboard,
   KeyboardAvoidingView,
   Platform,
   Pressable,
@@ -35,6 +36,7 @@ import {
   subscribeToMessages,
 } from "@/lib/chatRepo";
 import { emitAppEvent } from "@/lib/events";
+import { getMyProfile } from "@/lib/profileRepo";
 import { useSession } from "@/lib/session";
 import type { ChatMessage } from "@/types/chat";
 import type { PublicProfile } from "@/types/social";
@@ -72,6 +74,7 @@ export default function ChatScreen() {
   const inputRef = useRef<TextInput>(null);
 
   const [partner, setPartner] = useState<PublicProfile | null>(null);
+  const [myUsername, setMyUsername] = useState<string | null>(null);
   // Newest first, for the inverted list.
   const [messages, setMessages] = useState<ChatMessage[] | null>(null);
   const [hasMore, setHasMore] = useState(false);
@@ -105,6 +108,11 @@ export default function ChatScreen() {
     getConversationPartner(conversationId)
       .then((result) => {
         if (active) setPartner(result);
+      })
+      .catch(() => undefined);
+    getMyProfile()
+      .then((profile) => {
+        if (active) setMyUsername(profile.username);
       })
       .catch(() => undefined);
     fetchMessages(conversationId, null)
@@ -200,6 +208,15 @@ export default function ChatScreen() {
     void jumpTo(target.id);
     // With several pinned messages, each tap moves on to the next (older) one.
     setPinnedIndex((index) => (index + 1) % pinned.length);
+  }
+
+  function openReactions(message: ChatMessage, pageY: number) {
+    if (message.pending) return;
+    // Closing the keyboard moves the chat down by its height: place the bar where the
+    // message ends up, not where it was when the finger went down.
+    const keyboardHeight = Keyboard.isVisible() ? (Keyboard.metrics()?.height ?? 0) : 0;
+    Keyboard.dismiss();
+    setPicker({ message, y: pageY + keyboardHeight });
   }
 
   function startReply(message: ChatMessage) {
@@ -339,9 +356,7 @@ export default function ChatScreen() {
                 pinned={item.pinnedAt !== null}
                 onReply={() => startReply(item)}
                 onTogglePin={() => void togglePin(item)}
-                onLongPress={(y) => {
-                  if (!item.pending) setPicker({ message: item, y });
-                }}
+                onLongPress={(y) => openReactions(item, y)}
               >
                 <MessageBubble
                   message={item}
@@ -379,7 +394,7 @@ export default function ChatScreen() {
             <View style={styles.replyAccent} />
             <View style={styles.replyTextBox}>
               <Text style={styles.replyLabel}>
-                Antwort an {replyTo.senderId === myId ? "dich selbst" : `@${partnerName}`}
+                Antwort an @{replyTo.senderId === myId ? (myUsername ?? "") : partnerName}
               </Text>
               <Text style={styles.replyText} numberOfLines={1}>
                 {messagePreview(replyTo)}

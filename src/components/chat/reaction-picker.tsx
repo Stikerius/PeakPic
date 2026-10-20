@@ -1,94 +1,99 @@
 import Ionicons from "@expo/vector-icons/Ionicons";
 import { useEffect, useState } from "react";
-import { Modal, Pressable, StyleSheet, Text, TextInput, View, useWindowDimensions } from "react-native";
+import { Modal, Pressable, ScrollView, StyleSheet, Text, View, useWindowDimensions } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { colors, fontSize, radius, spacing } from "@/constants/theme";
-import { QUICK_REACTIONS, isSingleEmoji } from "@/lib/emoji";
+import { EMOJI_SECTIONS, QUICK_REACTIONS } from "@/lib/emoji";
 
 const BAR_HEIGHT = 56;
+const EMOJI_CELL = 44;
 
 type ReactionPickerProps = {
   /** Finger position of the long press; null hides the picker. */
   anchorY: number | null;
-  /** My current reaction on the message, highlighted in the bar. */
+  /** My current reaction on the message, highlighted. */
   current: string | null;
   onPick: (emoji: string) => void;
   onClose: () => void;
 };
 
-/** Bar with quick reactions and "…" for any single emoji, shown above the pressed message. */
+function EmojiButton({ emoji, selected, onPick }: { emoji: string; selected: boolean; onPick: (emoji: string) => void }) {
+  return (
+    <Pressable
+      onPress={() => onPick(emoji)}
+      accessibilityRole="button"
+      accessibilityLabel={`Mit ${emoji} reagieren`}
+      accessibilityState={{ selected }}
+      style={[styles.emojiButton, selected && styles.emojiSelected]}
+    >
+      <Text style={styles.emoji}>{emoji}</Text>
+    </Pressable>
+  );
+}
+
+/**
+ * Bar with quick reactions above the pressed message; "…" opens a grid with more emojis.
+ * Tapping any emoji reacts right away.
+ */
 export function ReactionPicker({ anchorY, current, onPick, onClose }: ReactionPickerProps) {
   const insets = useSafeAreaInsets();
   const { height } = useWindowDimensions();
-  const [custom, setCustom] = useState<string | null>(null);
-  const [error, setError] = useState(false);
+  const [showAll, setShowAll] = useState(false);
 
   useEffect(() => {
-    if (anchorY === null) {
-      setCustom(null);
-      setError(false);
-    }
+    if (anchorY === null) setShowAll(false);
   }, [anchorY]);
-
-  function changeCustom(text: string) {
-    setCustom(text);
-    if (isSingleEmoji(text)) {
-      onPick(text.trim());
-    } else {
-      setError(text.trim().length > 0);
-    }
-  }
 
   const top =
     anchorY === null
       ? 0
-      : Math.min(Math.max(anchorY - BAR_HEIGHT - spacing.lg, insets.top + spacing.sm), height / 2);
+      : Math.min(
+          Math.max(anchorY - BAR_HEIGHT - spacing.lg, insets.top + spacing.sm),
+          height - insets.bottom - BAR_HEIGHT - spacing.xl,
+        );
 
   return (
     <Modal visible={anchorY !== null} transparent animationType="fade" onRequestClose={onClose}>
       <Pressable style={styles.backdrop} onPress={onClose} accessibilityLabel="Reaktion abbrechen" />
-      <View style={[styles.panel, { top }]} pointerEvents="box-none">
-        {custom === null ? (
+      {showAll ? (
+        <View style={[styles.sheet, { height: height * 0.5, paddingBottom: insets.bottom }]}>
+          <View style={styles.sheetHeader}>
+            <Text style={styles.sheetTitle}>Reaktion wählen</Text>
+            <Pressable onPress={onClose} accessibilityRole="button" accessibilityLabel="Schliessen" hitSlop={spacing.sm}>
+              <Ionicons name="close" size={22} color={colors.text} />
+            </Pressable>
+          </View>
+          <ScrollView contentContainerStyle={styles.sheetContent}>
+            {EMOJI_SECTIONS.map((section) => (
+              <View key={section.title} style={styles.section}>
+                <Text style={styles.sectionTitle}>{section.title}</Text>
+                <View style={styles.grid}>
+                  {section.emojis.map((emoji) => (
+                    <EmojiButton key={emoji} emoji={emoji} selected={current === emoji} onPick={onPick} />
+                  ))}
+                </View>
+              </View>
+            ))}
+          </ScrollView>
+        </View>
+      ) : (
+        <View style={[styles.panel, { top }]} pointerEvents="box-none">
           <View style={styles.bar}>
             {QUICK_REACTIONS.map((emoji) => (
-              <Pressable
-                key={emoji}
-                onPress={() => onPick(emoji)}
-                accessibilityRole="button"
-                accessibilityLabel={`Mit ${emoji} reagieren`}
-                accessibilityState={{ selected: current === emoji }}
-                style={[styles.emojiButton, current === emoji && styles.emojiSelected]}
-              >
-                <Text style={styles.emoji}>{emoji}</Text>
-              </Pressable>
+              <EmojiButton key={emoji} emoji={emoji} selected={current === emoji} onPick={onPick} />
             ))}
             <Pressable
-              onPress={() => setCustom("")}
+              onPress={() => setShowAll(true)}
               accessibilityRole="button"
-              accessibilityLabel="Anderes Emoji wählen"
+              accessibilityLabel="Weitere Emojis"
               style={styles.emojiButton}
             >
               <Ionicons name="ellipsis-horizontal" size={22} color={colors.text} />
             </Pressable>
           </View>
-        ) : (
-          <View style={styles.customBox}>
-            <TextInput
-              value={custom}
-              onChangeText={changeCustom}
-              autoFocus
-              placeholder="Ein Emoji eingeben"
-              placeholderTextColor={colors.textMuted}
-              style={styles.customInput}
-              accessibilityLabel="Eigenes Emoji"
-            />
-            <Text style={[styles.customHint, error && styles.customError]}>
-              {error ? "Bitte genau ein Emoji eingeben." : "Tipp: Emoji-Tastatur über 🌐 bzw. 😀 öffnen."}
-            </Text>
-          </View>
-        )}
-      </View>
+        </View>
+      )}
     </Modal>
   );
 }
@@ -120,8 +125,8 @@ const styles = StyleSheet.create({
     borderColor: colors.border,
   },
   emojiButton: {
-    width: 42,
-    height: 42,
+    width: EMOJI_CELL,
+    height: EMOJI_CELL,
     borderRadius: radius.full,
     alignItems: "center",
     justifyContent: "center",
@@ -132,30 +137,44 @@ const styles = StyleSheet.create({
   emoji: {
     fontSize: 26,
   },
-  customBox: {
-    width: "100%",
-    gap: spacing.xs,
-    padding: spacing.md,
-    borderRadius: radius.lg,
-    backgroundColor: colors.surfaceElevated,
-    borderWidth: 1,
-    borderColor: colors.border,
-  },
-  customInput: {
-    minHeight: 48,
-    paddingHorizontal: spacing.md,
-    borderRadius: radius.md,
+  sheet: {
+    position: "absolute",
+    left: 0,
+    right: 0,
+    bottom: 0,
+    borderTopLeftRadius: radius.lg,
+    borderTopRightRadius: radius.lg,
     backgroundColor: colors.surface,
-    color: colors.text,
-    fontSize: 28,
-    textAlign: "center",
   },
-  customHint: {
+  sheetHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.md,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: colors.border,
+  },
+  sheetTitle: {
+    color: colors.text,
+    fontSize: fontSize.md,
+    fontWeight: "700",
+  },
+  sheetContent: {
+    padding: spacing.sm,
+    gap: spacing.md,
+  },
+  section: {
+    gap: spacing.xs,
+  },
+  sectionTitle: {
     color: colors.textMuted,
     fontSize: fontSize.sm,
-    textAlign: "center",
+    fontWeight: "700",
+    paddingHorizontal: spacing.xs,
   },
-  customError: {
-    color: colors.danger,
+  grid: {
+    flexDirection: "row",
+    flexWrap: "wrap",
   },
 });
