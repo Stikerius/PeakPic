@@ -353,6 +353,7 @@ export default function ChatScreen() {
             keyboardShouldPersistTaps="handled"
             renderItem={({ item }) => (
               <SwipeableMessage
+                mine={item.senderId === myId}
                 pinned={item.pinnedAt !== null}
                 onReply={() => startReply(item)}
                 onTogglePin={() => void togglePin(item)}

@@ -13,10 +13,12 @@ const MAX_DRAG = 90;
 const ICON_SIZE = 32;
 
 type SwipeableMessageProps = {
+  /** My own message (right-aligned): the swipe directions are mirrored. */
+  mine: boolean;
   pinned: boolean;
-  /** Swipe right. */
+  /** Swipe towards the middle of the screen. */
   onReply: () => void;
-  /** Swipe left. */
+  /** Swipe towards the screen edge. */
   onTogglePin: () => void;
   /** Long press; `pageY` is where the finger is, for placing the reaction bar. */
   onLongPress: (pageY: number) => void;
@@ -24,10 +26,12 @@ type SwipeableMessageProps = {
 };
 
 /**
- * A chat message that follows the finger sideways: right to reply, left to pin or unpin.
- * Vertical movement fails the pan quickly so the list keeps scrolling normally.
+ * A chat message that follows the finger sideways: towards the middle of the screen to
+ * reply, towards the edge to pin or unpin. Others' messages: right = reply, left = pin;
+ * my own messages are mirrored. Vertical movement fails the pan quickly so the list
+ * keeps scrolling normally.
  */
-export function SwipeableMessage({ pinned, onReply, onTogglePin, onLongPress, children }: SwipeableMessageProps) {
+export function SwipeableMessage({ mine, pinned, onReply, onTogglePin, onLongPress, children }: SwipeableMessageProps) {
   const translateX = useSharedValue(0);
 
   const pan = Gesture.Pan()
@@ -38,8 +42,10 @@ export function SwipeableMessage({ pinned, onReply, onTogglePin, onLongPress, ch
       translateX.value = Math.sign(x) * Math.min(Math.abs(x), MAX_DRAG);
     })
     .onEnd(() => {
-      if (translateX.value >= TRIGGER) scheduleOnRN(onReply);
-      else if (translateX.value <= -TRIGGER) scheduleOnRN(onTogglePin);
+      const onRight = mine ? onTogglePin : onReply;
+      const onLeft = mine ? onReply : onTogglePin;
+      if (translateX.value >= TRIGGER) scheduleOnRN(onRight);
+      else if (translateX.value <= -TRIGGER) scheduleOnRN(onLeft);
       translateX.value = withSpring(0);
     });
 
@@ -49,23 +55,27 @@ export function SwipeableMessage({ pinned, onReply, onTogglePin, onLongPress, ch
     .onStart((event) => onLongPress(event.absoluteY));
 
   const contentStyle = useAnimatedStyle(() => ({ transform: [{ translateX: translateX.value }] }));
-  const replyIconStyle = useAnimatedStyle(() => ({
+  // The left icon shows while dragging right, the right icon while dragging left.
+  const leftIconStyle = useAnimatedStyle(() => ({
     opacity: interpolate(translateX.value, [10, TRIGGER], [0, 1], "clamp"),
     transform: [{ scale: interpolate(translateX.value, [10, TRIGGER], [0.6, 1], "clamp") }],
   }));
-  const pinIconStyle = useAnimatedStyle(() => ({
+  const rightIconStyle = useAnimatedStyle(() => ({
     opacity: interpolate(-translateX.value, [10, TRIGGER], [0, 1], "clamp"),
     transform: [{ scale: interpolate(-translateX.value, [10, TRIGGER], [0.6, 1], "clamp") }],
   }));
 
+  const replyIcon = <Ionicons name="arrow-undo" size={18} color={colors.text} />;
+  const pinIcon = <Ionicons name={pinned ? "pin-outline" : "pin"} size={18} color={colors.text} />;
+
   return (
     <GestureDetector gesture={Gesture.Race(pan, longPress)}>
       <View collapsable={false}>
-        <Animated.View style={[styles.icon, styles.iconLeft, replyIconStyle]} pointerEvents="none">
-          <Ionicons name="arrow-undo" size={18} color={colors.text} />
+        <Animated.View style={[styles.icon, styles.iconLeft, leftIconStyle]} pointerEvents="none">
+          {mine ? pinIcon : replyIcon}
         </Animated.View>
-        <Animated.View style={[styles.icon, styles.iconRight, pinIconStyle]} pointerEvents="none">
-          <Ionicons name={pinned ? "pin-outline" : "pin"} size={18} color={colors.text} />
+        <Animated.View style={[styles.icon, styles.iconRight, rightIconStyle]} pointerEvents="none">
+          {mine ? replyIcon : pinIcon}
         </Animated.View>
         <Animated.View style={contentStyle}>{children}</Animated.View>
       </View>
