@@ -847,9 +847,15 @@ create policy "story_views: record own view" on public.story_views
   with check (user_id = (select auth.uid()) and public.can_view_story(story_id));
 
 -- highlights: owner manages them; owner and followers read them.
+-- Same rule as can_view_highlight, but on the row's own columns: inside
+-- INSERT ... RETURNING a lookup of the new row by id can't see it yet.
 drop policy if exists "highlights: read" on public.highlights;
 create policy "highlights: read" on public.highlights
-  for select to authenticated using (public.can_view_highlight(id));
+  for select to authenticated
+  using (
+    user_id = (select auth.uid())
+    or (public.is_following(user_id) and not public.is_hidden_from_me(user_id, 'stories'))
+  );
 
 drop policy if exists "highlights: create own" on public.highlights;
 create policy "highlights: create own" on public.highlights
