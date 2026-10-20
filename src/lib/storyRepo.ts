@@ -2,13 +2,13 @@ import { getSignedPhotoUrls, removePhotos, uploadPhoto } from "@/lib/photoUpload
 import { PROFILE_COLUMNS, toPublicProfiles } from "@/lib/profiles";
 import { requireUserId } from "@/lib/session";
 import { getFollowingIds } from "@/lib/socialRepo";
+import { sortStoryGroups } from "@/lib/storyOrder";
 import { supabase } from "@/lib/supabase";
 import type { PublicProfile, Story, StoryGroup } from "@/types/social";
 
 /**
  * Active stories (not expired) of people I follow, my own, and stories I'm tagged in,
- * grouped by author.
- * Order: my group first, then groups with unseen stories (newest first), then seen ones.
+ * grouped by author, in story bar order (see sortStoryGroups).
  */
 export async function fetchStoryGroups(): Promise<StoryGroup[]> {
   const userId = await requireUserId();
@@ -76,12 +76,7 @@ export async function fetchStoryGroups(): Promise<StoryGroup[]> {
     }
   }
 
-  const latest = (g: StoryGroup) => g.stories[g.stories.length - 1]?.createdAt ?? "";
-  return [...groups.values()].sort((a, b) => {
-    if (a.isMine !== b.isMine) return a.isMine ? -1 : 1;
-    if (a.hasUnseen !== b.hasUnseen) return a.hasUnseen ? -1 : 1;
-    return latest(b).localeCompare(latest(a));
-  });
+  return sortStoryGroups([...groups.values()]);
 }
 
 export async function addStory(sourceUri: string, mentionedUserIds: string[]): Promise<void> {

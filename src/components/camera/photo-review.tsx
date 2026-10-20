@@ -10,27 +10,17 @@ import {
   Text,
   TextInput,
   View,
-  useWindowDimensions,
 } from "react-native";
 import { Gesture, GestureDetector } from "react-native-gesture-handler";
-import Animated, {
-  interpolate,
-  useAnimatedStyle,
-  useSharedValue,
-  withSpring,
-  withTiming,
-} from "react-native-reanimated";
+import Animated from "react-native-reanimated";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { scheduleOnRN } from "react-native-worklets";
 
 import { Button } from "@/components/button";
 import { colors, fontSize, radius, spacing } from "@/constants/theme";
+import { useSwipeToDismiss } from "@/hooks/use-swipe-to-dismiss";
 import type { CapturedPhoto } from "@/types/photo";
 
 const CAPTION_MAX_LENGTH = 200;
-/** Drag distance (px) or downward velocity (px/s) that dismisses the review. */
-const DISMISS_DISTANCE = 120;
-const DISMISS_VELOCITY = 1000;
 
 type PhotoReviewProps = {
   photo: CapturedPhoto;
@@ -51,40 +41,17 @@ export function PhotoReview({
   const [caption, setCaption] = useState("");
   const [fullscreen, setFullscreen] = useState(false);
   const insets = useSafeAreaInsets();
-  const { height: screenHeight } = useWindowDimensions();
-  const translateY = useSharedValue(0);
-
-  const swipeDown = Gesture.Pan()
-    .enabled(!saving)
-    .activeOffsetY(10)
-    .failOffsetX([-20, 20])
-    .onUpdate((event) => {
-      translateY.value = Math.max(0, event.translationY);
-    })
-    .onEnd((event) => {
-      if (event.translationY > DISMISS_DISTANCE || event.velocityY > DISMISS_VELOCITY) {
-        translateY.value = withTiming(screenHeight, { duration: 180 }, () => {
-          scheduleOnRN(onRetake);
-        });
-      } else {
-        translateY.value = withSpring(0);
-      }
-    });
+  const swipeDown = useSwipeToDismiss({ onDismiss: onRetake, enabled: !saving, fadeTo: 0.4 });
 
   const tapImage = Gesture.Tap()
     .runOnJS(true)
     .onStart(() => setFullscreen(true));
 
-  const imageGesture = Gesture.Race(swipeDown, tapImage);
-
-  const dragStyle = useAnimatedStyle(() => ({
-    transform: [{ translateY: translateY.value }],
-    opacity: interpolate(translateY.value, [0, screenHeight * 0.6], [1, 0.4], "clamp"),
-  }));
+  const imageGesture = Gesture.Race(swipeDown.gesture, tapImage);
 
   return (
     <View style={styles.backdrop}>
-      <Animated.View style={[styles.flex, dragStyle]}>
+      <Animated.View style={[styles.flex, swipeDown.animatedStyle]}>
         <KeyboardAvoidingView
           style={[styles.container, { paddingTop: insets.top + spacing.sm }]}
           behavior={Platform.OS === "ios" ? "padding" : undefined}

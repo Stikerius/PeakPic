@@ -4,15 +4,14 @@ import { useEffect, useState } from "react";
 import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 
 import { Avatar } from "@/components/avatar";
+import { STORY_RING_INSET, StoryRing } from "@/components/stories/story-ring";
 import { colors, fontSize, radius, spacing } from "@/constants/theme";
 import { getMyProfile, type Profile } from "@/lib/profileRepo";
 import { refreshStories, useStories } from "@/lib/storyStore";
 import type { StoryGroup } from "@/types/social";
 
 const AVATAR_SIZE = 62;
-const RING_GAP = 3;
-const RING_WIDTH = 2.5;
-const ITEM_SIZE = AVATAR_SIZE + 2 * (RING_GAP + RING_WIDTH);
+const ITEM_SIZE = AVATAR_SIZE + 2 * STORY_RING_INSET;
 
 function openViewer(group: StoryGroup) {
   router.push({ pathname: "/stories/[userId]", params: { userId: group.author.id } });
@@ -51,9 +50,9 @@ export function StoryBar() {
           accessibilityLabel={myGroup !== undefined ? "Deine Story ansehen" : "Story hinzufügen"}
           accessibilityHint={myGroup !== undefined ? "Lange drücken, um eine weitere Story hinzuzufügen" : undefined}
         >
-          <View style={[styles.ring, myGroup !== undefined ? styles.ringSeen : styles.ringNone]}>
+          <StoryRing size={ITEM_SIZE} state={myGroup !== undefined ? "seen" : "none"}>
             <Avatar uri={me?.avatarUrl ?? null} username={me?.username ?? "?"} size={AVATAR_SIZE} />
-          </View>
+          </StoryRing>
         </Pressable>
         <Pressable
           onPress={chooseSource}
@@ -82,9 +81,9 @@ export function StoryBar() {
           accessibilityRole="button"
           accessibilityLabel={`Story von ${group.author.username}${group.hasUnseen ? ", neu" : ""}`}
         >
-          <View style={[styles.ring, group.hasUnseen ? styles.ringUnseen : styles.ringSeen]}>
+          <StoryRing size={ITEM_SIZE} state={group.hasUnseen ? "unseen" : "seen"}>
             <Avatar uri={group.author.avatarUrl} username={group.author.username} size={AVATAR_SIZE} />
-          </View>
+          </StoryRing>
           <Text style={[styles.label, !group.hasUnseen && styles.labelSeen]} numberOfLines={1}>
             {group.author.username}
           </Text>
@@ -108,24 +107,6 @@ const styles = StyleSheet.create({
     width: ITEM_SIZE,
     alignItems: "center",
     gap: spacing.xs,
-  },
-  ring: {
-    width: ITEM_SIZE,
-    height: ITEM_SIZE,
-    borderRadius: radius.full,
-    borderWidth: RING_WIDTH,
-    padding: RING_GAP,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  ringUnseen: {
-    borderColor: colors.primary,
-  },
-  ringSeen: {
-    borderColor: colors.border,
-  },
-  ringNone: {
-    borderColor: "transparent",
   },
   addBadge: {
     position: "absolute",

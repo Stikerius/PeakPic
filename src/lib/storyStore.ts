@@ -8,12 +8,14 @@ import {
   markStorySeen,
   setStoryLiked,
 } from "@/lib/storyRepo";
+import { sortStoryGroups } from "@/lib/storyOrder";
 import type { Story, StoryGroup } from "@/types/social";
 
 /**
  * Shared story state for the feed's story bar and the full-screen viewer, so seen/liked
- * changes show up in both immediately. Group order is only changed by a refresh, which
- * keeps the viewer's position stable while stories are being marked as seen.
+ * changes show up in both immediately. Group order only changes on a refresh or when the
+ * viewer closes (resortStories), which keeps the viewer's position stable while stories
+ * are being marked as seen.
  */
 type StoryState = {
   groups: StoryGroup[];
@@ -57,6 +59,11 @@ export async function refreshStories(): Promise<void> {
   } catch {
     setState({ loading: false, error: "Storys konnten nicht geladen werden." });
   }
+}
+
+/** Re-applies the story bar order locally, e.g. after the viewer closed. */
+export function resortStories(): void {
+  setState({ groups: sortStoryGroups(state.groups) });
 }
 
 export function markSeen(story: Story): void {

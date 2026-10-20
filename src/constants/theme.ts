@@ -14,6 +14,9 @@ export const colors = {
   danger: "#FF453A",
 } as const;
 
+/** Ring around people with unseen stories, from bottom-left to top-right. */
+export const storyRingGradient = ["#FFB020", colors.primary, "#E8336F"] as const;
+
 /** Flame colour per streak tier (see FLAME_TIER_THRESHOLDS in lib/streak.ts). */
 export const flameColors = ["#FFB347", "#FF7A1A", "#FF3B30", "#4DA3FF"] as const;
 
