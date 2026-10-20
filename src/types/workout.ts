@@ -14,6 +14,8 @@ export type WorkoutWithPhoto = Workout & {
   photoUrl: string | null;
   /** All photos of the post in carousel order. */
   photoUrls: string[];
+  /** false: a training proof for streak and calendar only, not in the feed. */
+  inFeed: boolean;
 };
 
 export type NewWorkout = {

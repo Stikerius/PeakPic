@@ -53,6 +53,7 @@ type MediaEditorProps = {
   /** "story": one full-screen photo. "post": 4:5 photos with carousel, caption and tags. */
   variant: "story" | "post";
   initialUris: string[];
+  initialCaption?: string;
   /** Post variant: how many photos may be in the carousel (1 hides "add"). */
   maxPhotos?: number;
   showCaption?: boolean;
@@ -73,6 +74,7 @@ function createId(): string {
 export function MediaEditor({
   variant,
   initialUris,
+  initialCaption = "",
   maxPhotos = 1,
   showCaption = false,
   title,
@@ -85,7 +87,7 @@ export function MediaEditor({
   const [fonts] = useState(overlayFonts);
   const [photos, setPhotos] = useState<EditedPhoto[]>(() => initialUris.map(createEditedPhoto));
   const [current, setCurrent] = useState(0);
-  const [caption, setCaption] = useState("");
+  const [caption, setCaption] = useState(initialCaption);
   const [textEditing, setTextEditing] = useState<TextEditing | null>(null);
   const [mentionPickerOpen, setMentionPickerOpen] = useState(false);
   const [dragging, setDragging] = useState(false);

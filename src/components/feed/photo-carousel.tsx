@@ -1,7 +1,15 @@
 import Ionicons from "@expo/vector-icons/Ionicons";
 import { Image } from "expo-image";
 import { useState } from "react";
-import { FlatList, StyleSheet, View, type LayoutChangeEvent, type NativeScrollEvent, type NativeSyntheticEvent } from "react-native";
+import {
+  FlatList,
+  Pressable,
+  StyleSheet,
+  View,
+  type LayoutChangeEvent,
+  type NativeScrollEvent,
+  type NativeSyntheticEvent,
+} from "react-native";
 
 import { colors, radius, spacing } from "@/constants/theme";
 
@@ -11,10 +19,12 @@ type PhotoCarouselProps = {
   label: string;
   /** Keeps recycled list cells from showing the previous post's photo. */
   recyclingKey?: string;
+  /** Tap on a photo, e.g. to open it full screen. */
+  onPressPhoto?: (index: number) => void;
 };
 
 /** 4:5 photos, swipeable when there are several, with page dots. */
-export function PhotoCarousel({ photoUrls, label, recyclingKey }: PhotoCarouselProps) {
+export function PhotoCarousel({ photoUrls, label, recyclingKey, onPressPhoto }: PhotoCarouselProps) {
   const [width, setWidth] = useState(0);
   const [page, setPage] = useState(0);
 
@@ -46,14 +56,21 @@ export function PhotoCarousel({ photoUrls, label, recyclingKey }: PhotoCarouselP
           scrollEnabled={photoUrls.length > 1}
           onMomentumScrollEnd={onScrollEnd}
           renderItem={({ item, index }) => (
-            <Image
-              source={{ uri: item }}
-              style={{ width, height: width * 1.25 }}
-              contentFit="cover"
-              transition={150}
-              recyclingKey={recyclingKey !== undefined ? `${recyclingKey}-${index}` : undefined}
-              accessibilityLabel={photoUrls.length > 1 ? `${label}, Bild ${index + 1} von ${photoUrls.length}` : label}
-            />
+            <Pressable
+              onPress={onPressPhoto !== undefined ? () => onPressPhoto(index) : undefined}
+              disabled={onPressPhoto === undefined}
+              accessibilityRole={onPressPhoto !== undefined ? "imagebutton" : "image"}
+              accessibilityHint={onPressPhoto !== undefined ? "Tippen zum Vergrössern" : undefined}
+            >
+              <Image
+                source={{ uri: item }}
+                style={{ width, height: width * 1.25 }}
+                contentFit="cover"
+                transition={150}
+                recyclingKey={recyclingKey !== undefined ? `${recyclingKey}-${index}` : undefined}
+                accessibilityLabel={photoUrls.length > 1 ? `${label}, Bild ${index + 1} von ${photoUrls.length}` : label}
+              />
+            </Pressable>
           )}
         />
       )}

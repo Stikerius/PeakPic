@@ -74,7 +74,7 @@ export async function fetchUserRecentPosts(userId: string): Promise<PostThumbnai
 export async function fetchUserPostsOnDay(userId: string, day: DayKey): Promise<WorkoutWithPhoto[]> {
   const { data, error } = await supabase
     .from("posts")
-    .select("id, photo_path, caption, workout_date, created_at")
+    .select("id, photo_path, caption, workout_date, created_at, in_feed")
     .eq("user_id", userId)
     .eq("workout_date", day)
     .order("created_at", { ascending: true });
@@ -87,6 +87,7 @@ export async function fetchUserPostsOnDay(userId: string, day: DayKey): Promise<
     createdAt: row.created_at,
     photoUrl: urls.get(row.id)?.[0] ?? null,
     photoUrls: urls.get(row.id) ?? [],
+    inFeed: row.in_feed,
   }));
 }
 

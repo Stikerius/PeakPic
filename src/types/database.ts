@@ -51,7 +51,7 @@ export type Database = {
           in_feed?: boolean;
           is_day_post?: boolean;
         };
-        Update: { caption?: string | null; in_feed?: boolean };
+        Update: { caption?: string | null; in_feed?: boolean; photo_path?: string };
         Relationships: [Rel<"posts_user_id_fkey", "user_id", "profiles">];
       };
       post_media: {

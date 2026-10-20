@@ -12,9 +12,10 @@ import {
 } from "react-native";
 
 import { PhotoCarousel } from "@/components/feed/photo-carousel";
+import { PhotoViewer } from "@/components/photo-viewer";
 import { colors, fontSize, radius, spacing } from "@/constants/theme";
 import { describeError } from "@/lib/errors";
-import { emitAppEvent } from "@/lib/events";
+import { emitAppEvent, onAppEvent } from "@/lib/events";
 import { formatDayTitle, formatTime } from "@/lib/format";
 import { useSession } from "@/lib/session";
 import { fetchUserPostsOnDay } from "@/lib/userProfileRepo";
@@ -29,6 +30,11 @@ export default function DayScreen() {
   const [workouts, setWorkouts] = useState<WorkoutWithPhoto[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [viewer, setViewer] = useState<{ photoUrls: string[]; index: number } | null>(null);
+  // Bumped after a post was edited or published, to reload the day.
+  const [version, setVersion] = useState(0);
+
+  useEffect(() => onAppEvent("postCreated", () => setVersion((v) => v + 1)), []);
 
   useEffect(() => {
     let active = true;
@@ -42,7 +48,14 @@ export default function DayScreen() {
     return () => {
       active = false;
     };
-  }, [date, userId, isMine]);
+  }, [date, userId, isMine, version]);
+
+  function openEditor(workout: WorkoutWithPhoto) {
+    router.push({
+      pathname: "/post-create",
+      params: { mode: "edit", postId: workout.id, ...(workout.inFeed ? {} : { publish: "1" }) },
+    });
+  }
 
   async function remove(workout: WorkoutWithPhoto) {
     setDeletingId(workout.id);
@@ -98,14 +111,37 @@ export default function DayScreen() {
               <PhotoCarousel
                 photoUrls={workout.photoUrls}
                 label={`Workout-Foto von ${formatTime(workout.createdAt)} Uhr`}
+                onPressPhoto={(index) => setViewer({ photoUrls: workout.photoUrls, index })}
               />
               <View style={styles.footer}>
                 <View style={styles.footerText}>
-                  <Text style={styles.time}>{formatTime(workout.createdAt)} Uhr</Text>
+                  <Text style={styles.time}>
+                    {formatTime(workout.createdAt)} Uhr{isMine && !workout.inFeed ? " · Nur für den Streak" : ""}
+                  </Text>
                   {workout.caption !== null && (
                     <Text style={styles.caption}>{workout.caption}</Text>
                   )}
                 </View>
+                {isMine && (
+                  <Pressable
+                    onPress={() => openEditor(workout)}
+                    disabled={deletingId !== null}
+                    accessibilityRole="button"
+                    accessibilityLabel={workout.inFeed ? "Post bearbeiten" : "Bearbeiten und im Feed posten"}
+                    style={({ pressed }) => [
+                      styles.editButton,
+                      !workout.inFeed && styles.publishButton,
+                      pressed && styles.pressed,
+                    ]}
+                  >
+                    <Ionicons
+                      name={workout.inFeed ? "create-outline" : "paper-plane-outline"}
+                      size={18}
+                      color={colors.text}
+                    />
+                    <Text style={styles.editLabel}>{workout.inFeed ? "Bearbeiten" : "Im Feed posten"}</Text>
+                  </Pressable>
+                )}
                 {isMine && (
                   <Pressable
                     onPress={() => confirmRemove(workout)}
@@ -127,6 +163,11 @@ export default function DayScreen() {
           ))}
         </ScrollView>
       )}
+      <PhotoViewer
+        photoUrls={viewer?.photoUrls ?? []}
+        initialIndex={viewer?.index ?? null}
+        onClose={() => setViewer(null)}
+      />
     </>
   );
 }
@@ -169,6 +210,23 @@ const styles = StyleSheet.create({
   caption: {
     color: colors.text,
     fontSize: fontSize.md,
+  },
+  editButton: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: spacing.xs,
+    minHeight: 44,
+    paddingHorizontal: spacing.md,
+    borderRadius: radius.full,
+    backgroundColor: colors.surfaceElevated,
+  },
+  publishButton: {
+    backgroundColor: colors.primary,
+  },
+  editLabel: {
+    color: colors.text,
+    fontSize: fontSize.sm,
+    fontWeight: "700",
   },
   deleteButton: {
     width: 44,

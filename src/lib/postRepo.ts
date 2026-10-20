@@ -130,6 +130,72 @@ export async function addToDayPost(postId: string, photoUris: string[], tagIds: 
   await insertTags(postId, tagIds);
 }
 
+export type EditablePost = { photoUrls: string[]; caption: string; inFeed: boolean };
+
+/** One of my posts with its photos, to open it in the editor again. */
+export async function fetchPostForEdit(postId: string): Promise<EditablePost> {
+  const userId = await requireUserId();
+  const { data, error } = await supabase
+    .from("posts")
+    .select("id, photo_path, caption, in_feed")
+    .eq("id", postId)
+    .eq("user_id", userId)
+    .single();
+  if (error) throw error;
+  const urls = await fetchPostPhotoUrls([data]);
+  return { photoUrls: urls.get(data.id) ?? [], caption: data.caption ?? "", inFeed: data.in_feed };
+}
+
+export type PostUpdate = {
+  /** The new set of photos (edited), in carousel order; replaces the old ones. */
+  photoUris: string[];
+  caption: string;
+  inFeed: boolean;
+  /** Added to the existing tags. */
+  tagIds: string[];
+};
+
+/**
+ * Replaces photos and caption of one of my posts, e.g. to publish a streak-only proof to
+ * the feed after editing it. Old photo files are removed once the new ones are saved.
+ */
+export async function updatePost(postId: string, update: PostUpdate): Promise<void> {
+  const userId = await requireUserId();
+  const [post, media] = await Promise.all([
+    supabase.from("posts").select("photo_path").eq("id", postId).eq("user_id", userId).single(),
+    supabase.from("post_media").select("photo_path").eq("post_id", postId),
+  ]);
+  if (post.error) throw post.error;
+  if (media.error) throw media.error;
+  const oldPaths = [...new Set([post.data.photo_path, ...media.data.map((m) => m.photo_path)])];
+
+  const paths = await uploadAll(userId, update.photoUris);
+  const cover = paths[0];
+  if (cover === undefined) throw new StepError("Post speichern", "Kein Bild ausgewählt.");
+
+  const { error } = await supabase
+    .from("posts")
+    .update({
+      photo_path: cover,
+      caption: update.caption.length > 0 ? update.caption : null,
+      in_feed: update.inFeed,
+    })
+    .eq("id", postId)
+    .eq("user_id", userId);
+  if (error) {
+    await removePhotos(paths).catch(() => undefined);
+    throw new StepError("Post speichern", error.message);
+  }
+
+  const { error: deleteError } = await supabase.from("post_media").delete().eq("post_id", postId);
+  if (deleteError) throw new StepError("Bilder ersetzen", deleteError.message);
+  await insertMedia(postId, userId, paths, 0);
+  await insertTags(postId, update.tagIds);
+  await removePhotos(oldPaths.filter((path) => !paths.includes(path))).catch((removeError: unknown) =>
+    console.warn("[post] Alte Fotos konnten nicht gelöscht werden:", removeError),
+  );
+}
+
 /**
  * Signed photo URLs per post, in carousel order. Posts without media rows (created
  * before carousels existed) fall back to their cover photo.
