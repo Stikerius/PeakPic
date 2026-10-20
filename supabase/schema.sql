@@ -8,6 +8,7 @@
 -- Visibility model
 --   * profiles      readable by every signed-in user (needed for search)
 --   * follows       readable by every signed-in user (follower counts)
+--   * comments      readable (and likeable) exactly when their post is
 --   * posts/stories readable by the owner and by people who follow the owner;
 --                   a post shared into a chat is also readable by that chat's members;
 --                   tagged people can see a story. Owners can hide their posts and/or
@@ -62,6 +63,20 @@ create table if not exists public.comments (
   created_at timestamptz not null default now()
 );
 create index if not exists comments_post_created_idx on public.comments (post_id, created_at);
+-- Replies are one level deep: parent_comment_id points at a top-level comment of the same
+-- post (enforced by the insert policy). Deleting a comment deletes its replies.
+alter table public.comments
+  add column if not exists parent_comment_id uuid references public.comments (id) on delete cascade;
+create index if not exists comments_parent_idx on public.comments (parent_comment_id)
+  where parent_comment_id is not null;
+
+create table if not exists public.comment_likes (
+  comment_id uuid not null references public.comments (id) on delete cascade,
+  user_id    uuid not null references public.profiles (id) on delete cascade,
+  created_at timestamptz not null default now(),
+  primary key (comment_id, user_id)
+);
+create index if not exists comment_likes_user_idx on public.comment_likes (user_id);
 
 create table if not exists public.follows (
   follower_id  uuid not null references public.profiles (id) on delete cascade,
@@ -141,6 +156,10 @@ create table if not exists public.messages (
 create index if not exists messages_conversation_created_idx
   on public.messages (conversation_id, created_at desc);
 create index if not exists messages_post_idx on public.messages (post_id) where post_id is not null;
+-- Shared comment. Always sent together with its post_id (so the recipient can open the
+-- post); if the comment is deleted later, the message falls back to the post card.
+alter table public.messages
+  add column if not exists comment_id uuid references public.comments (id) on delete set null;
 
 
 -- -----------------------------------------------------------------------------
@@ -224,6 +243,36 @@ as $$
         )
       )
   );
+$$;
+
+-- A comment is visible exactly when its post is.
+create or replace function public.can_view_comment(comment uuid)
+returns boolean
+language sql stable security definer set search_path = ''
+as $$
+  select exists (
+    select 1 from public.comments c
+    where c.id = comment and public.can_view_post(c.post_id)
+  );
+$$;
+
+-- True if `parent` is a top-level comment on `post` (replies are only one level deep).
+create or replace function public.is_top_level_comment_on(parent uuid, post uuid)
+returns boolean
+language sql stable security definer set search_path = ''
+as $$
+  select exists (
+    select 1 from public.comments c
+    where c.id = parent and c.post_id = post and c.parent_comment_id is null
+  );
+$$;
+
+-- True if `comment` belongs to `post`; a shared comment must travel with its own post.
+create or replace function public.comment_belongs_to_post(comment uuid, post uuid)
+returns boolean
+language sql stable security definer set search_path = ''
+as $$
+  select exists (select 1 from public.comments c where c.id = comment and c.post_id = post);
 $$;
 
 create or replace function public.can_view_story(story uuid)
@@ -345,7 +394,7 @@ grant execute on function public.username_available(text) to anon, authenticated
 -- -----------------------------------------------------------------------------
 
 grant select, insert, update, delete on
-  public.profiles, public.posts, public.post_likes, public.comments, public.follows,
+  public.profiles, public.posts, public.post_likes, public.comments, public.comment_likes, public.follows,
   public.stories, public.story_likes, public.story_views, public.audience_restrictions,
   public.conversations, public.conversation_members, public.messages
 to authenticated;
@@ -359,6 +408,7 @@ alter table public.profiles             enable row level security;
 alter table public.posts                enable row level security;
 alter table public.post_likes           enable row level security;
 alter table public.comments             enable row level security;
+alter table public.comment_likes        enable row level security;
 alter table public.follows              enable row level security;
 alter table public.stories              enable row level security;
 alter table public.story_likes          enable row level security;
@@ -434,7 +484,11 @@ create policy "comments: read on visible posts" on public.comments
 drop policy if exists "comments: write on visible posts" on public.comments;
 create policy "comments: write on visible posts" on public.comments
   for insert to authenticated
-  with check (user_id = (select auth.uid()) and public.can_view_post(post_id));
+  with check (
+    user_id = (select auth.uid())
+    and public.can_view_post(post_id)
+    and (parent_comment_id is null or public.is_top_level_comment_on(parent_comment_id, post_id))
+  );
 
 drop policy if exists "comments: delete own or on own post" on public.comments;
 create policy "comments: delete own or on own post" on public.comments
@@ -446,6 +500,20 @@ create policy "comments: delete own or on own post" on public.comments
       where p.id = post_id and p.user_id = (select auth.uid())
     )
   );
+
+-- comment_likes: same rules as post_likes, via the comment's post.
+drop policy if exists "comment_likes: read on visible comments" on public.comment_likes;
+create policy "comment_likes: read on visible comments" on public.comment_likes
+  for select to authenticated using (public.can_view_comment(comment_id));
+
+drop policy if exists "comment_likes: like visible comments" on public.comment_likes;
+create policy "comment_likes: like visible comments" on public.comment_likes
+  for insert to authenticated
+  with check (user_id = (select auth.uid()) and public.can_view_comment(comment_id));
+
+drop policy if exists "comment_likes: unlike own" on public.comment_likes;
+create policy "comment_likes: unlike own" on public.comment_likes
+  for delete to authenticated using (user_id = (select auth.uid()));
 
 -- follows
 drop policy if exists "follows: read" on public.follows;
@@ -571,6 +639,7 @@ create policy "messages: members send" on public.messages
     and public.is_conversation_member(conversation_id)
     and (body is not null or post_id is not null)
     and (post_id is null or public.can_view_post(post_id))
+    and (comment_id is null or (post_id is not null and public.comment_belongs_to_post(comment_id, post_id)))
   );
 
 drop policy if exists "messages: delete own" on public.messages;

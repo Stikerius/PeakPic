@@ -46,7 +46,12 @@ function RootNavigator() {
         <Stack.Screen name="search" options={{ title: "Leute finden", presentation: "modal" }} />
         <Stack.Screen
           name="comments/[postId]"
-          options={{ title: "Kommentare", presentation: "modal" }}
+          options={{
+            headerShown: false,
+            presentation: "transparentModal",
+            animation: "fade",
+            contentStyle: { backgroundColor: "transparent" },
+          }}
         />
         <Stack.Screen
           name="share/[postId]"

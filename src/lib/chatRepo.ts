@@ -4,7 +4,7 @@ import { getSignedPhotoUrls } from "@/lib/photoUpload";
 import { PROFILE_COLUMNS, toPublicProfiles } from "@/lib/profiles";
 import { requireUserId } from "@/lib/session";
 import { supabase } from "@/lib/supabase";
-import type { ChatMessage, ConversationSummary, SharedPost } from "@/types/chat";
+import type { ChatMessage, ConversationSummary, SharedComment, SharedPost } from "@/types/chat";
 import type { Tables } from "@/types/database";
 import type { PublicProfile } from "@/types/social";
 
@@ -13,10 +13,10 @@ export const MESSAGE_MAX_LENGTH = 2000;
 
 type MessageRow = Pick<
   Tables<"messages">,
-  "id" | "conversation_id" | "sender_id" | "body" | "post_id" | "created_at"
+  "id" | "conversation_id" | "sender_id" | "body" | "post_id" | "comment_id" | "created_at"
 >;
 
-const MESSAGE_COLUMNS = "id, conversation_id, sender_id, body, post_id, created_at";
+const MESSAGE_COLUMNS = "id, conversation_id, sender_id, body, post_id, comment_id, created_at";
 
 /** Returns the 1:1 conversation with `otherUserId`, creating it if needed (must follow them). */
 export async function getOrCreateDirectConversation(otherUserId: string): Promise<string> {
@@ -37,8 +37,25 @@ export async function sharePostWithUser(postId: string, otherUserId: string): Pr
   if (error) throw error;
 }
 
+/** Sends a comment (as a card linking to its post) into the direct chat with `otherUserId`. */
+export async function shareCommentWithUser(
+  comment: { id: string; postId: string },
+  otherUserId: string,
+): Promise<void> {
+  const userId = await requireUserId();
+  const conversationId = await getOrCreateDirectConversation(otherUserId);
+  const { error } = await supabase.from("messages").insert({
+    conversation_id: conversationId,
+    sender_id: userId,
+    post_id: comment.postId,
+    comment_id: comment.id,
+  });
+  if (error) throw error;
+}
+
 function previewText(row: MessageRow): string {
   if (row.body !== null) return row.body;
+  if (row.comment_id !== null) return "💬 Kommentar geteilt";
   return row.post_id !== null ? "📷 Post geteilt" : "Post nicht mehr verfügbar";
 }
 
@@ -142,12 +159,31 @@ async function hydrateMessages(rows: MessageRow[]): Promise<ChatMessage[]> {
       });
     }
   }
+  const commentIds = [...new Set(rows.flatMap((r) => (r.comment_id !== null ? [r.comment_id] : [])))];
+  const comments = new Map<string, SharedComment>();
+  if (commentIds.length > 0) {
+    const { data, error } = await supabase
+      .from("comments")
+      .select(`id, post_id, body, author:profiles!comments_user_id_fkey(${PROFILE_COLUMNS})`)
+      .in("id", commentIds);
+    if (error) throw error;
+    const authors = await toPublicProfiles(data.map((c) => c.author));
+    for (const c of data) {
+      comments.set(c.id, {
+        id: c.id,
+        postId: c.post_id,
+        body: c.body,
+        author: authors.get(c.author.id) ?? { id: c.author.id, username: c.author.username, avatarUrl: null },
+      });
+    }
+  }
   return rows.map((r) => ({
     id: r.id,
     conversationId: r.conversation_id,
     senderId: r.sender_id,
     body: r.body,
     post: r.post_id !== null ? (posts.get(r.post_id) ?? "deleted") : r.body === null ? "deleted" : null,
+    comment: r.comment_id !== null ? (comments.get(r.comment_id) ?? null) : null,
     createdAt: r.created_at,
   }));
 }

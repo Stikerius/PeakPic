@@ -6,14 +6,15 @@ import { ActivityIndicator, FlatList, StyleSheet, Text, View } from "react-nativ
 import { Button } from "@/components/button";
 import { ProfileRow } from "@/components/profile-row";
 import { colors, fontSize, spacing } from "@/constants/theme";
-import { sharePostWithUser } from "@/lib/chatRepo";
+import { shareCommentWithUser, sharePostWithUser } from "@/lib/chatRepo";
 import { listFollowing } from "@/lib/socialRepo";
 import type { PublicProfile } from "@/types/social";
 
 type SendState = "sending" | "sent" | "error";
 
+/** Sends a post, or with `commentId` one of its comments, into direct chats. */
 export default function SharePostScreen() {
-  const { postId } = useLocalSearchParams<{ postId: string }>();
+  const { postId, commentId } = useLocalSearchParams<{ postId: string; commentId?: string }>();
   const [people, setPeople] = useState<PublicProfile[] | null>(null);
   const [loadError, setLoadError] = useState(false);
   const [sendStates, setSendStates] = useState<Record<string, SendState>>({});
@@ -35,7 +36,8 @@ export default function SharePostScreen() {
   async function send(userId: string) {
     setSendStates((prev) => ({ ...prev, [userId]: "sending" }));
     try {
-      await sharePostWithUser(postId, userId);
+      if (commentId !== undefined) await shareCommentWithUser({ id: commentId, postId }, userId);
+      else await sharePostWithUser(postId, userId);
       setSendStates((prev) => ({ ...prev, [userId]: "sent" }));
     } catch {
       setSendStates((prev) => ({ ...prev, [userId]: "error" }));
@@ -62,7 +64,11 @@ export default function SharePostScreen() {
       contentContainerStyle={people.length === 0 ? styles.emptyContainer : styles.list}
       ListHeaderComponent={
         people.length > 0 ? (
-          <Text style={styles.hint}>Der Post wird im Chat mit der Person geteilt.</Text>
+          <Text style={styles.hint}>
+            {commentId !== undefined
+              ? "Der Kommentar wird mit einem Link zum Post im Chat mit der Person geteilt."
+              : "Der Post wird im Chat mit der Person geteilt."}
+          </Text>
         ) : null
       }
       renderItem={({ item }) => {

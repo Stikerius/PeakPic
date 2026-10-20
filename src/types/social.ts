@@ -44,7 +44,11 @@ export type StoryGroup = {
 export type PostComment = {
   id: string;
   postId: string;
+  /** Top-level comment this one replies to; null for top-level comments. */
+  parentId: string | null;
   author: PublicProfile;
   body: string;
   createdAt: string;
+  likeCount: number;
+  likedByMe: boolean;
 };

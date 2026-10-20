@@ -8,6 +8,14 @@ export type SharedPost = {
   caption: string | null;
 };
 
+/** A comment shared into a chat, shown as a card with a link to its post. */
+export type SharedComment = {
+  id: string;
+  postId: string;
+  author: PublicProfile;
+  body: string;
+};
+
 export type ChatMessage = {
   id: string;
   conversationId: string;
@@ -15,6 +23,8 @@ export type ChatMessage = {
   body: string | null;
   /** The shared post, "deleted" if it no longer exists, null for plain text messages. */
   post: SharedPost | "deleted" | null;
+  /** Shared comment (its post is in `post`); null if none or if it was deleted. */
+  comment: SharedComment | null;
   createdAt: string;
   /** Optimistic message that the server hasn't confirmed yet. */
   pending?: boolean;

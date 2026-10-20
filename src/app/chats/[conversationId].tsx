@@ -114,6 +114,7 @@ export default function ChatScreen() {
       senderId: myId,
       body,
       post: null,
+      comment: null,
       createdAt: new Date().toISOString(),
       pending: true,
     };

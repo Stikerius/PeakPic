@@ -60,12 +60,36 @@ export type Database = {
         ];
       };
       comments: {
-        Row: { id: Uuid; post_id: Uuid; user_id: Uuid; body: string; created_at: Timestamp };
-        Insert: { id?: Uuid; post_id: Uuid; user_id: Uuid; body: string; created_at?: Timestamp };
+        Row: {
+          id: Uuid;
+          post_id: Uuid;
+          user_id: Uuid;
+          body: string;
+          created_at: Timestamp;
+          parent_comment_id: Uuid | null;
+        };
+        Insert: {
+          id?: Uuid;
+          post_id: Uuid;
+          user_id: Uuid;
+          body: string;
+          created_at?: Timestamp;
+          parent_comment_id?: Uuid | null;
+        };
         Update: Record<string, never>;
         Relationships: [
           Rel<"comments_post_id_fkey", "post_id", "posts">,
           Rel<"comments_user_id_fkey", "user_id", "profiles">,
+          Rel<"comments_parent_comment_id_fkey", "parent_comment_id", "comments">,
+        ];
+      };
+      comment_likes: {
+        Row: { comment_id: Uuid; user_id: Uuid; created_at: Timestamp };
+        Insert: { comment_id: Uuid; user_id: Uuid; created_at?: Timestamp };
+        Update: Record<string, never>;
+        Relationships: [
+          Rel<"comment_likes_comment_id_fkey", "comment_id", "comments">,
+          Rel<"comment_likes_user_id_fkey", "user_id", "profiles">,
         ];
       };
       follows: {
@@ -156,6 +180,7 @@ export type Database = {
           sender_id: Uuid;
           body: string | null;
           post_id: Uuid | null;
+          comment_id: Uuid | null;
           created_at: Timestamp;
         };
         Insert: {
@@ -164,6 +189,7 @@ export type Database = {
           sender_id: Uuid;
           body?: string | null;
           post_id?: Uuid | null;
+          comment_id?: Uuid | null;
           created_at?: Timestamp;
         };
         Update: Record<string, never>;
@@ -171,6 +197,7 @@ export type Database = {
           Rel<"messages_conversation_id_fkey", "conversation_id", "conversations">,
           Rel<"messages_sender_id_fkey", "sender_id", "profiles">,
           Rel<"messages_post_id_fkey", "post_id", "posts">,
+          Rel<"messages_comment_id_fkey", "comment_id", "comments">,
         ];
       };
     };
