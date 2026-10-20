@@ -71,7 +71,10 @@ export const localWorkoutRepo: WorkoutRepo = {
 
   async listWorkoutsOnDay(day) {
     return (await readAll())
-      .map((stored) => ({ ...toWorkout(stored), photoUrl: getPhotoUri(stored.fileName) }))
+      .map((stored) => {
+        const photoUrl = getPhotoUri(stored.fileName);
+        return { ...toWorkout(stored), photoUrl, photoUrls: photoUrl !== null ? [photoUrl] : [] };
+      })
       .filter((workout) => workout.workoutDate === day)
       .sort((a, b) => a.createdAt.localeCompare(b.createdAt));
   },

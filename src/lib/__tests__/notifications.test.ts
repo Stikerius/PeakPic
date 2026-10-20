@@ -65,6 +65,18 @@ describe("groupNotifications", () => {
   });
 });
 
+describe("post tags", () => {
+  it("groups tags per post and opens the post", () => {
+    const groups = groupNotifications([
+      { kind: "post_tag", actorId: "lena", at: "2026-10-19T08:00:00Z", postId: "p1" },
+      { kind: "post_tag", actorId: "marco", at: "2026-10-19T09:00:00Z", postId: "p2" },
+    ]);
+    expect(groups).toHaveLength(2);
+    expect(groups[1]?.target).toEqual({ type: "post", postId: "p1" });
+    expect(notificationText(groups[1]!, today)).toBe("hat dich in einem Workout markiert");
+  });
+});
+
 describe("notificationText", () => {
   it("uses singular and plural verbs", () => {
     const [single] = groupNotifications([{ kind: "story", actorId: "lena", at: "2026-10-19T08:00:00Z" }]);

@@ -1,4 +1,5 @@
 import { getSignedPhotoUrls } from "@/lib/photoUpload";
+import { fetchPostPhotoUrls } from "@/lib/postRepo";
 import { PROFILE_COLUMNS, toPublicProfiles } from "@/lib/profiles";
 import { requireUserId } from "@/lib/session";
 import type { DayKey } from "@/lib/streak";
@@ -78,13 +79,14 @@ export async function fetchUserPostsOnDay(userId: string, day: DayKey): Promise<
     .eq("workout_date", day)
     .order("created_at", { ascending: true });
   if (error) throw error;
-  const urls = await getSignedPhotoUrls(data.map((row) => row.photo_path));
+  const urls = await fetchPostPhotoUrls(data);
   return data.map((row) => ({
     id: row.id,
     workoutDate: row.workout_date,
     caption: row.caption,
     createdAt: row.created_at,
-    photoUrl: urls.get(row.photo_path) ?? null,
+    photoUrl: urls.get(row.id)?.[0] ?? null,
+    photoUrls: urls.get(row.id) ?? [],
   }));
 }
 

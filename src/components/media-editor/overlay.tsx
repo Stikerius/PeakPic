@@ -6,7 +6,7 @@ import { Gesture, GestureDetector } from "react-native-gesture-handler";
 import { colors } from "@/constants/theme";
 import type { PublicProfile } from "@/types/social";
 
-export type StoryOverlay =
+export type MediaOverlay =
   | { id: string; kind: "text"; text: string; color: string; background: boolean; x: number; y: number }
   | { id: string; kind: "mention"; user: PublicProfile; x: number; y: number };
 
@@ -33,7 +33,7 @@ type OverlayLayout = {
 };
 
 /** Where and how an overlay is drawn; shared by the Skia drawing and its touch handle. */
-export function layoutOverlay(item: StoryOverlay, fonts: OverlayFonts): OverlayLayout {
+export function layoutOverlay(item: MediaOverlay, fonts: OverlayFonts): OverlayLayout {
   const isText = item.kind === "text";
   const label = isText ? item.text : `@${item.user.username}`;
   const font = isText ? fonts.text : fonts.mention;
@@ -58,7 +58,7 @@ export function layoutOverlay(item: StoryOverlay, fonts: OverlayFonts): OverlayL
 }
 
 /** Skia drawing of one overlay. Rendered inside the editor's Canvas, so it ends up in the export. */
-export function OverlayDrawing({ item, fonts }: { item: StoryOverlay; fonts: OverlayFonts }) {
+export function OverlayDrawing({ item, fonts }: { item: MediaOverlay; fonts: OverlayFonts }) {
   const layout = layoutOverlay(item, fonts);
   return (
     <Group>
@@ -94,12 +94,12 @@ export function OverlayDrawing({ item, fonts }: { item: StoryOverlay; fonts: Ove
 }
 
 type OverlayHandleProps = {
-  item: StoryOverlay;
+  item: MediaOverlay;
   fonts: OverlayFonts;
   onMove: (id: string, x: number, y: number, fingerY: number) => void;
   onDragStart: (id: string) => void;
   onDragEnd: (id: string, fingerY: number) => void;
-  onTap: (item: StoryOverlay) => void;
+  onTap: (item: MediaOverlay) => void;
 };
 
 /** Invisible touch area on top of an overlay: drag to move, tap to edit. */

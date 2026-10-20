@@ -1,5 +1,4 @@
 import Ionicons from "@expo/vector-icons/Ionicons";
-import { Image } from "expo-image";
 import { router, Stack, useLocalSearchParams } from "expo-router";
 import { useEffect, useState } from "react";
 import {
@@ -12,6 +11,7 @@ import {
   View,
 } from "react-native";
 
+import { PhotoCarousel } from "@/components/feed/photo-carousel";
 import { colors, fontSize, radius, spacing } from "@/constants/theme";
 import { describeError } from "@/lib/errors";
 import { emitAppEvent } from "@/lib/events";
@@ -66,7 +66,9 @@ export default function DayScreen() {
       "Foto löschen?",
       isLast
         ? "Es ist dein einziges Foto an diesem Tag. Der Tag zählt danach nicht mehr für deinen Streak."
-        : "Das Foto wird endgültig gelöscht und verschwindet auch aus dem Feed.",
+        : workout.photoUrls.length > 1
+          ? "Der Post mit allen seinen Bildern wird endgültig gelöscht und verschwindet auch aus dem Feed."
+          : "Das Foto wird endgültig gelöscht und verschwindet auch aus dem Feed.",
       [
         { text: "Abbrechen", style: "cancel" },
         { text: "Löschen", style: "destructive", onPress: () => void remove(workout) },
@@ -93,19 +95,10 @@ export default function DayScreen() {
           )}
           {workouts.map((workout) => (
             <View key={workout.id} style={styles.card}>
-              {workout.photoUrl !== null ? (
-                <Image
-                  source={{ uri: workout.photoUrl }}
-                  style={styles.photo}
-                  contentFit="cover"
-                  transition={150}
-                  accessibilityLabel={`Workout-Foto von ${formatTime(workout.createdAt)} Uhr`}
-                />
-              ) : (
-                <View style={[styles.photo, styles.photoMissing]}>
-                  <Ionicons name="image-outline" size={40} color={colors.textMuted} />
-                </View>
-              )}
+              <PhotoCarousel
+                photoUrls={workout.photoUrls}
+                label={`Workout-Foto von ${formatTime(workout.createdAt)} Uhr`}
+              />
               <View style={styles.footer}>
                 <View style={styles.footerText}>
                   <Text style={styles.time}>{formatTime(workout.createdAt)} Uhr</Text>
@@ -158,15 +151,6 @@ const styles = StyleSheet.create({
     borderRadius: radius.lg,
     overflow: "hidden",
     backgroundColor: colors.surface,
-  },
-  photo: {
-    width: "100%",
-    aspectRatio: 4 / 5,
-    backgroundColor: colors.surfaceElevated,
-  },
-  photoMissing: {
-    alignItems: "center",
-    justifyContent: "center",
   },
   footer: {
     flexDirection: "row",

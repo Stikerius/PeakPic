@@ -67,6 +67,10 @@ function RootNavigator() {
         <Stack.Screen name="privacy/[scope]" options={{ title: "" }} />
         <Stack.Screen name="app-icon" options={{ title: "App-Icon" }} />
         <Stack.Screen
+          name="post-create"
+          options={{ headerShown: false, presentation: "fullScreenModal", gestureEnabled: false }}
+        />
+        <Stack.Screen
           name="story-create"
           options={{ headerShown: false, presentation: "fullScreenModal", gestureEnabled: false }}
         />

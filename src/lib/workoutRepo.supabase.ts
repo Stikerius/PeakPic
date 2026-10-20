@@ -1,5 +1,6 @@
 import { StepError } from "@/lib/errors";
-import { getSignedPhotoUrls, removePhotos, uploadPhoto } from "@/lib/photoUpload";
+import { removePhotos, uploadPhoto } from "@/lib/photoUpload";
+import { fetchPostPhotoUrls } from "@/lib/postRepo";
 import { requireUserId } from "@/lib/session";
 import { toDayKey } from "@/lib/streak";
 import { supabase } from "@/lib/supabase";
@@ -25,13 +26,14 @@ export const supabaseWorkoutRepo: WorkoutRepo = {
       .eq("workout_date", day)
       .order("created_at", { ascending: true });
     if (error) throw error;
-    const urls = await getSignedPhotoUrls(data.map((row) => row.photo_path));
+    const urls = await fetchPostPhotoUrls(data);
     return data.map((row) => ({
       id: row.id,
       workoutDate: row.workout_date,
       caption: row.caption,
       createdAt: row.created_at,
-      photoUrl: urls.get(row.photo_path) ?? null,
+      photoUrl: urls.get(row.id)?.[0] ?? null,
+      photoUrls: urls.get(row.id) ?? [],
     }));
   },
 
@@ -67,6 +69,9 @@ export const supabaseWorkoutRepo: WorkoutRepo = {
 
   async deleteWorkout(id) {
     const userId = await requireUserId();
+    // Carousel photos: their rows go with the post (cascade), the files need removing too.
+    const media = await supabase.from("post_media").select("photo_path").eq("post_id", id);
+    const mediaPaths = media.data?.map((row) => row.photo_path) ?? [];
     const { data, error } = await supabase
       .from("posts")
       .delete()
@@ -75,7 +80,9 @@ export const supabaseWorkoutRepo: WorkoutRepo = {
       .select("photo_path");
     if (error) throw error;
     // The row is gone either way; a leftover file is only wasted storage.
-    await removePhotos(data.map((row) => row.photo_path)).catch((removeError: unknown) =>
+    if (data.length === 0) return;
+    const paths = [...new Set([...data.map((row) => row.photo_path), ...mediaPaths])];
+    await removePhotos(paths).catch((removeError: unknown) =>
       console.warn("[workouts] Foto konnte nicht gelöscht werden:", removeError),
     );
   },

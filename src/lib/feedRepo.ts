@@ -1,4 +1,4 @@
-import { getSignedPhotoUrls } from "@/lib/photoUpload";
+import { fetchPostPhotoUrls, fetchPostTags } from "@/lib/postRepo";
 import { toPublicProfiles } from "@/lib/profiles";
 import { requireUserId } from "@/lib/session";
 import { getFollowingIds } from "@/lib/socialRepo";
@@ -14,7 +14,7 @@ export type FeedPage = {
 };
 
 const POST_SELECT =
-  "id, photo_path, caption, workout_date, created_at, author:profiles!posts_user_id_fkey(id, username, avatar_path)";
+  "id, photo_path, caption, workout_date, created_at, is_day_post, author:profiles!posts_user_id_fkey(id, username, avatar_path)";
 
 type PostRow = {
   id: string;
@@ -22,17 +22,19 @@ type PostRow = {
   caption: string | null;
   workout_date: string;
   created_at: string;
+  is_day_post: boolean;
   author: { id: string; username: string; avatar_path: string | null };
 };
 
-/** Adds author avatar, signed photo URL, like and comment counts to post rows. */
+/** Adds author avatar, signed photo URLs, tags, like and comment counts to post rows. */
 async function hydratePosts(rows: PostRow[], userId: string): Promise<FeedPost[]> {
   if (rows.length === 0) return [];
   const postIds = rows.map((r) => r.id);
-  const [likesResult, commentsResult, photoUrls, authors] = await Promise.all([
+  const [likesResult, commentsResult, photoUrls, tags, authors] = await Promise.all([
     supabase.from("post_likes").select("post_id, user_id").in("post_id", postIds),
     supabase.from("comments").select("post_id").in("post_id", postIds),
-    getSignedPhotoUrls(rows.map((r) => r.photo_path)),
+    fetchPostPhotoUrls(rows),
+    fetchPostTags(postIds),
     toPublicProfiles(rows.map((r) => r.author)),
   ]);
   if (likesResult.error) throw likesResult.error;
@@ -52,7 +54,10 @@ async function hydratePosts(rows: PostRow[], userId: string): Promise<FeedPost[]
   return rows.map((r) => ({
     id: r.id,
     author: authors.get(r.author.id) ?? { id: r.author.id, username: r.author.username, avatarUrl: null },
-    photoUrl: photoUrls.get(r.photo_path) ?? null,
+    photoUrl: photoUrls.get(r.id)?.[0] ?? null,
+    photoUrls: photoUrls.get(r.id) ?? [],
+    tags: tags.get(r.id) ?? [],
+    isDayPost: r.is_day_post,
     caption: r.caption,
     workoutDate: r.workout_date,
     createdAt: r.created_at,
@@ -63,7 +68,8 @@ async function hydratePosts(rows: PostRow[], userId: string): Promise<FeedPost[]
 }
 
 /**
- * Posts by people I follow plus my own, newest first.
+ * Posts by people I follow plus my own, newest first; training proofs that weren't
+ * published to the feed (in_feed = false) are left out.
  * RLS would also return posts shared with me in chats, so authors are filtered explicitly.
  */
 export async function fetchFeedPage(cursor: string | null): Promise<FeedPage> {
@@ -74,6 +80,7 @@ export async function fetchFeedPage(cursor: string | null): Promise<FeedPage> {
     .from("posts")
     .select(POST_SELECT)
     .in("user_id", authorIds)
+    .eq("in_feed", true)
     .order("created_at", { ascending: false })
     .limit(FEED_PAGE_SIZE);
   if (cursor !== null) query = query.lt("created_at", cursor);

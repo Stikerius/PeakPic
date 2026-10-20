@@ -11,7 +11,7 @@
 --   * comments      readable (and likeable) exactly when their post is
 --   * posts/stories readable by the owner and by people who follow the owner;
 --                   a post shared into a chat is also readable by that chat's members;
---                   tagged people can see a story. Owners can hide their posts and/or
+--                   tagged people can see a story, and the one post they are tagged in. Owners can hide their posts and/or
 --                   stories from specific people (audience_restrictions); that always wins.
 --   * chats         only members can read conversations, members and messages
 --   * storage       bucket "photos" (private), objects live under {user_id}/{kind}/...;
@@ -46,6 +46,51 @@ create table if not exists public.posts (
 create index if not exists posts_user_created_idx on public.posts (user_id, created_at desc);
 create index if not exists posts_created_idx on public.posts (created_at desc);
 create index if not exists posts_photo_path_idx on public.posts (photo_path);
+-- false = only a training proof for streak and calendar, not shown in the feed.
+alter table public.posts add column if not exists in_feed boolean not null default true;
+-- The day's slideshow: the first proof of a training day; later photos of that day can be
+-- added to it. At most one per person and day. photo_path stays its cover photo.
+alter table public.posts add column if not exists is_day_post boolean not null default false;
+-- Existing data: the first post of every day becomes that day's slideshow.
+update public.posts p
+set is_day_post = true
+where p.id in (
+    select distinct on (user_id, workout_date) id
+    from public.posts
+    order by user_id, workout_date, created_at
+  )
+  and not exists (
+    select 1 from public.posts q
+    where q.user_id = p.user_id and q.workout_date = p.workout_date and q.is_day_post
+  );
+create unique index if not exists posts_one_day_post_idx
+  on public.posts (user_id, workout_date) where is_day_post;
+
+-- All photos of a post in carousel order (a single photo is one row).
+create table if not exists public.post_media (
+  id         uuid primary key default gen_random_uuid(),
+  post_id    uuid not null references public.posts (id) on delete cascade,
+  user_id    uuid not null references public.profiles (id) on delete cascade,
+  photo_path text not null,
+  position   integer not null default 0,
+  created_at timestamptz not null default now()
+);
+create index if not exists post_media_post_idx on public.post_media (post_id, position);
+create index if not exists post_media_photo_path_idx on public.post_media (photo_path);
+-- Existing posts: their single photo becomes their only media row.
+insert into public.post_media (post_id, user_id, photo_path, position)
+select p.id, p.user_id, p.photo_path, 0
+from public.posts p
+where not exists (select 1 from public.post_media m where m.post_id = p.id);
+
+-- People tagged in a post. They may see that post even if they don't follow the author.
+create table if not exists public.post_tags (
+  post_id    uuid not null references public.posts (id) on delete cascade,
+  user_id    uuid not null references public.profiles (id) on delete cascade,
+  created_at timestamptz not null default now(),
+  primary key (post_id, user_id)
+);
+create index if not exists post_tags_user_idx on public.post_tags (user_id);
 
 create table if not exists public.post_likes (
   post_id    uuid not null references public.posts (id) on delete cascade,
@@ -249,6 +294,24 @@ as $$
   );
 $$;
 
+-- True if the caller is tagged in the post.
+create or replace function public.is_tagged_in_post(post uuid)
+returns boolean
+language sql stable security definer set search_path = ''
+as $$
+  select exists (
+    select 1 from public.post_tags t where t.post_id = post and t.user_id = (select auth.uid())
+  );
+$$;
+
+-- True if the caller owns the post.
+create or replace function public.is_my_post(post uuid)
+returns boolean
+language sql stable security definer set search_path = ''
+as $$
+  select exists (select 1 from public.posts p where p.id = post and p.user_id = (select auth.uid()));
+$$;
+
 -- For policies on OTHER tables (likes, comments, messages) that reference an existing post.
 -- Don't use it in the posts policy itself: it looks the post up again, and inside
 -- INSERT ... RETURNING that lookup can't see the row being inserted yet.
@@ -262,7 +325,11 @@ as $$
       and (
         p.user_id = (select auth.uid())
         or (
-          (public.is_following(p.user_id) or public.is_post_shared_with_me(p.id))
+          (
+            public.is_following(p.user_id)
+            or public.is_post_shared_with_me(p.id)
+            or public.is_tagged_in_post(p.id)
+          )
           and not public.is_hidden_from_me(p.user_id, 'posts')
         )
       )
@@ -330,6 +397,10 @@ as $$
     or exists (
       select 1 from public.posts p
       where p.photo_path = object_name and public.can_view_post(p.id)
+    )
+    or exists (
+      select 1 from public.post_media m
+      where m.photo_path = object_name and public.can_view_post(m.post_id)
     )
     or exists (
       select 1 from public.stories s
@@ -449,7 +520,7 @@ grant execute on function public.set_message_pinned(uuid, boolean) to authentica
 -- -----------------------------------------------------------------------------
 
 grant select, insert, update, delete on
-  public.profiles, public.posts, public.post_likes, public.comments, public.comment_likes, public.follows,
+  public.profiles, public.posts, public.post_media, public.post_tags, public.post_likes, public.comments, public.comment_likes, public.follows,
   public.stories, public.story_likes, public.story_views, public.audience_restrictions,
   public.conversations, public.conversation_members, public.messages, public.message_reactions
 to authenticated;
@@ -461,6 +532,8 @@ to authenticated;
 
 alter table public.profiles             enable row level security;
 alter table public.posts                enable row level security;
+alter table public.post_media           enable row level security;
+alter table public.post_tags            enable row level security;
 alter table public.post_likes           enable row level security;
 alter table public.comments             enable row level security;
 alter table public.comment_likes        enable row level security;
@@ -489,13 +562,19 @@ create policy "profiles: update own" on public.profiles
 -- posts
 -- Checks the row's own columns instead of looking the post up again, so the owner
 -- can always read their posts, including the new row returned by insert().select().
+-- Tagged people see exactly the post they are tagged in (is_tagged_in_post checks the
+-- caller only), and not if the owner has hidden their posts from them.
 drop policy if exists "posts: read own, followed or shared" on public.posts;
 create policy "posts: read own, followed or shared" on public.posts
   for select to authenticated
   using (
     user_id = (select auth.uid())
     or (
-      (public.is_following(user_id) or public.is_post_shared_with_me(id))
+      (
+        public.is_following(user_id)
+        or public.is_post_shared_with_me(id)
+        or public.is_tagged_in_post(id)
+      )
       and not public.is_hidden_from_me(user_id, 'posts')
     )
   );
@@ -517,6 +596,45 @@ create policy "posts: update own" on public.posts
 drop policy if exists "posts: delete own" on public.posts;
 create policy "posts: delete own" on public.posts
   for delete to authenticated using (user_id = (select auth.uid()));
+
+-- post_media: visible with its post; only the post owner adds, reorders or removes photos.
+drop policy if exists "post_media: read on visible posts" on public.post_media;
+create policy "post_media: read on visible posts" on public.post_media
+  for select to authenticated using (public.can_view_post(post_id));
+
+drop policy if exists "post_media: add to own post" on public.post_media;
+create policy "post_media: add to own post" on public.post_media
+  for insert to authenticated
+  with check (
+    user_id = (select auth.uid())
+    and public.is_my_post(post_id)
+    and (storage.foldername(photo_path))[1] = (select auth.uid())::text
+  );
+
+drop policy if exists "post_media: reorder own" on public.post_media;
+create policy "post_media: reorder own" on public.post_media
+  for update to authenticated
+  using (user_id = (select auth.uid()))
+  with check (user_id = (select auth.uid()) and public.is_my_post(post_id));
+
+drop policy if exists "post_media: delete own" on public.post_media;
+create policy "post_media: delete own" on public.post_media
+  for delete to authenticated using (user_id = (select auth.uid()));
+
+-- post_tags: the owner tags people they follow; a tagged person can remove themselves.
+drop policy if exists "post_tags: read on visible posts" on public.post_tags;
+create policy "post_tags: read on visible posts" on public.post_tags
+  for select to authenticated using (public.can_view_post(post_id));
+
+drop policy if exists "post_tags: owner tags people they follow" on public.post_tags;
+create policy "post_tags: owner tags people they follow" on public.post_tags
+  for insert to authenticated
+  with check (public.is_my_post(post_id) and public.is_following(user_id));
+
+drop policy if exists "post_tags: owner or tagged person removes" on public.post_tags;
+create policy "post_tags: owner or tagged person removes" on public.post_tags
+  for delete to authenticated
+  using (user_id = (select auth.uid()) or public.is_my_post(post_id));
 
 -- post_likes
 drop policy if exists "post_likes: read on visible posts" on public.post_likes;

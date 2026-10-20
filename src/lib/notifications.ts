@@ -11,7 +11,8 @@ export type ActivityEvent =
   | { kind: "comment"; actorId: string; at: string; postId: string; text: string }
   | { kind: "follow"; actorId: string; at: string }
   | { kind: "story_like"; actorId: string; at: string; storyId: string }
-  | { kind: "mention"; actorId: string; at: string; storyId: string };
+  | { kind: "mention"; actorId: string; at: string; storyId: string }
+  | { kind: "post_tag"; actorId: string; at: string; postId: string };
 
 export type NotificationKind = ActivityEvent["kind"];
 
@@ -52,6 +53,8 @@ function groupKey(event: ActivityEvent): string {
       return `story_like:${event.storyId}`;
     case "mention":
       return `mention:${event.storyId}`;
+    case "post_tag":
+      return `post_tag:${event.postId}`;
   }
 }
 
@@ -64,6 +67,7 @@ function targetFor(event: ActivityEvent, actorCount: number): NotificationTarget
       return actorCount === 1 ? { type: "profile", userId: event.actorId } : { type: "feed" };
     case "post_like":
     case "comment":
+    case "post_tag":
       return { type: "post", postId: event.postId };
     case "follow":
       return { type: "profile", userId: event.actorId };
@@ -129,5 +133,7 @@ export function notificationText(group: NotificationGroup, today: DayKey): strin
       return "gefällt deine Story";
     case "mention":
       return "hat dich in einer Story markiert";
+    case "post_tag":
+      return "hat dich in einem Workout markiert";
   }
 }

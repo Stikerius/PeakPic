@@ -1,16 +1,7 @@
 import { Image } from "expo-image";
 import { StatusBar } from "expo-status-bar";
 import { useState } from "react";
-import {
-  KeyboardAvoidingView,
-  Modal,
-  Platform,
-  Pressable,
-  StyleSheet,
-  Text,
-  TextInput,
-  View,
-} from "react-native";
+import { Modal, Pressable, StyleSheet, Text, View } from "react-native";
 import { Gesture, GestureDetector } from "react-native-gesture-handler";
 import Animated from "react-native-reanimated";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -20,15 +11,14 @@ import { colors, fontSize, radius, spacing } from "@/constants/theme";
 import { useSwipeToDismiss } from "@/hooks/use-swipe-to-dismiss";
 import type { CapturedPhoto } from "@/types/photo";
 
-const CAPTION_MAX_LENGTH = 200;
-
 type PhotoReviewProps = {
   photo: CapturedPhoto;
   saving: boolean;
   error: string | null;
   /** Discards the photo and returns to the live camera (button or swipe down). */
   onRetake: () => void;
-  onUse: (caption: string) => void;
+  /** Continue with this photo (the next step asks where it goes and opens the editor). */
+  onUse: () => void;
 };
 
 export function PhotoReview({
@@ -38,7 +28,6 @@ export function PhotoReview({
   onRetake,
   onUse,
 }: PhotoReviewProps) {
-  const [caption, setCaption] = useState("");
   const [fullscreen, setFullscreen] = useState(false);
   const insets = useSafeAreaInsets();
   const swipeDown = useSwipeToDismiss({ onDismiss: onRetake, enabled: !saving, fadeTo: 0.4 });
@@ -52,10 +41,7 @@ export function PhotoReview({
   return (
     <View style={styles.backdrop}>
       <Animated.View style={[styles.flex, swipeDown.animatedStyle]}>
-        <KeyboardAvoidingView
-          style={[styles.container, { paddingTop: insets.top + spacing.sm }]}
-          behavior={Platform.OS === "ios" ? "padding" : undefined}
-        >
+        <View style={[styles.container, { paddingTop: insets.top + spacing.sm }]}>
           <View style={styles.grabberArea}>
             <View style={styles.grabber} />
             <Text style={styles.hint}>Nach unten ziehen zum Verwerfen · Tippen für Vollbild</Text>
@@ -74,18 +60,7 @@ export function PhotoReview({
             </View>
           </GestureDetector>
 
-          <View style={styles.controls}>
-            <TextInput
-              value={caption}
-              onChangeText={setCaption}
-              placeholder="Caption hinzufügen (optional)"
-              placeholderTextColor={colors.textMuted}
-              maxLength={CAPTION_MAX_LENGTH}
-              style={styles.input}
-              editable={!saving}
-              returnKeyType="done"
-              submitBehavior="blurAndSubmit"
-            />
+          <View style={[styles.controls, { paddingBottom: insets.bottom + spacing.md }]}>
             {error !== null && <Text style={styles.error}>{error}</Text>}
             <View style={styles.actions}>
               <Button
@@ -97,13 +72,13 @@ export function PhotoReview({
               />
               <Button
                 label="Verwenden"
-                onPress={() => onUse(caption)}
+                onPress={onUse}
                 loading={saving}
                 style={styles.action}
               />
             </View>
           </View>
-        </KeyboardAvoidingView>
+        </View>
       </Animated.View>
 
       <Modal
@@ -156,16 +131,6 @@ const styles = StyleSheet.create({
   controls: {
     gap: spacing.md,
     padding: spacing.md,
-  },
-  input: {
-    minHeight: 48,
-    paddingHorizontal: spacing.md,
-    borderRadius: radius.md,
-    backgroundColor: colors.surface,
-    borderWidth: 1,
-    borderColor: colors.border,
-    color: colors.text,
-    fontSize: fontSize.md,
   },
   error: {
     color: colors.danger,

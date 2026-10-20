@@ -12,6 +12,8 @@ export type Workout = {
 export type WorkoutWithPhoto = Workout & {
   /** Displayable URI (signed URL or local file); null if it could not be resolved. */
   photoUrl: string | null;
+  /** All photos of the post in carousel order. */
+  photoUrls: string[];
 };
 
 export type NewWorkout = {

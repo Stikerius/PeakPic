@@ -38,6 +38,8 @@ export type Database = {
           caption: string | null;
           workout_date: string;
           created_at: Timestamp;
+          in_feed: boolean;
+          is_day_post: boolean;
         };
         Insert: {
           id?: Uuid;
@@ -46,9 +48,43 @@ export type Database = {
           caption?: string | null;
           workout_date?: string;
           created_at?: Timestamp;
+          in_feed?: boolean;
+          is_day_post?: boolean;
         };
-        Update: { caption?: string | null };
+        Update: { caption?: string | null; in_feed?: boolean };
         Relationships: [Rel<"posts_user_id_fkey", "user_id", "profiles">];
+      };
+      post_media: {
+        Row: {
+          id: Uuid;
+          post_id: Uuid;
+          user_id: Uuid;
+          photo_path: string;
+          position: number;
+          created_at: Timestamp;
+        };
+        Insert: {
+          id?: Uuid;
+          post_id: Uuid;
+          user_id: Uuid;
+          photo_path: string;
+          position?: number;
+          created_at?: Timestamp;
+        };
+        Update: { position?: number };
+        Relationships: [
+          Rel<"post_media_post_id_fkey", "post_id", "posts">,
+          Rel<"post_media_user_id_fkey", "user_id", "profiles">,
+        ];
+      };
+      post_tags: {
+        Row: { post_id: Uuid; user_id: Uuid; created_at: Timestamp };
+        Insert: { post_id: Uuid; user_id: Uuid; created_at?: Timestamp };
+        Update: Record<string, never>;
+        Relationships: [
+          Rel<"post_tags_post_id_fkey", "post_id", "posts">,
+          Rel<"post_tags_user_id_fkey", "user_id", "profiles">,
+        ];
       };
       post_likes: {
         Row: { post_id: Uuid; user_id: Uuid; created_at: Timestamp };

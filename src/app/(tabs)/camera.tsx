@@ -1,6 +1,6 @@
-import { useIsFocused, useNavigation } from "expo-router";
+import { router, useIsFocused, useNavigation } from "expo-router";
 import { useEffect, useState } from "react";
-import { StyleSheet, Text, View } from "react-native";
+import { Alert, StyleSheet, Text, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { CameraCapture } from "@/components/camera/camera-capture";
@@ -8,7 +8,7 @@ import { PhotoReview } from "@/components/camera/photo-review";
 import { colors, fontSize, radius, spacing } from "@/constants/theme";
 import { describeError } from "@/lib/errors";
 import { emitAppEvent } from "@/lib/events";
-import { workoutRepo } from "@/lib/workoutRepo";
+import { createPost, getTodaysDayPostId } from "@/lib/postRepo";
 import type { CapturedPhoto } from "@/types/photo";
 
 const NOTICE_DURATION_MS = 2500;
@@ -47,15 +47,20 @@ export default function CameraScreen() {
     setSaveError(null);
   }
 
-  async function confirmPhoto(caption: string) {
-    if (captured === null) return;
+  function openEditor(photoUri: string, mode: "day" | "single" | "append", postId?: string) {
+    router.push({ pathname: "/post-create", params: { photoUri, mode, ...(postId !== undefined ? { postId } : {}) } });
+    discardCapture();
+  }
+
+  /** "Nein" to the feed: store the photo as today's proof for streak and calendar only. */
+  async function saveProofOnly(photoUri: string) {
     setSaving(true);
     setSaveError(null);
     try {
-      await workoutRepo.addWorkout({ sourceUri: captured.uri, caption });
+      await createPost({ photoUris: [photoUri], caption: "", inFeed: false, isDayPost: true, tagIds: [] });
       emitAppEvent("postCreated", undefined);
       setCaptured(null);
-      setNotice("Workout gepostet 💪");
+      setNotice("Training gespeichert 💪");
     } catch (error) {
       // Shows up in the dev server terminal, so upload problems can be diagnosed.
       console.error("[camera] Workout speichern fehlgeschlagen:", error);
@@ -63,6 +68,41 @@ export default function CameraScreen() {
     } finally {
       setSaving(false);
     }
+  }
+
+  /**
+   * The first proof of the day counts for the streak and asks whether it also goes to the
+   * feed. Later photos of the day go into today's slideshow or become a single post.
+   */
+  async function confirmPhoto() {
+    if (captured === null) return;
+    const photoUri = captured.uri;
+    setSaving(true);
+    setSaveError(null);
+    let dayPostId: string | null;
+    try {
+      dayPostId = await getTodaysDayPostId();
+    } catch (error) {
+      setSaveError(`Konnte nicht prüfen, ob du heute schon gepostet hast – ${describeError(error)}`);
+      return;
+    } finally {
+      setSaving(false);
+    }
+
+    if (dayPostId === null) {
+      Alert.alert("Auch im Feed veröffentlichen?", "Dein erster Trainingsnachweis heute zählt für deinen Streak.", [
+        { text: "Nein, nur für den Streak", onPress: () => void saveProofOnly(photoUri) },
+        { text: "Ja, bearbeiten und posten", onPress: () => openEditor(photoUri, "day") },
+        { text: "Abbrechen", style: "cancel" },
+      ]);
+      return;
+    }
+    const todaysPost = dayPostId;
+    Alert.alert("Du hast heute schon gepostet", "Dein Streak zählt heute schon. Wohin soll das Foto?", [
+      { text: "Zur Slideshow von heute hinzufügen", onPress: () => openEditor(photoUri, "append", todaysPost) },
+      { text: "Nur als einzelner Post", onPress: () => openEditor(photoUri, "single") },
+      { text: "Abbrechen", style: "cancel" },
+    ]);
   }
 
   if (captured !== null) {
@@ -73,7 +113,7 @@ export default function CameraScreen() {
         saving={saving}
         error={saveError}
         onRetake={discardCapture}
-        onUse={(caption) => void confirmPhoto(caption)}
+        onUse={() => void confirmPhoto()}
       />
     );
   }

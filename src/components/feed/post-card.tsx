@@ -1,8 +1,8 @@
 import Ionicons from "@expo/vector-icons/Ionicons";
-import { Image } from "expo-image";
 import { Pressable, StyleSheet, Text, View } from "react-native";
 
 import { Avatar } from "@/components/avatar";
+import { PhotoCarousel } from "@/components/feed/photo-carousel";
 import { colors, fontSize, spacing } from "@/constants/theme";
 import { formatRelativeTime } from "@/lib/format";
 import type { FeedPost } from "@/types/social";
@@ -31,20 +31,11 @@ export function PostCard({ post, onToggleLike, onOpenComments, onShare, onOpenPr
         </View>
       </Pressable>
 
-      {post.photoUrl !== null ? (
-        <Image
-          source={{ uri: post.photoUrl }}
-          style={styles.photo}
-          contentFit="cover"
-          transition={150}
-          recyclingKey={post.id}
-          accessibilityLabel={`Workout-Foto von ${post.author.username}`}
-        />
-      ) : (
-        <View style={[styles.photo, styles.photoMissing]}>
-          <Ionicons name="image-outline" size={40} color={colors.textMuted} />
-        </View>
-      )}
+      <PhotoCarousel
+        photoUrls={post.photoUrls}
+        label={`Workout-Foto von ${post.author.username}`}
+        recyclingKey={post.id}
+      />
 
       <View style={styles.actions}>
         <Pressable
@@ -83,6 +74,27 @@ export function PostCard({ post, onToggleLike, onOpenComments, onShare, onOpenPr
         </Pressable>
       </View>
 
+      {post.tags.length > 0 && (
+        <View style={styles.tags}>
+          <Ionicons name="people-outline" size={16} color={colors.textMuted} />
+          <Text style={styles.tagsText}>
+            Mit{" "}
+            {post.tags.map((person, index) => (
+              <Text key={person.id}>
+                {index > 0 ? ", " : ""}
+                <Text
+                  style={styles.tagName}
+                  onPress={() => onOpenProfile(person.id)}
+                  accessibilityRole="link"
+                >
+                  @{person.username}
+                </Text>
+              </Text>
+            ))}
+          </Text>
+        </View>
+      )}
+
       {post.caption !== null && (
         <Text style={styles.caption}>
           <Text style={styles.username}>@{post.author.username} </Text>
@@ -116,15 +128,6 @@ const styles = StyleSheet.create({
     color: colors.textMuted,
     fontSize: fontSize.sm,
   },
-  photo: {
-    width: "100%",
-    aspectRatio: 4 / 5,
-    backgroundColor: colors.surface,
-  },
-  photoMissing: {
-    alignItems: "center",
-    justifyContent: "center",
-  },
   actions: {
     flexDirection: "row",
     alignItems: "center",
@@ -141,6 +144,22 @@ const styles = StyleSheet.create({
     color: colors.text,
     fontSize: fontSize.md,
     fontWeight: "600",
+  },
+  tags: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: spacing.xs,
+    paddingHorizontal: spacing.md,
+    paddingTop: spacing.sm,
+  },
+  tagsText: {
+    flex: 1,
+    color: colors.textMuted,
+    fontSize: fontSize.sm,
+  },
+  tagName: {
+    color: colors.text,
+    fontWeight: "700",
   },
   caption: {
     color: colors.text,

@@ -26,7 +26,7 @@ export async function fetchNotifications(): Promise<NotificationFeed> {
   const now = new Date().toISOString();
   const following = await getFollowingIds();
 
-  const [seen, stories, workouts, likes, comments, follows, storyLikes, mentions] = await Promise.all([
+  const [seen, stories, workouts, likes, comments, follows, storyLikes, mentions, postTags] = await Promise.all([
     supabase.from("profiles").select("notifications_seen_at").eq("id", me).single(),
     supabase.from("stories").select("user_id, created_at").in("user_id", following).gt("expires_at", now),
     supabase
@@ -58,8 +58,13 @@ export async function fetchNotifications(): Promise<NotificationFeed> {
       .select("id, user_id, created_at")
       .contains("mentioned_user_ids", [me])
       .gt("created_at", since),
+    supabase
+      .from("post_tags")
+      .select("post_id, created_at, post:posts!inner(user_id)")
+      .eq("user_id", me)
+      .gt("created_at", since),
   ]);
-  for (const result of [seen, stories, workouts, likes, comments, follows, storyLikes, mentions]) {
+  for (const result of [seen, stories, workouts, likes, comments, follows, storyLikes, mentions, postTags]) {
     if (result.error) throw result.error;
   }
 
@@ -80,6 +85,9 @@ export async function fetchNotifications(): Promise<NotificationFeed> {
     ),
     ...(mentions.data ?? []).map(
       (m): ActivityEvent => ({ kind: "mention", actorId: m.user_id, at: m.created_at, storyId: m.id }),
+    ),
+    ...(postTags.data ?? []).map(
+      (t): ActivityEvent => ({ kind: "post_tag", actorId: t.post.user_id, at: t.created_at, postId: t.post_id }),
     ),
   ];
 

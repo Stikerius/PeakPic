@@ -11,7 +11,7 @@ import {
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
-import { contrastColor } from "@/components/stories/story-overlay";
+import { contrastColor } from "@/components/media-editor/overlay";
 import { colors, fontSize, radius, spacing } from "@/constants/theme";
 
 export const TEXT_COLORS = [

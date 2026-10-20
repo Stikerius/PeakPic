@@ -10,8 +10,14 @@ export type PublicProfile = {
 export type FeedPost = {
   id: string;
   author: PublicProfile;
-  /** Signed photo URL; null if it could not be signed. */
+  /** Signed cover photo URL; null if it could not be signed. */
   photoUrl: string | null;
+  /** All photos in carousel order (just the cover for single-photo posts). */
+  photoUrls: string[];
+  /** People tagged in the post. */
+  tags: PublicProfile[];
+  /** The day's slideshow (several photos of one training day). */
+  isDayPost: boolean;
   caption: string | null;
   workoutDate: DayKey;
   createdAt: string;

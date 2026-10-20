@@ -27,6 +27,7 @@ const KIND_ICONS: Record<NotificationKind, { name: ComponentProps<typeof Ionicon
   follow: { name: "person-add", color: colors.success },
   story_like: { name: "heart", color: colors.danger },
   mention: { name: "at", color: colors.warning },
+  post_tag: { name: "pricetag", color: colors.warning },
 };
 
 export default function NotificationsScreen() {
