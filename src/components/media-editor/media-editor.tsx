@@ -28,6 +28,7 @@ import {
 import { MediaCanvas } from "@/components/media-editor/media-canvas";
 import { MentionPicker } from "@/components/media-editor/mention-picker";
 import type { MediaOverlay } from "@/components/media-editor/overlay";
+import { sameEdits, toPhotoEdits, type PhotoEdits } from "@/lib/photoEdits";
 import { TextOverlayEditor, type TextOverlayValue } from "@/components/media-editor/text-overlay-editor";
 import { colors, fontSize, radius, spacing } from "@/constants/theme";
 import { describeError } from "@/lib/errors";
@@ -41,21 +42,39 @@ const STORY_EXPORT_MAX_WIDTH = 1080;
 /** Space the post layout needs below and above the canvas (header, strip, caption, button). */
 const POST_CHROME_HEIGHT = 340;
 
+export type EditorPhoto = {
+  /** The caller's reference for an existing photo (see InitialPhoto), null for new ones. */
+  source: string | null;
+  /** The unedited original (local file for new photos). */
+  originalUri: string;
+  /** JPEG with the edits burned in; null if the photo has no edits or is unchanged. */
+  renderedUri: string | null;
+  /** Edits to store with the photo, so it can be edited again from the original. */
+  edits: PhotoEdits | null;
+  /** New photo, or its edits differ from when the editor opened. */
+  changed: boolean;
+};
+
 export type MediaEditorResult = {
-  /**
-   * Photos in carousel order: edited ones as new local JPEG files, untouched post photos
-   * with their original URI (so existing photos can be kept without re-uploading).
-   */
-  fileUris: string[];
-  /** Everyone tagged on any of the photos. */
+  /** Photos in carousel order. */
+  photos: EditorPhoto[];
+  /** Everyone tagged: on the photos, plus earlier tags that weren't removed. */
   mentionIds: string[];
   caption: string;
 };
 
+/** A photo that already exists, opened for editing again. */
+export type InitialPhoto = { uri: string; source: string; edits: PhotoEdits | null };
+
 type MediaEditorProps = {
   /** "story": one full-screen photo. "post": 4:5 photos with carousel, caption and tags. */
   variant: "story" | "post";
-  initialUris: string[];
+  /** New photos (local files). */
+  initialUris?: string[];
+  /** Existing photos with their stored edits (editing a post again). */
+  initialPhotos?: InitialPhoto[];
+  /** People tagged before; shown as removable tags even without a mention on a photo. */
+  initialTags?: PublicProfile[];
   initialCaption?: string;
   /** Post variant: how many photos may be in the carousel (1 hides "add"). */
   maxPhotos?: number;
@@ -76,7 +95,9 @@ function createId(): string {
 /** Filters, text, tags and (for posts) several photos; shared by stories and posts. */
 export function MediaEditor({
   variant,
-  initialUris,
+  initialUris = [],
+  initialPhotos = [],
+  initialTags = [],
   initialCaption = "",
   maxPhotos = 1,
   showCaption = false,
@@ -88,7 +109,15 @@ export function MediaEditor({
   const { width, height } = useWindowDimensions();
   const insets = useSafeAreaInsets();
   const [fonts] = useState(overlayFonts);
-  const [photos, setPhotos] = useState<EditedPhoto[]>(() => initialUris.map(createEditedPhoto));
+  const isStory = variant === "story";
+  const postWidth = Math.min(width, (height - insets.top - insets.bottom - POST_CHROME_HEIGHT) / 1.25);
+  const size: CanvasSize = isStory ? { width, height } : { width: postWidth, height: postWidth * 1.25 };
+  const [photos, setPhotos] = useState<EditedPhoto[]>(() => [
+    ...initialPhotos.map((p) => createEditedPhoto(p.uri, { source: p.source, edits: p.edits, size })),
+    ...initialUris.map((uri) => createEditedPhoto(uri)),
+  ]);
+  // Earlier tags without a mention on any photo (e.g. posts edited before edits were stored).
+  const [extraTags, setExtraTags] = useState<PublicProfile[]>(initialTags);
   const [current, setCurrent] = useState(0);
   const [caption, setCaption] = useState(initialCaption);
   const [textEditing, setTextEditing] = useState<TextEditing | null>(null);
@@ -96,14 +125,15 @@ export function MediaEditor({
   const [dragging, setDragging] = useState(false);
   const [submitting, setSubmitting] = useState(false);
 
-  const isStory = variant === "story";
-  const postWidth = Math.min(width, (height - insets.top - insets.bottom - POST_CHROME_HEIGHT) / 1.25);
-  const size: CanvasSize = isStory ? { width, height } : { width: postWidth, height: postWidth * 1.25 };
   const photo = photos[Math.min(current, photos.length - 1)];
-  const mentions = photos.flatMap((p) =>
-    p.items.flatMap((item) => (item.kind === "mention" ? [item.user] : [])),
-  );
-  const mentionIds = [...new Set(mentions.map((m) => m.id))];
+  const mentions = [
+    ...new Map(
+      [...photos.flatMap((p) => p.items.flatMap((item) => (item.kind === "mention" ? [item.user] : []))), ...extraTags].map(
+        (user) => [user.id, user],
+      ),
+    ).values(),
+  ];
+  const mentionIds = mentions.map((m) => m.id);
   const center = { x: size.width / 2, y: size.height * (isStory ? 0.42 : 0.5) };
 
   function updatePhoto(next: EditedPhoto) {
@@ -139,6 +169,14 @@ export function MediaEditor({
   function editItem(item: MediaOverlay) {
     if (item.kind !== "text") return;
     setTextEditing({ id: item.id, initial: { text: item.text, color: item.color, background: item.background } });
+  }
+
+  /** Untags someone: removes their mentions from all photos. */
+  function removeTag(userId: string) {
+    setPhotos((prev) =>
+      prev.map((p) => ({ ...p, items: p.items.filter((i) => !(i.kind === "mention" && i.user.id === userId)) })),
+    );
+    setExtraTags((prev) => prev.filter((u) => u.id !== userId));
   }
 
   function addMention(user: PublicProfile) {
@@ -189,13 +227,22 @@ export function MediaEditor({
       const outputWidth = isStory
         ? Math.min(STORY_EXPORT_MAX_WIDTH, Math.round(width * PixelRatio.get()))
         : POST_EXPORT_WIDTH;
-      const fileUris: string[] = [];
+      const result: EditorPhoto[] = [];
       for (const p of photos) {
-        // Stories are always rendered (they're cropped to the screen); post photos only if edited.
-        const untouched = p.filterIndex === 0 && p.items.length === 0;
-        fileUris.push(!isStory && untouched ? p.uri : await renderEditedPhoto(p, size, fonts, outputWidth));
+        const edits = toPhotoEdits(p.filterIndex, p.items, size);
+        const changed = p.source === null || !sameEdits(edits, p.initialEdits);
+        // Stories are always rendered (cropped to the screen); post photos only when edited
+        // and changed, unchanged ones keep their stored rendering.
+        const render = isStory || (edits !== null && changed);
+        result.push({
+          source: p.source,
+          originalUri: p.uri,
+          renderedUri: render ? await renderEditedPhoto(p, size, fonts, outputWidth) : null,
+          edits,
+          changed,
+        });
       }
-      const error = await onSubmit({ fileUris, mentionIds, caption: caption.trim() });
+      const error = await onSubmit({ photos: result, mentionIds, caption: caption.trim() });
       if (error !== null) Alert.alert("Hochladen fehlgeschlagen", error);
     } catch (error) {
       Alert.alert("Bild konnte nicht erstellt werden", describeError(error));
@@ -410,9 +457,21 @@ export function MediaEditor({
           )}
 
           {mentions.length > 0 && (
-            <Text style={styles.tagged} numberOfLines={1}>
-              Markiert: {[...new Map(mentions.map((m) => [m.id, m])).values()].map((m) => `@${m.username}`).join(", ")}
-            </Text>
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.tagRow}>
+              <Text style={styles.tagged}>Markiert:</Text>
+              {mentions.map((user) => (
+                <Pressable
+                  key={user.id}
+                  onPress={() => removeTag(user.id)}
+                  accessibilityRole="button"
+                  accessibilityLabel={`Markierung @${user.username} entfernen`}
+                  style={styles.tagChip}
+                >
+                  <Text style={styles.tagChipText}>@{user.username}</Text>
+                  <Ionicons name="close" size={14} color={colors.textMuted} />
+                </Pressable>
+              ))}
+            </ScrollView>
           )}
 
           {showCaption && (
@@ -599,10 +658,28 @@ const styles = StyleSheet.create({
     alignItems: "center",
     gap: spacing.md,
   },
+  tagRow: {
+    alignItems: "center",
+    gap: spacing.xs,
+    paddingHorizontal: spacing.md,
+  },
   tagged: {
     color: colors.textMuted,
     fontSize: fontSize.sm,
-    paddingHorizontal: spacing.md,
+  },
+  tagChip: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 2,
+    paddingHorizontal: spacing.sm,
+    paddingVertical: 4,
+    borderRadius: radius.full,
+    backgroundColor: colors.surfaceElevated,
+  },
+  tagChipText: {
+    color: colors.text,
+    fontSize: fontSize.sm,
+    fontWeight: "600",
   },
   caption: {
     minHeight: 44,

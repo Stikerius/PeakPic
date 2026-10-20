@@ -104,7 +104,9 @@ export default function DayScreen() {
         <ScrollView style={styles.screen} contentContainerStyle={styles.content}>
           {error !== null && <Text style={styles.error}>{error}</Text>}
           {workouts.length === 0 && (
-            <Text style={styles.empty}>An diesem Tag gibt es keine Fotos.</Text>
+            <Text style={styles.empty}>
+              {isMine ? "An diesem Tag gibt es keine Fotos." : "An diesem Tag wurde trainiert, aber keine Fotos geteilt."}
+            </Text>
           )}
           {workouts.map((workout) => (
             <View key={workout.id} style={styles.card}>

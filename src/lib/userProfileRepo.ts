@@ -72,13 +72,14 @@ export async function fetchUserRecentPosts(userId: string): Promise<PostThumbnai
   return data.map((row) => ({ id: row.id, photoUrl: urls.get(row.photo_path) ?? null }));
 }
 
-/** Another user's workouts on one day (read-only), oldest first. */
+/** Another user's workouts on one day (read-only), oldest first; streak-only proofs stay private. */
 export async function fetchUserPostsOnDay(userId: string, day: DayKey): Promise<WorkoutWithPhoto[]> {
   const { data, error } = await supabase
     .from("posts")
     .select("id, photo_path, caption, workout_date, created_at, in_feed")
     .eq("user_id", userId)
     .eq("workout_date", day)
+    .eq("in_feed", true)
     .order("created_at", { ascending: true });
   if (error) throw error;
   const urls = await fetchPostPhotoUrls(data);

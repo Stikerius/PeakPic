@@ -4,11 +4,9 @@ import { StyleSheet, View } from "react-native";
 import { Gesture, GestureDetector } from "react-native-gesture-handler";
 
 import { colors } from "@/constants/theme";
-import type { PublicProfile } from "@/types/social";
+import type { MediaOverlay } from "@/lib/photoEdits";
 
-export type MediaOverlay =
-  | { id: string; kind: "text"; text: string; color: string; background: boolean; x: number; y: number }
-  | { id: string; kind: "mention"; user: PublicProfile; x: number; y: number };
+export type { MediaOverlay };
 
 export type OverlayFonts = { text: SkFont; mention: SkFont };
 

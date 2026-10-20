@@ -8,7 +8,14 @@ import { MediaEditor, type MediaEditorResult } from "@/components/media-editor/m
 import { colors, fontSize, spacing } from "@/constants/theme";
 import { describeError } from "@/lib/errors";
 import { emitAppEvent } from "@/lib/events";
-import { addToDayPost, createPost, fetchPostForEdit, updatePost, type EditablePost } from "@/lib/postRepo";
+import {
+  addToDayPost,
+  createPost,
+  fetchPostForEdit,
+  updatePost,
+  type EditablePost,
+  type PostPhotoInput,
+} from "@/lib/postRepo";
 
 /** Photos per post (carousel). */
 const MAX_PHOTOS = 10;
@@ -37,16 +44,26 @@ export default function PostCreateScreen() {
       .catch((error: unknown) => setLoadError(describeError(error)));
   }, [mode, postId]);
 
-  async function submit({ fileUris, mentionIds, caption }: MediaEditorResult): Promise<string | null> {
+  async function submit({ photos: edited, mentionIds, caption }: MediaEditorResult): Promise<string | null> {
+    // Editor photos refer to existing ones by their index in `existing.photos`.
+    const photos: PostPhotoInput[] = edited.map((photo) => {
+      const before = photo.source !== null ? existing?.photos[Number(photo.source)] : undefined;
+      return {
+        existing: before !== undefined ? { originalPath: before.originalPath, photoPath: before.photoPath } : null,
+        originalUri: photo.originalUri,
+        renderedUri: photo.renderedUri,
+        edits: photo.edits,
+        changed: photo.changed,
+      };
+    });
     try {
       if (mode === "edit" || mode === "append") {
         if (postId === undefined) return "Der Post wurde nicht gefunden.";
         if (mode === "append") {
-          await addToDayPost(postId, fileUris, mentionIds);
+          await addToDayPost(postId, photos, mentionIds);
         } else {
           await updatePost(postId, {
-            photoUris: fileUris,
-            existingPaths: Object.fromEntries((existing?.photos ?? []).map((p) => [p.url, p.path])),
+            photos,
             caption,
             inFeed: publishing || existing?.inFeed === true,
             tagIds: mentionIds,
@@ -54,7 +71,7 @@ export default function PostCreateScreen() {
         }
       } else {
         await createPost({
-          photoUris: fileUris,
+          photos,
           caption,
           inFeed: true,
           isDayPost: mode === "day",
@@ -90,7 +107,8 @@ export default function PostCreateScreen() {
         <StatusBar style="light" />
         <MediaEditor
           variant="post"
-          initialUris={existing.photos.map((p) => p.url)}
+          initialPhotos={existing.photos.map((p, index) => ({ uri: p.url, source: String(index), edits: p.edits }))}
+          initialTags={existing.tags}
           initialCaption={existing.caption}
           maxPhotos={MAX_PHOTOS}
           showCaption

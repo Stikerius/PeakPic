@@ -71,8 +71,10 @@ export const supabaseWorkoutRepo: WorkoutRepo = {
   async deleteWorkout(id) {
     const userId = await requireUserId();
     // Carousel photos: their rows go with the post (cascade), the files need removing too.
-    const media = await supabase.from("post_media").select("photo_path").eq("post_id", id);
-    const mediaPaths = media.data?.map((row) => row.photo_path) ?? [];
+    const media = await supabase.from("post_media").select("photo_path, original_path").eq("post_id", id);
+    const mediaPaths =
+      media.data?.flatMap((row) => (row.original_path !== null ? [row.photo_path, row.original_path] : [row.photo_path])) ??
+      [];
     const { data, error } = await supabase
       .from("posts")
       .delete()

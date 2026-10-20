@@ -57,7 +57,13 @@ export default function CameraScreen() {
     setSaving(true);
     setSaveError(null);
     try {
-      await createPost({ photoUris: [photoUri], caption: "", inFeed: false, isDayPost: true, tagIds: [] });
+      await createPost({
+        photos: [{ existing: null, originalUri: photoUri, renderedUri: null, edits: null, changed: true }],
+        caption: "",
+        inFeed: false,
+        isDayPost: true,
+        tagIds: [],
+      });
       emitAppEvent("postCreated", undefined);
       setCaptured(null);
       setNotice("Training gespeichert 💪");

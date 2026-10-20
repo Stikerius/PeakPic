@@ -9,6 +9,8 @@
 --   * profiles      readable by every signed-in user (needed for search)
 --   * follows       readable by every signed-in user (follower counts)
 --   * comments      readable (and likeable) exactly when their post is
+--   * streak-only   posts with in_feed = false: followers see the training day (row), but
+--                   photos, likes, comments and tags only the owner (can_view_post)
 --   * posts/stories readable by the owner and by people who follow the owner;
 --                   a post shared into a chat is also readable by that chat's members;
 --                   tagged people can see a story, and the one post they are tagged in. Owners can hide their posts and/or
@@ -76,6 +78,11 @@ create table if not exists public.post_media (
   created_at timestamptz not null default now()
 );
 create index if not exists post_media_post_idx on public.post_media (post_id, position);
+-- Non-destructive editing: the unedited photo and the edits (filter, texts, mentions as
+-- JSON) are kept, photo_path is the rendered result shown to others. Without edits both
+-- paths are the same file. The original is only readable by its owner (own folder).
+alter table public.post_media add column if not exists original_path text;
+alter table public.post_media add column if not exists edits jsonb;
 create index if not exists post_media_photo_path_idx on public.post_media (photo_path);
 -- Existing posts: their single photo becomes their only media row.
 insert into public.post_media (post_id, user_id, photo_path, position)
@@ -325,7 +332,9 @@ as $$
       and (
         p.user_id = (select auth.uid())
         or (
-          (
+          -- Streak-only proofs: photos, likes, comments only for the owner.
+          p.in_feed
+          and (
             public.is_following(p.user_id)
             or public.is_post_shared_with_me(p.id)
             or public.is_tagged_in_post(p.id)
@@ -609,6 +618,7 @@ create policy "post_media: add to own post" on public.post_media
     user_id = (select auth.uid())
     and public.is_my_post(post_id)
     and (storage.foldername(photo_path))[1] = (select auth.uid())::text
+    and (original_path is null or (storage.foldername(original_path))[1] = (select auth.uid())::text)
   );
 
 drop policy if exists "post_media: reorder own" on public.post_media;

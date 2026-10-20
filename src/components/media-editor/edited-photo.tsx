@@ -11,7 +11,10 @@ import { File, Paths } from "expo-file-system";
 import { Platform } from "react-native";
 
 import { OverlayDrawing, type MediaOverlay, type OverlayFonts } from "@/components/media-editor/overlay";
+import { fromPhotoEdits, type CanvasSize, type PhotoEdits } from "@/lib/photoEdits";
 import { STORY_FILTERS } from "@/lib/storyFilters";
+
+export type { CanvasSize };
 
 const EXPORT_JPEG_QUALITY = 92;
 const FONT_FAMILY = Platform.select({ ios: "Helvetica Neue", default: "sans-serif" });
@@ -19,16 +22,33 @@ const FONT_FAMILY = Platform.select({ ios: "Helvetica Neue", default: "sans-seri
 /** One photo in the editor: the original file plus its (not yet applied) edits. */
 export type EditedPhoto = {
   key: string;
+  /** The unedited original. */
   uri: string;
   filterIndex: number;
   /** Text and mention overlays, in canvas coordinates. */
   items: MediaOverlay[];
+  /** Caller's reference for a photo that already exists (e.g. its media row); null if new. */
+  source: string | null;
+  /** The edits it had when the editor opened, to tell whether anything changed. */
+  initialEdits: PhotoEdits | null;
 };
 
-export type CanvasSize = { width: number; height: number };
+function createKey(): string {
+  return `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+}
 
-export function createEditedPhoto(uri: string): EditedPhoto {
-  return { key: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`, uri, filterIndex: 0, items: [] };
+export function createEditedPhoto(
+  uri: string,
+  existing?: { source: string; edits: PhotoEdits | null; size: CanvasSize },
+): EditedPhoto {
+  const restored = fromPhotoEdits(existing?.edits ?? null, existing?.size ?? { width: 1, height: 1 }, createKey);
+  return {
+    key: createKey(),
+    uri,
+    ...restored,
+    source: existing?.source ?? null,
+    initialEdits: existing?.edits ?? null,
+  };
 }
 
 export function overlayFonts(): OverlayFonts {

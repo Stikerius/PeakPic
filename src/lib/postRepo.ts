@@ -1,14 +1,28 @@
 import { StepError } from "@/lib/errors";
 import { getSignedPhotoUrls, removePhotos, uploadPhoto } from "@/lib/photoUpload";
+import { parsePhotoEdits, type PhotoEdits } from "@/lib/photoEdits";
 import { PROFILE_COLUMNS, toPublicProfiles } from "@/lib/profiles";
 import { requireUserId } from "@/lib/session";
 import { toDayKey } from "@/lib/streak";
 import { supabase } from "@/lib/supabase";
 import type { PublicProfile } from "@/types/social";
 
+/** One photo of a post as the editor hands it over. */
+export type PostPhotoInput = {
+  /** Storage paths of a photo the post already has; null for a new photo. */
+  existing: { originalPath: string; photoPath: string } | null;
+  /** The unedited original (local file for new photos). */
+  originalUri: string;
+  /** Rendered JPEG with the edits, if it has to be (re)uploaded. */
+  renderedUri: string | null;
+  edits: PhotoEdits | null;
+  /** New photo or changed edits; unchanged existing photos keep their files. */
+  changed: boolean;
+};
+
 export type NewPost = {
-  /** Local files (already edited), in carousel order. */
-  photoUris: string[];
+  /** In carousel order. */
+  photos: PostPhotoInput[];
   caption: string;
   /** false: only a training proof for streak and calendar, not in the feed. */
   inFeed: boolean;
@@ -20,24 +34,49 @@ export type NewPost = {
 /** Postgres unique_violation: a second day post for the same day. */
 const UNIQUE_VIOLATION = "23505";
 
-/** Uploads photos one after another; on failure removes the ones already uploaded. */
-async function uploadAll(userId: string, uris: string[]): Promise<string[]> {
-  const paths: string[] = [];
+type MediaFiles = { photo_path: string; original_path: string; edits: PhotoEdits | null };
+
+/**
+ * Uploads what's needed for each photo: originals of new photos, renderings of edited
+ * ones. Returns the storage paths per photo plus everything uploaded (for cleanup).
+ */
+async function savePhotos(
+  userId: string,
+  photos: PostPhotoInput[],
+): Promise<{ files: MediaFiles[]; uploaded: string[] }> {
+  const uploaded: string[] = [];
+  const upload = async (uri: string) => {
+    const path = await uploadPhoto(userId, "posts", uri);
+    uploaded.push(path);
+    return path;
+  };
   try {
-    for (const uri of uris) paths.push(await uploadPhoto(userId, "posts", uri));
-    return paths;
+    const files: MediaFiles[] = [];
+    for (const photo of photos) {
+      if (photo.existing !== null && !photo.changed) {
+        files.push({ photo_path: photo.existing.photoPath, original_path: photo.existing.originalPath, edits: photo.edits });
+        continue;
+      }
+      const original = photo.existing?.originalPath ?? (await upload(photo.originalUri));
+      // Without edits the original itself is shown.
+      const rendered = photo.edits !== null && photo.renderedUri !== null ? await upload(photo.renderedUri) : original;
+      files.push({ photo_path: rendered, original_path: original, edits: photo.edits });
+    }
+    return { files, uploaded };
   } catch (error) {
-    await removePhotos(paths).catch(() => undefined);
+    await removePhotos(uploaded).catch(() => undefined);
     throw error;
   }
 }
 
-async function insertMedia(postId: string, userId: string, paths: string[], firstPosition: number) {
+async function insertMedia(postId: string, userId: string, files: MediaFiles[], firstPosition: number) {
   const { error } = await supabase.from("post_media").insert(
-    paths.map((photoPath, index) => ({
+    files.map((file, index) => ({
       post_id: postId,
       user_id: userId,
-      photo_path: photoPath,
+      photo_path: file.photo_path,
+      original_path: file.original_path,
+      edits: file.edits,
       position: firstPosition + index,
     })),
   );
@@ -56,6 +95,16 @@ async function insertTags(postId: string, tagIds: string[]) {
   if (error) throw new StepError("Markierungen speichern", error.message);
 }
 
+/** Makes the post's tags exactly `tagIds`: adds new ones, removes the others. */
+async function setTags(postId: string, tagIds: string[]) {
+  const keep = [...new Set(tagIds)];
+  let remove = supabase.from("post_tags").delete().eq("post_id", postId);
+  if (keep.length > 0) remove = remove.not("user_id", "in", `(${keep.join(",")})`);
+  const { error } = await remove;
+  if (error) throw new StepError("Markierungen speichern", error.message);
+  await insertTags(postId, keep);
+}
+
 /** Today's slideshow post of the current user, if there is one. */
 export async function getTodaysDayPostId(): Promise<string | null> {
   const userId = await requireUserId();
@@ -72,15 +121,15 @@ export async function getTodaysDayPostId(): Promise<string | null> {
 
 export async function createPost(input: NewPost): Promise<string> {
   const userId = await requireUserId();
-  const paths = await uploadAll(userId, input.photoUris);
-  const cover = paths[0];
+  const { files, uploaded } = await savePhotos(userId, input.photos);
+  const cover = files[0];
   if (cover === undefined) throw new StepError("Post speichern", "Kein Bild ausgewählt.");
 
   const { data, error } = await supabase
     .from("posts")
     .insert({
       user_id: userId,
-      photo_path: cover,
+      photo_path: cover.photo_path,
       caption: input.caption.length > 0 ? input.caption : null,
       workout_date: toDayKey(new Date()),
       in_feed: input.inFeed,
@@ -89,7 +138,7 @@ export async function createPost(input: NewPost): Promise<string> {
     .select("id")
     .single();
   if (error) {
-    await removePhotos(paths).catch(() => undefined);
+    await removePhotos(uploaded).catch(() => undefined);
     if (error.code === UNIQUE_VIOLATION) {
       throw new StepError("Post speichern", "Für heute gibt es schon eine Slideshow. Bitte versuche es erneut.");
     }
@@ -97,19 +146,19 @@ export async function createPost(input: NewPost): Promise<string> {
   }
 
   try {
-    await insertMedia(data.id, userId, paths, 0);
+    await insertMedia(data.id, userId, files, 0);
     await insertTags(data.id, input.tagIds);
   } catch (mediaError) {
     // Without its photos the post is broken: undo it completely.
     await supabase.from("posts").delete().eq("id", data.id);
-    await removePhotos(paths).catch(() => undefined);
+    await removePhotos(uploaded).catch(() => undefined);
     throw mediaError;
   }
   return data.id;
 }
 
 /** Appends photos (and tags) to today's slideshow. */
-export async function addToDayPost(postId: string, photoUris: string[], tagIds: string[]): Promise<void> {
+export async function addToDayPost(postId: string, photos: PostPhotoInput[], tagIds: string[]): Promise<void> {
   const userId = await requireUserId();
   const { data: last, error } = await supabase
     .from("post_media")
@@ -120,24 +169,32 @@ export async function addToDayPost(postId: string, photoUris: string[], tagIds: 
     .maybeSingle();
   if (error) throw error;
 
-  const paths = await uploadAll(userId, photoUris);
+  const { files, uploaded } = await savePhotos(userId, photos);
   try {
-    await insertMedia(postId, userId, paths, (last?.position ?? 0) + 1);
+    await insertMedia(postId, userId, files, (last?.position ?? 0) + 1);
   } catch (mediaError) {
-    await removePhotos(paths).catch(() => undefined);
+    await removePhotos(uploaded).catch(() => undefined);
     throw mediaError;
   }
   await insertTags(postId, tagIds);
 }
 
+export type EditablePhoto = {
+  /** Signed URL of the unedited original, for the editor. */
+  url: string;
+  originalPath: string;
+  photoPath: string;
+  edits: PhotoEdits | null;
+};
+
 export type EditablePost = {
-  /** Current photos: signed URL for the editor, storage path to keep them unchanged. */
-  photos: { url: string; path: string }[];
+  photos: EditablePhoto[];
+  tags: PublicProfile[];
   caption: string;
   inFeed: boolean;
 };
 
-/** One of my posts with its photos, to open it in the editor again. */
+/** One of my posts with originals and stored edits, to open it in the editor again. */
 export async function fetchPostForEdit(postId: string): Promise<EditablePost> {
   const userId = await requireUserId();
   const { data, error } = await supabase
@@ -147,19 +204,32 @@ export async function fetchPostForEdit(postId: string): Promise<EditablePost> {
     .eq("user_id", userId)
     .single();
   if (error) throw error;
-  const { data: media, error: mediaError } = await supabase
-    .from("post_media")
-    .select("photo_path")
-    .eq("post_id", postId)
-    .order("position", { ascending: true });
-  if (mediaError) throw mediaError;
-  const paths = media.length > 0 ? media.map((m) => m.photo_path) : [data.photo_path];
-  const urls = await getSignedPhotoUrls(paths);
+  const [media, tags] = await Promise.all([
+    supabase
+      .from("post_media")
+      .select("photo_path, original_path, edits")
+      .eq("post_id", postId)
+      .order("position", { ascending: true }),
+    fetchPostTags([postId]),
+  ]);
+  if (media.error) throw media.error;
+
+  // Photos saved before originals were kept: the shown photo is all there is.
+  const rows =
+    media.data.length > 0
+      ? media.data.map((m) => ({
+          photoPath: m.photo_path,
+          originalPath: m.original_path ?? m.photo_path,
+          edits: m.original_path !== null ? parsePhotoEdits(m.edits) : null,
+        }))
+      : [{ photoPath: data.photo_path, originalPath: data.photo_path, edits: null }];
+  const urls = await getSignedPhotoUrls(rows.map((r) => r.originalPath));
   return {
-    photos: paths.flatMap((path) => {
-      const url = urls.get(path);
-      return url !== undefined ? [{ url, path }] : [];
+    photos: rows.flatMap((row) => {
+      const url = urls.get(row.originalPath);
+      return url !== undefined ? [{ ...row, url }] : [];
     }),
+    tags: tags.get(postId) ?? [],
     caption: data.caption ?? "",
     inFeed: data.in_feed,
   };
@@ -167,44 +237,39 @@ export async function fetchPostForEdit(postId: string): Promise<EditablePost> {
 
 export type PostUpdate = {
   /** The new set of photos in carousel order; replaces the old ones. */
-  photoUris: string[];
-  /** URIs that are existing photos of the post, mapped to their storage path (kept as is). */
-  existingPaths: Record<string, string>;
+  photos: PostPhotoInput[];
   caption: string;
   inFeed: boolean;
-  /** Added to the existing tags. */
+  /** The post's tags afterwards (removed people are untagged). */
   tagIds: string[];
 };
 
 /**
- * Replaces photos and caption of one of my posts: photos can be added, removed, reordered
- * or edited, and a streak-only proof can be published to the feed. Unchanged photos keep
- * their file; files that are no longer used are removed once the new set is saved.
+ * Updates one of my posts: photos can be added, removed, reordered or edited again from
+ * their originals, and a streak-only proof can be published to the feed. Unchanged photos
+ * keep their files; files no longer used are removed once the new set is saved.
  */
 export async function updatePost(postId: string, update: PostUpdate): Promise<void> {
   const userId = await requireUserId();
   const [post, media] = await Promise.all([
     supabase.from("posts").select("photo_path").eq("id", postId).eq("user_id", userId).single(),
-    supabase.from("post_media").select("photo_path").eq("post_id", postId),
+    supabase.from("post_media").select("photo_path, original_path").eq("post_id", postId),
   ]);
   if (post.error) throw post.error;
   if (media.error) throw media.error;
-  const oldPaths = [...new Set([post.data.photo_path, ...media.data.map((m) => m.photo_path)])];
+  const oldPaths = new Set([
+    post.data.photo_path,
+    ...media.data.flatMap((m) => (m.original_path !== null ? [m.photo_path, m.original_path] : [m.photo_path])),
+  ]);
 
-  const newUris = update.photoUris.filter((uri) => update.existingPaths[uri] === undefined);
-  const uploaded = await uploadAll(userId, newUris);
-  const uploadedByUri = new Map(newUris.map((uri, index) => [uri, uploaded[index]]));
-  const paths = update.photoUris.flatMap((uri) => {
-    const path = update.existingPaths[uri] ?? uploadedByUri.get(uri);
-    return path !== undefined ? [path] : [];
-  });
-  const cover = paths[0];
+  const { files, uploaded } = await savePhotos(userId, update.photos);
+  const cover = files[0];
   if (cover === undefined) throw new StepError("Post speichern", "Kein Bild ausgewählt.");
 
   const { error } = await supabase
     .from("posts")
     .update({
-      photo_path: cover,
+      photo_path: cover.photo_path,
       caption: update.caption.length > 0 ? update.caption : null,
       in_feed: update.inFeed,
     })
@@ -217,9 +282,11 @@ export async function updatePost(postId: string, update: PostUpdate): Promise<vo
 
   const { error: deleteError } = await supabase.from("post_media").delete().eq("post_id", postId);
   if (deleteError) throw new StepError("Bilder ersetzen", deleteError.message);
-  await insertMedia(postId, userId, paths, 0);
-  await insertTags(postId, update.tagIds);
-  await removePhotos(oldPaths.filter((path) => !paths.includes(path))).catch((removeError: unknown) =>
+  await insertMedia(postId, userId, files, 0);
+  await setTags(postId, update.tagIds);
+
+  const stillUsed = new Set(files.flatMap((f) => [f.photo_path, f.original_path]));
+  await removePhotos([...oldPaths].filter((path) => !stillUsed.has(path))).catch((removeError: unknown) =>
     console.warn("[post] Alte Fotos konnten nicht gelöscht werden:", removeError),
   );
 }

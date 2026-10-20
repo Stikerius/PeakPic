@@ -4,6 +4,7 @@
  */
 
 type Timestamp = string;
+export type Json = string | number | boolean | null | Json[] | { [key: string]: Json };
 export type AudienceScope = "stories" | "posts";
 type Uuid = string;
 
@@ -62,6 +63,8 @@ export type Database = {
           photo_path: string;
           position: number;
           created_at: Timestamp;
+          original_path: string | null;
+          edits: Json | null;
         };
         Insert: {
           id?: Uuid;
@@ -70,6 +73,8 @@ export type Database = {
           photo_path: string;
           position?: number;
           created_at?: Timestamp;
+          original_path?: string | null;
+          edits?: Json | null;
         };
         Update: { position?: number };
         Relationships: [

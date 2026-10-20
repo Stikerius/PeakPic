@@ -15,10 +15,10 @@ export function StoryEditor({ photoUri, onBack, onShared }: StoryEditorProps) {
       initialUris={[photoUri]}
       submitLabel="Deine Story"
       onBack={onBack}
-      onSubmit={async ({ fileUris, mentionIds }) => {
-        const [fileUri] = fileUris;
-        if (fileUri === undefined) return "Kein Bild.";
-        const error = await addStory(fileUri, mentionIds);
+      onSubmit={async ({ photos, mentionIds }) => {
+        const [photo] = photos;
+        if (photo === undefined) return "Kein Bild.";
+        const error = await addStory(photo.renderedUri ?? photo.originalUri, mentionIds);
         if (error === null) onShared();
         return error;
       }}
