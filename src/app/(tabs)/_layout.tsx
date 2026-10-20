@@ -6,6 +6,7 @@ import { Pressable, StyleSheet, View, type ColorValue } from "react-native";
 import { NewChatButton } from "@/components/chat/new-chat-button";
 import { NotificationBell } from "@/components/notification-bell";
 import { colors, spacing } from "@/constants/theme";
+import { useFollowRequestCount } from "@/hooks/use-follow-requests";
 import { useUnreadChatCount } from "@/hooks/use-unread-chats";
 
 type IoniconName = ComponentProps<typeof Ionicons>["name"];
@@ -62,6 +63,7 @@ function HomeHeaderActions() {
 
 export default function TabLayout() {
   const unreadChats = useUnreadChatCount();
+  const followRequests = useFollowRequestCount();
   return (
     <Tabs
       screenOptions={{
@@ -114,6 +116,8 @@ export default function TabLayout() {
         options={{
           title: "Profil",
           tabBarIcon: tabIcon("person", "person-outline"),
+          tabBarBadge: followRequests > 0 ? followRequests : undefined,
+          tabBarBadgeStyle: { backgroundColor: colors.primary, color: colors.text },
           headerRight: SettingsButton,
         }}
       />

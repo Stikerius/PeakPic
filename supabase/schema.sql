@@ -6,8 +6,15 @@
 -- without dropping data.
 --
 -- Visibility model
---   * profiles      readable by every signed-in user (needed for search)
---   * follows       readable by every signed-in user (follower counts)
+--   * profiles      readable by every signed-in user (name, avatar, privacy settings)
+--   * follows       a follow is 'pending' (request to a private profile) or 'accepted';
+--                   only accepted follows count anywhere (is_following). The status is set
+--                   by a trigger, only the followed person can accept. Follower lists are
+--                   readable for public profiles and accepted followers; counts for everyone
+--                   signed in (follow_counts).
+--   * public        is_private = false and post_visibility / story_visibility = 'everyone'
+--                   makes posts / active stories readable by every signed-in user
+--                   (is_public_content); never for anonymous users.
 --   * comments      readable (and likeable) exactly when their post is
 --   * streak-only   posts with in_feed = false: followers see the training day (row), but
 --                   photos, likes, comments and tags only the owner (can_view_post)
@@ -37,6 +44,23 @@ create table if not exists public.profiles (
 -- Everything in the notifications screen newer than this counts as unread.
 alter table public.profiles
   add column if not exists notifications_seen_at timestamptz not null default now();
+-- Privacy. Existing and new profiles start private (nothing changes until the user opts in).
+-- A private profile always behaves like 'followers', whatever the two settings say.
+alter table public.profiles add column if not exists is_private boolean not null default true;
+alter table public.profiles add column if not exists story_visibility text not null default 'followers';
+alter table public.profiles add column if not exists post_visibility text not null default 'followers';
+do $$
+begin
+  if not exists (select 1 from pg_constraint where conname = 'profiles_story_visibility_check') then
+    alter table public.profiles
+      add constraint profiles_story_visibility_check check (story_visibility in ('everyone', 'followers'));
+  end if;
+  if not exists (select 1 from pg_constraint where conname = 'profiles_post_visibility_check') then
+    alter table public.profiles
+      add constraint profiles_post_visibility_check check (post_visibility in ('everyone', 'followers'));
+  end if;
+end;
+$$;
 
 create table if not exists public.posts (
   id           uuid primary key default gen_random_uuid(),
@@ -142,6 +166,18 @@ create table if not exists public.follows (
   check (follower_id <> following_id)
 );
 create index if not exists follows_following_idx on public.follows (following_id);
+-- Existing follows become 'accepted' (column default when added); new rows get their status
+-- from the follows_set_status trigger, never from the client.
+alter table public.follows add column if not exists status text not null default 'accepted';
+alter table public.follows alter column status set default 'pending';
+do $$
+begin
+  if not exists (select 1 from pg_constraint where conname = 'follows_status_check') then
+    alter table public.follows add constraint follows_status_check check (status in ('pending', 'accepted'));
+  end if;
+end;
+$$;
+create index if not exists follows_following_status_idx on public.follows (following_id, status);
 
 create table if not exists public.stories (
   id         uuid primary key default gen_random_uuid(),
@@ -272,8 +308,90 @@ language sql stable security definer set search_path = ''
 as $$
   select exists (
     select 1 from public.follows
-    where follower_id = (select auth.uid()) and following_id = target
+    where follower_id = (select auth.uid()) and following_id = target and status = 'accepted'
   );
+$$;
+
+-- True if `owner`'s posts or active stories ('posts' / 'stories') are open to every
+-- signed-in user: public profile and the setting is 'everyone'.
+create or replace function public.is_public_content(owner uuid, scope text)
+returns boolean
+language sql stable security definer set search_path = ''
+as $$
+  select exists (
+    select 1 from public.profiles p
+    where p.id = owner
+      and not p.is_private
+      and (case is_public_content.scope when 'posts' then p.post_visibility else p.story_visibility end) = 'everyone'
+  );
+$$;
+
+-- Follower / following lists of `target` are readable for: target, accepted followers,
+-- everyone if the profile is public.
+create or replace function public.can_view_follow_lists(target uuid)
+returns boolean
+language sql stable security definer set search_path = ''
+as $$
+  select target = (select auth.uid())
+    or public.is_following(target)
+    or exists (select 1 from public.profiles p where p.id = target and not p.is_private);
+$$;
+
+-- Follower and following counts (accepted only); visible for every profile, also private ones.
+create or replace function public.follow_counts(target uuid)
+returns table (followers bigint, following bigint)
+language sql stable security definer set search_path = ''
+as $$
+  select
+    (select count(*) from public.follows f where f.following_id = target and f.status = 'accepted'),
+    (select count(*) from public.follows f where f.follower_id = target and f.status = 'accepted');
+$$;
+
+-- Follows: the status is decided here, from the followed profile, never by the client.
+create or replace function public.handle_follow_insert()
+returns trigger
+language plpgsql security definer set search_path = ''
+as $$
+begin
+  new.status := case
+    when exists (select 1 from public.profiles p where p.id = new.following_id and not p.is_private)
+      then 'accepted'
+    else 'pending'
+  end;
+  new.created_at := now();
+  return new;
+end;
+$$;
+
+-- Only the status may change, and only from 'pending' to 'accepted'.
+create or replace function public.handle_follow_update()
+returns trigger
+language plpgsql security definer set search_path = ''
+as $$
+begin
+  if new.follower_id <> old.follower_id
+    or new.following_id <> old.following_id
+    or new.created_at <> old.created_at then
+    raise exception 'only the status of a follow can change';
+  end if;
+  if new.status <> old.status and not (old.status = 'pending' and new.status = 'accepted') then
+    raise exception 'follow requests can only be accepted';
+  end if;
+  return new;
+end;
+$$;
+
+-- Going from private to public accepts all open requests.
+create or replace function public.handle_profile_privacy_change()
+returns trigger
+language plpgsql security definer set search_path = ''
+as $$
+begin
+  if old.is_private and not new.is_private then
+    update public.follows set status = 'accepted' where following_id = new.id and status = 'pending';
+  end if;
+  return new;
+end;
 $$;
 
 -- True if `owner` has hidden their `scope` ('stories' or 'posts') from the caller.
@@ -360,6 +478,7 @@ as $$
             public.is_following(p.user_id)
             or public.is_post_shared_with_me(p.id)
             or public.is_tagged_in_post(p.id)
+            or public.is_public_content(p.user_id, 'posts')
           )
           and not public.is_hidden_from_me(p.user_id, 'posts')
         )
@@ -421,7 +540,10 @@ as $$
     where h.id = highlight
       and (
         h.user_id = (select auth.uid())
-        or (public.is_following(h.user_id) and not public.is_hidden_from_me(h.user_id, 'stories'))
+        or (
+          (public.is_following(h.user_id) or public.is_public_content(h.user_id, 'stories'))
+          and not public.is_hidden_from_me(h.user_id, 'stories')
+        )
       )
   );
 $$;
@@ -449,7 +571,11 @@ as $$
         s.user_id = (select auth.uid())
         or (
           s.expires_at > now()
-          and (public.is_following(s.user_id) or (select auth.uid()) = any (s.mentioned_user_ids))
+          and (
+            public.is_following(s.user_id)
+            or (select auth.uid()) = any (s.mentioned_user_ids)
+            or public.is_public_content(s.user_id, 'stories')
+          )
           and not public.is_hidden_from_me(s.user_id, 'stories')
         )
         or public.is_in_visible_highlight(s.id)
@@ -581,11 +707,33 @@ create trigger on_auth_user_created
   after insert on auth.users
   for each row execute function public.handle_new_user();
 
+drop trigger if exists follows_set_status on public.follows;
+create trigger follows_set_status
+  before insert on public.follows
+  for each row execute function public.handle_follow_insert();
+
+drop trigger if exists follows_guard_update on public.follows;
+create trigger follows_guard_update
+  before update on public.follows
+  for each row execute function public.handle_follow_update();
+
+drop trigger if exists profiles_privacy_changed on public.profiles;
+create trigger profiles_privacy_changed
+  after update of is_private on public.profiles
+  for each row execute function public.handle_profile_privacy_change();
+
 revoke all on function public.get_or_create_direct_conversation(uuid) from public, anon;
 grant execute on function public.get_or_create_direct_conversation(uuid) to authenticated;
 grant execute on function public.username_available(text) to anon, authenticated;
 revoke all on function public.set_message_pinned(uuid, boolean) from public, anon;
 grant execute on function public.set_message_pinned(uuid, boolean) to authenticated;
+-- New in the privacy model: nothing of it for anonymous users.
+revoke all on function public.follow_counts(uuid) from public, anon;
+grant execute on function public.follow_counts(uuid) to authenticated;
+revoke all on function public.is_public_content(uuid, text) from public, anon;
+grant execute on function public.is_public_content(uuid, text) to authenticated;
+revoke all on function public.can_view_follow_lists(uuid) from public, anon;
+grant execute on function public.can_view_follow_lists(uuid) to authenticated;
 
 
 -- -----------------------------------------------------------------------------
@@ -640,6 +788,7 @@ create policy "profiles: update own" on public.profiles
 -- can always read their posts, including the new row returned by insert().select().
 -- Tagged people see exactly the post they are tagged in (is_tagged_in_post checks the
 -- caller only), and not if the owner has hidden their posts from them.
+-- Public posts (is_public_content) are readable by every signed-in user.
 drop policy if exists "posts: read own, followed or shared" on public.posts;
 create policy "posts: read own, followed or shared" on public.posts
   for select to authenticated
@@ -650,6 +799,7 @@ create policy "posts: read own, followed or shared" on public.posts
         public.is_following(user_id)
         or public.is_post_shared_with_me(id)
         or public.is_tagged_in_post(id)
+        or public.is_public_content(user_id, 'posts')
       )
       and not public.is_hidden_from_me(user_id, 'posts')
     )
@@ -767,17 +917,38 @@ create policy "comment_likes: unlike own" on public.comment_likes
   for delete to authenticated using (user_id = (select auth.uid()));
 
 -- follows
+-- Your own follows and requests (both directions) are always readable; other people's
+-- only when accepted and one side's lists are visible to you (public or you follow them).
 drop policy if exists "follows: read" on public.follows;
 create policy "follows: read" on public.follows
-  for select to authenticated using (true);
+  for select to authenticated
+  using (
+    follower_id = (select auth.uid())
+    or following_id = (select auth.uid())
+    or (
+      status = 'accepted'
+      and (public.can_view_follow_lists(follower_id) or public.can_view_follow_lists(following_id))
+    )
+  );
 
+-- The status is set by follows_set_status, whatever the client sends.
 drop policy if exists "follows: follow as yourself" on public.follows;
 create policy "follows: follow as yourself" on public.follows
   for insert to authenticated with check (follower_id = (select auth.uid()));
 
+-- Only the followed person accepts a request (pending -> accepted, see follows_guard_update).
+drop policy if exists "follows: accept requests to me" on public.follows;
+create policy "follows: accept requests to me" on public.follows
+  for update to authenticated
+  using (following_id = (select auth.uid()) and status = 'pending')
+  with check (following_id = (select auth.uid()) and status = 'accepted');
+
+-- Unfollow / withdraw a request yourself, or remove a follower / decline a request to you.
 drop policy if exists "follows: unfollow as yourself" on public.follows;
-create policy "follows: unfollow as yourself" on public.follows
-  for delete to authenticated using (follower_id = (select auth.uid()));
+drop policy if exists "follows: unfollow, remove follower or decline" on public.follows;
+create policy "follows: unfollow, remove follower or decline" on public.follows
+  for delete to authenticated
+  using (follower_id = (select auth.uid()) or following_id = (select auth.uid()));
 
 -- stories: expired stories are invisible to everyone but their owner, except stories in a
 -- highlight the caller may see (owner and followers, see can_view_highlight).
@@ -788,7 +959,11 @@ create policy "stories: read active from followed, own always" on public.stories
     user_id = (select auth.uid())
     or (
       expires_at > now()
-      and (public.is_following(user_id) or (select auth.uid()) = any (mentioned_user_ids))
+      and (
+        public.is_following(user_id)
+        or (select auth.uid()) = any (mentioned_user_ids)
+        or public.is_public_content(user_id, 'stories')
+      )
       and not public.is_hidden_from_me(user_id, 'stories')
     )
     or public.is_in_visible_highlight(id)
@@ -854,7 +1029,10 @@ create policy "highlights: read" on public.highlights
   for select to authenticated
   using (
     user_id = (select auth.uid())
-    or (public.is_following(user_id) and not public.is_hidden_from_me(user_id, 'stories'))
+    or (
+      (public.is_following(user_id) or public.is_public_content(user_id, 'stories'))
+      and not public.is_hidden_from_me(user_id, 'stories')
+    )
   );
 
 drop policy if exists "highlights: create own" on public.highlights;

@@ -1,10 +1,9 @@
 import Ionicons from "@expo/vector-icons/Ionicons";
 import * as ImagePicker from "expo-image-picker";
-import { useFocusEffect } from "expo-router";
+import { router, useFocusEffect } from "expo-router";
 import { useCallback, useEffect, useState } from "react";
 import {
   ActivityIndicator,
-  Alert,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -13,18 +12,18 @@ import {
 } from "react-native";
 
 import { Avatar } from "@/components/avatar";
-import { Button } from "@/components/button";
 import { HighlightsRow } from "@/components/profile/highlights-row";
 import { PostGrid } from "@/components/profile/post-grid";
 import { FlameIcon } from "@/components/streak/flame-icon";
 import { colors, fontSize, radius, spacing } from "@/constants/theme";
+import { useFollowRequestCount } from "@/hooks/use-follow-requests";
 import { useWorkoutDays } from "@/hooks/use-workout-days";
-import { signOut } from "@/lib/auth";
 import { describeError } from "@/lib/errors";
 import { onAppEvent } from "@/lib/events";
 import { listMyHighlights, type Highlight } from "@/lib/highlightRepo";
 import { getMyProfile, updateMyAvatar, type Profile } from "@/lib/profileRepo";
 import { useSession } from "@/lib/session";
+import { fetchFollowCounts } from "@/lib/socialRepo";
 import { computeStreakStatsFromDays, flameTier, toDayKey } from "@/lib/streak";
 import { fetchProfileGrid, type PostThumbnail } from "@/lib/userProfileRepo";
 
@@ -39,6 +38,8 @@ export default function ProfileScreen() {
   const [uploading, setUploading] = useState(false);
   const [highlights, setHighlights] = useState<Highlight[]>([]);
   const [posts, setPosts] = useState<PostThumbnail[] | null>(null);
+  const [counts, setCounts] = useState<{ followers: number; following: number } | null>(null);
+  const requestCount = useFollowRequestCount();
   // Bumped when posts or highlights change elsewhere, to reload them.
   const [version, setVersion] = useState(0);
 
@@ -48,6 +49,7 @@ export default function ProfileScreen() {
       onAppEvent("postCreated", bump),
       onAppEvent("postDeleted", bump),
       onAppEvent("highlightsChanged", bump),
+      onAppEvent("followChanged", bump),
     ];
     return () => unsubscribers.forEach((unsubscribe) => unsubscribe());
   }, []);
@@ -60,10 +62,15 @@ export default function ProfileScreen() {
           if (!active) return;
           setProfile(result);
           setError(null);
-          const [mine, grid] = await Promise.all([listMyHighlights(), fetchProfileGrid(result.id)]);
+          const [mine, grid, followCounts] = await Promise.all([
+            listMyHighlights(),
+            fetchProfileGrid(result.id),
+            fetchFollowCounts(result.id),
+          ]);
           if (!active) return;
           setHighlights(mine);
           setPosts(grid);
+          setCounts(followCounts);
         })
         .catch(() => {
           if (active) setError("Profil konnte nicht geladen werden.");
@@ -99,11 +106,8 @@ export default function ProfileScreen() {
     }
   }
 
-  function confirmSignOut() {
-    Alert.alert("Abmelden?", "Du kannst dich jederzeit wieder anmelden.", [
-      { text: "Abbrechen", style: "cancel" },
-      { text: "Abmelden", style: "destructive", onPress: () => void signOut() },
-    ]);
+  function openList(list: "followers" | "following") {
+    if (profile !== null) router.push({ pathname: "/follows/[userId]", params: { userId: profile.id, list } });
   }
 
   if (profile === null) {
@@ -140,6 +144,30 @@ export default function ProfileScreen() {
           </Pressable>
           <Text style={styles.username}>@{profile.username}</Text>
           {email !== undefined && <Text style={styles.email}>{email}</Text>}
+          <View style={styles.followRow}>
+            <Pressable onPress={() => openList("followers")} accessibilityRole="button" hitSlop={spacing.xs}>
+              <Text style={styles.followText}>
+                <Text style={styles.followCount}>{counts?.followers ?? "–"}</Text> Follower
+              </Text>
+            </Pressable>
+            <Pressable onPress={() => openList("following")} accessibilityRole="button" hitSlop={spacing.xs}>
+              <Text style={styles.followText}>
+                <Text style={styles.followCount}>{counts?.following ?? "–"}</Text> Folge ich
+              </Text>
+            </Pressable>
+          </View>
+          {requestCount > 0 && (
+            <Pressable
+              onPress={() => router.push("/follow-requests")}
+              accessibilityRole="button"
+              style={styles.requestsChip}
+            >
+              <Ionicons name="person-add" size={14} color={colors.text} />
+              <Text style={styles.requestsText}>
+                {requestCount} {requestCount === 1 ? "Follower-Anfrage" : "Follower-Anfragen"}
+              </Text>
+            </Pressable>
+          )}
         </View>
       </View>
 
@@ -183,10 +211,6 @@ export default function ProfileScreen() {
       ) : (
         <PostGrid posts={posts} emptyText="Noch keine Beiträge im Profil. Teile ein Workout im Feed." />
       )}
-
-      <View style={styles.padded}>
-        <Button label="Abmelden" variant="secondary" onPress={confirmSignOut} />
-      </View>
     </ScrollView>
   );
 }
@@ -244,6 +268,34 @@ const styles = StyleSheet.create({
     marginTop: spacing.sm,
     color: colors.text,
     fontSize: fontSize.xl,
+    fontWeight: "700",
+  },
+  followRow: {
+    flexDirection: "row",
+    gap: spacing.lg,
+    marginTop: spacing.sm,
+  },
+  followText: {
+    color: colors.textMuted,
+    fontSize: fontSize.md,
+  },
+  followCount: {
+    color: colors.text,
+    fontWeight: "800",
+  },
+  requestsChip: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: spacing.xs,
+    marginTop: spacing.sm,
+    paddingHorizontal: spacing.md,
+    paddingVertical: 6,
+    borderRadius: radius.full,
+    backgroundColor: colors.primary,
+  },
+  requestsText: {
+    color: colors.text,
+    fontSize: fontSize.sm,
     fontWeight: "700",
   },
   email: {

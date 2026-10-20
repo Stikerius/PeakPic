@@ -37,6 +37,19 @@ export async function fetchStoryGroups(): Promise<StoryGroup[]> {
   return sortStoryGroups(await groupStoryRows(rows, userId));
 }
 
+/** Active stories of one person that I may see (e.g. a public profile I don't follow). */
+export async function fetchUserStoryGroup(authorId: string): Promise<StoryGroup | null> {
+  const userId = await requireUserId();
+  const { data: rows, error } = await supabase
+    .from("stories")
+    .select(STORY_SELECT)
+    .eq("user_id", authorId)
+    .gt("expires_at", new Date().toISOString())
+    .order("created_at", { ascending: true });
+  if (error) throw error;
+  return (await groupStoryRows(rows, userId))[0] ?? null;
+}
+
 /** Stories with photos, seen/liked state and mentions, grouped by author (oldest first). */
 export async function groupStoryRows(rows: StoryRow[], userId: string): Promise<StoryGroup[]> {
   if (rows.length === 0) return [];

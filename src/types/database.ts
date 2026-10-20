@@ -4,6 +4,8 @@
  */
 
 type Timestamp = string;
+export type Visibility = "everyone" | "followers";
+export type FollowRowStatus = "pending" | "accepted";
 export type Json = string | number | boolean | null | Json[] | { [key: string]: Json };
 export type AudienceScope = "stories" | "posts";
 type Uuid = string;
@@ -26,9 +28,19 @@ export type Database = {
           avatar_path: string | null;
           created_at: Timestamp;
           notifications_seen_at: Timestamp;
+          is_private: boolean;
+          story_visibility: Visibility;
+          post_visibility: Visibility;
         };
         Insert: { id: Uuid; username: string; avatar_path?: string | null; created_at?: Timestamp };
-        Update: { username?: string; avatar_path?: string | null; notifications_seen_at?: Timestamp };
+        Update: {
+          username?: string;
+          avatar_path?: string | null;
+          notifications_seen_at?: Timestamp;
+          is_private?: boolean;
+          story_visibility?: Visibility;
+          post_visibility?: Visibility;
+        };
         Relationships: [];
       };
       posts: {
@@ -136,9 +148,11 @@ export type Database = {
         ];
       };
       follows: {
-        Row: { follower_id: Uuid; following_id: Uuid; created_at: Timestamp };
+        Row: { follower_id: Uuid; following_id: Uuid; created_at: Timestamp; status: FollowRowStatus };
+        /** status is set by a database trigger; whatever is sent is ignored. */
         Insert: { follower_id: Uuid; following_id: Uuid; created_at?: Timestamp };
-        Update: Record<string, never>;
+        /** Only the followed person, only pending -> accepted. */
+        Update: { status?: "accepted" };
         Relationships: [
           Rel<"follows_follower_id_fkey", "follower_id", "profiles">,
           Rel<"follows_following_id_fkey", "following_id", "profiles">,
@@ -295,6 +309,7 @@ export type Database = {
       username_available: { Args: { name: string }; Returns: boolean };
       get_or_create_direct_conversation: { Args: { other_user: Uuid }; Returns: Uuid };
       set_message_pinned: { Args: { message: Uuid; pinned: boolean }; Returns: undefined };
+      follow_counts: { Args: { target: Uuid }; Returns: { followers: number; following: number }[] };
     };
     Enums: Record<string, never>;
     CompositeTypes: Record<string, never>;

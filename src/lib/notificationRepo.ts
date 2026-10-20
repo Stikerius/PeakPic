@@ -46,7 +46,12 @@ export async function fetchNotifications(): Promise<NotificationFeed> {
       .eq("post.user_id", me)
       .neq("user_id", me)
       .gt("created_at", since),
-    supabase.from("follows").select("follower_id, created_at").eq("following_id", me).gt("created_at", since),
+    supabase
+      .from("follows")
+      .select("follower_id, created_at")
+      .eq("following_id", me)
+      .eq("status", "accepted")
+      .gt("created_at", since),
     supabase
       .from("story_likes")
       .select("story_id, user_id, created_at, story:stories!inner(user_id)")

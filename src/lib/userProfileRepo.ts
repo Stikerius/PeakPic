@@ -2,6 +2,7 @@ import { getSignedPhotoUrls } from "@/lib/photoUpload";
 import { fetchPostPhotoUrls } from "@/lib/postRepo";
 import { PROFILE_COLUMNS, toPublicProfiles } from "@/lib/profiles";
 import { requireUserId } from "@/lib/session";
+import { fetchFollowCounts, type FollowStatus } from "@/lib/socialRepo";
 import type { DayKey } from "@/lib/streak";
 import { supabase } from "@/lib/supabase";
 import type { PublicProfile } from "@/types/social";
@@ -11,8 +12,15 @@ export type UserProfileSummary = {
   profile: PublicProfile;
   followerCount: number;
   followingCount: number;
-  isFollowing: boolean;
+  /** My follow status towards them. */
+  followStatus: FollowStatus;
+  /** They follow me (accepted). */
   followsMe: boolean;
+  isPrivate: boolean;
+  /** What I may see (the database enforces the same rules). */
+  canSeePosts: boolean;
+  canSeeStories: boolean;
+  canSeeLists: boolean;
 };
 
 export type PostThumbnail = { id: string; photoUrl: string | null; photoCount: number };
@@ -21,33 +29,41 @@ const GRID_POSTS_LIMIT = 60;
 
 export async function fetchUserProfile(userId: string): Promise<UserProfileSummary | null> {
   const myId = await requireUserId();
-  const [profileResult, followers, following, iFollow, theyFollow] = await Promise.all([
-    supabase.from("profiles").select(PROFILE_COLUMNS).eq("id", userId).maybeSingle(),
-    supabase.from("follows").select("follower_id", { count: "exact", head: true }).eq("following_id", userId),
-    supabase.from("follows").select("following_id", { count: "exact", head: true }).eq("follower_id", userId),
+  const [profileResult, counts, iFollow, theyFollow] = await Promise.all([
+    supabase
+      .from("profiles")
+      .select(`${PROFILE_COLUMNS}, is_private, story_visibility, post_visibility`)
+      .eq("id", userId)
+      .maybeSingle(),
+    fetchFollowCounts(userId),
+    supabase.from("follows").select("status").eq("follower_id", myId).eq("following_id", userId).maybeSingle(),
     supabase
       .from("follows")
-      .select("follower_id", { count: "exact", head: true })
-      .eq("follower_id", myId)
-      .eq("following_id", userId),
-    supabase
-      .from("follows")
-      .select("follower_id", { count: "exact", head: true })
+      .select("status")
       .eq("follower_id", userId)
-      .eq("following_id", myId),
+      .eq("following_id", myId)
+      .eq("status", "accepted")
+      .maybeSingle(),
   ]);
-  for (const result of [profileResult, followers, following, iFollow, theyFollow]) {
+  for (const result of [profileResult, iFollow, theyFollow]) {
     if (result.error) throw result.error;
   }
-  if (profileResult.data === null) return null;
-  const profile = (await toPublicProfiles([profileResult.data])).get(userId);
+  const row = profileResult.data;
+  if (row === null) return null;
+  const profile = (await toPublicProfiles([row])).get(userId);
   if (profile === undefined) return null;
+  const followStatus: FollowStatus = iFollow.data?.status ?? "none";
+  const following = followStatus === "accepted" || userId === myId;
   return {
     profile,
-    followerCount: followers.count ?? 0,
-    followingCount: following.count ?? 0,
-    isFollowing: (iFollow.count ?? 0) > 0,
-    followsMe: (theyFollow.count ?? 0) > 0,
+    followerCount: counts.followers,
+    followingCount: counts.following,
+    followStatus,
+    followsMe: theyFollow.data !== null,
+    isPrivate: row.is_private,
+    canSeePosts: following || (!row.is_private && row.post_visibility === "everyone"),
+    canSeeStories: following || (!row.is_private && row.story_visibility === "everyone"),
+    canSeeLists: following || !row.is_private,
   };
 }
 

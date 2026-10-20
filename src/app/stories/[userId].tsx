@@ -33,7 +33,7 @@ import {
   removeStoryFromHighlight,
   type HighlightChoice,
 } from "@/lib/highlightRepo";
-import { fetchStoryActivity, type StoryActivity } from "@/lib/storyRepo";
+import { fetchStoryActivity, fetchUserStoryGroup, type StoryActivity } from "@/lib/storyRepo";
 import { deleteStory, markSeen, resortStories, toggleLike, useStories } from "@/lib/storyStore";
 import type { StoryGroup } from "@/types/social";
 
@@ -122,12 +122,14 @@ function ProgressSegment({ state, progress }: { state: "done" | "active" | "todo
 
 export default function StoryViewerScreen() {
   // With highlightId: the stories of one highlight (also expired ones), no other people.
-  const { userId, highlightId } = useLocalSearchParams<{ userId: string; highlightId?: string }>();
+  // With only=1: just this person's active stories (e.g. opened from their profile).
+  const { userId, highlightId, only } = useLocalSearchParams<{ userId: string; highlightId?: string; only?: string }>();
   const store = useStories();
   const inHighlight = highlightId !== undefined;
-  // undefined while loading, null if the highlight is gone or empty.
+  const singleGroupMode = inHighlight || only === "1";
+  // undefined while loading, null if the highlight / stories are gone.
   const [highlightGroup, setHighlightGroup] = useState<StoryGroup | null | undefined>(undefined);
-  const groups = inHighlight ? (highlightGroup ? [highlightGroup] : []) : store.groups;
+  const groups = singleGroupMode ? (highlightGroup ? [highlightGroup] : []) : store.groups;
   const [highlightPickerOpen, setHighlightPickerOpen] = useState(false);
   const insets = useSafeAreaInsets();
   const { width } = useWindowDimensions();
@@ -152,11 +154,11 @@ export default function StoryViewerScreen() {
   const [activityOpen, setActivityOpen] = useState(false);
 
   useEffect(() => {
-    if (highlightId === undefined) return;
-    fetchHighlightGroup(highlightId)
+    if (!singleGroupMode) return;
+    (highlightId !== undefined ? fetchHighlightGroup(highlightId) : fetchUserStoryGroup(userId))
       .then(setHighlightGroup)
       .catch(() => setHighlightGroup(null));
-  }, [highlightId]);
+  }, [highlightId, userId, singleGroupMode]);
 
   const group = groups[groupIndex];
   const story = group?.stories[Math.min(storyIndex, group.stories.length - 1)];
@@ -251,7 +253,7 @@ export default function StoryViewerScreen() {
 
   // Group disappeared (e.g. last own story deleted): leave the viewer.
   useEffect(() => {
-    const loadingHighlight = inHighlight && highlightGroup === undefined;
+    const loadingHighlight = singleGroupMode && highlightGroup === undefined;
     if (story === undefined && !loadingHighlight) close();
   }, [story]);
 
@@ -325,7 +327,7 @@ export default function StoryViewerScreen() {
   if (group === undefined || story === undefined) {
     return (
       <View style={[styles.screen, styles.missing]}>
-        {inHighlight && highlightGroup === undefined && <ActivityIndicator color={colors.text} />}
+        {singleGroupMode && highlightGroup === undefined && <ActivityIndicator color={colors.text} />}
       </View>
     );
   }

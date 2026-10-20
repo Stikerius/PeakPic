@@ -2,12 +2,11 @@ import Ionicons from "@expo/vector-icons/Ionicons";
 import { useEffect, useState } from "react";
 import { ActivityIndicator, FlatList, StyleSheet, Text, TextInput, View } from "react-native";
 
-import { Button } from "@/components/button";
+import { FollowButton } from "@/components/follow-button";
 import { ProfileRow } from "@/components/profile-row";
 import { useOpenProfile } from "@/hooks/use-open-profile";
 import { colors, fontSize, radius, spacing } from "@/constants/theme";
-import { emitAppEvent } from "@/lib/events";
-import { getFollowingIds, listFollowing, searchProfiles, setFollowing } from "@/lib/socialRepo";
+import { getMyFollowStatuses, listFollowing, searchProfiles, type FollowStatus } from "@/lib/socialRepo";
 import type { PublicProfile } from "@/types/social";
 
 const SEARCH_DEBOUNCE_MS = 300;
@@ -16,16 +15,20 @@ export default function SearchScreen() {
   const [query, setQuery] = useState("");
   const [results, setResults] = useState<PublicProfile[]>([]);
   const [following, setFollowingProfiles] = useState<PublicProfile[]>([]);
-  const [followingIds, setFollowingIds] = useState<Set<string>>(new Set());
+  const [statuses, setStatuses] = useState<Map<string, FollowStatus>>(new Map());
   const [searching, setSearching] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const openProfile = useOpenProfile();
 
   useEffect(() => {
-    void Promise.all([getFollowingIds(), listFollowing()])
-      .then(([ids, profiles]) => {
-        setFollowingIds(new Set(ids));
+    listFollowing()
+      .then((profiles) => {
         setFollowingProfiles(profiles);
+        setStatuses((prev) => {
+          const next = new Map(prev);
+          for (const p of profiles) next.set(p.id, "accepted");
+          return next;
+        });
       })
       .catch(() => setError("Konnte nicht laden, wem du folgst."));
   }, []);
@@ -41,8 +44,11 @@ export default function SearchScreen() {
     setSearching(true);
     const timer = setTimeout(() => {
       searchProfiles(term)
-        .then((found) => {
-          if (active) setResults(found);
+        .then(async (found) => {
+          const foundStatuses = await getMyFollowStatuses(found.map((p) => p.id));
+          if (!active) return;
+          setResults(found);
+          setStatuses((prev) => new Map([...prev, ...foundStatuses]));
         })
         .catch(() => {
           if (active) setError("Suche fehlgeschlagen.");
@@ -57,29 +63,10 @@ export default function SearchScreen() {
     };
   }, [query]);
 
-  async function toggleFollow(profile: PublicProfile) {
-    const follow = !followingIds.has(profile.id);
-    const update = (value: boolean) =>
-      setFollowingIds((prev) => {
-        const next = new Set(prev);
-        if (value) next.add(profile.id);
-        else next.delete(profile.id);
-        return next;
-      });
-
-    update(follow); // optimistic
-    setError(null);
-    try {
-      await setFollowing(profile.id, follow);
-      if (follow && !following.some((p) => p.id === profile.id)) {
-        setFollowingProfiles((prev) =>
-          [...prev, profile].sort((a, b) => a.username.localeCompare(b.username)),
-        );
-      }
-      emitAppEvent("followChanged", undefined);
-    } catch {
-      update(!follow);
-      setError(follow ? "Folgen fehlgeschlagen." : "Entfolgen fehlgeschlagen.");
+  function setStatus(profile: PublicProfile, status: FollowStatus) {
+    setStatuses((prev) => new Map(prev).set(profile.id, status));
+    if (status === "accepted" && !following.some((p) => p.id === profile.id)) {
+      setFollowingProfiles((prev) => [...prev, profile].sort((a, b) => a.username.localeCompare(b.username)));
     }
   }
 
@@ -116,23 +103,20 @@ export default function SearchScreen() {
             <Text style={styles.sectionTitle}>Du folgst</Text>
           ) : null
         }
-        renderItem={({ item }) => {
-          const isFollowing = followingIds.has(item.id);
-          return (
-            <ProfileRow
-              profile={item}
-              onPress={() => openProfile(item.id)}
-              accessory={
-                <Button
-                  label={isFollowing ? "Gefolgt" : "Folgen"}
-                  variant={isFollowing ? "secondary" : "primary"}
-                  size="sm"
-                  onPress={() => void toggleFollow(item)}
-                />
-              }
-            />
-          );
-        }}
+        renderItem={({ item }) => (
+          <ProfileRow
+            profile={item}
+            onPress={() => openProfile(item.id)}
+            accessory={
+              <FollowButton
+                userId={item.id}
+                username={item.username}
+                status={statuses.get(item.id) ?? "none"}
+                onChange={(status) => setStatus(item, status)}
+              />
+            }
+          />
+        )}
         ListEmptyComponent={
           <Text style={styles.emptyText}>
             {showingSearch

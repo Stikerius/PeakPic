@@ -10,7 +10,8 @@ export async function listFollowers(): Promise<PublicProfile[]> {
   const { data, error } = await supabase
     .from("follows")
     .select(`profile:profiles!follows_follower_id_fkey(${PROFILE_COLUMNS})`)
-    .eq("following_id", userId);
+    .eq("following_id", userId)
+    .eq("status", "accepted");
   if (error) throw error;
   const profiles = await toPublicProfiles(data.map((row) => row.profile));
   return [...profiles.values()].sort((a, b) => a.username.localeCompare(b.username));

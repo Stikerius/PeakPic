@@ -1,10 +1,12 @@
 import Ionicons from "@expo/vector-icons/Ionicons";
 import { router, Stack, useLocalSearchParams } from "expo-router";
 import { useEffect, useState, type ReactNode } from "react";
-import { ActivityIndicator, ScrollView, StyleSheet, Text, View } from "react-native";
+import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 
 import { Avatar } from "@/components/avatar";
 import { Button } from "@/components/button";
+import { FollowButton } from "@/components/follow-button";
+import { STORY_RING_INSET, StoryRing } from "@/components/stories/story-ring";
 import { HighlightsRow } from "@/components/profile/highlights-row";
 import { PostGrid } from "@/components/profile/post-grid";
 import { FlameIcon } from "@/components/streak/flame-icon";
@@ -12,9 +14,8 @@ import { MonthCalendar } from "@/components/streak/month-calendar";
 import { colors, fontSize, radius, spacing } from "@/constants/theme";
 import { getOrCreateDirectConversation } from "@/lib/chatRepo";
 import { describeError } from "@/lib/errors";
-import { emitAppEvent } from "@/lib/events";
 import { listHighlights, type Highlight } from "@/lib/highlightRepo";
-import { setFollowing } from "@/lib/socialRepo";
+import { fetchUserStoryGroup } from "@/lib/storyRepo";
 import {
   addMonths,
   computeStreakStatsFromDays,
@@ -32,17 +33,35 @@ import {
   type UserProfileSummary,
 } from "@/lib/userProfileRepo";
 
-type Content = { days: DayKey[]; posts: PostThumbnail[]; highlights: Highlight[] };
+const AVATAR_SIZE = 88;
 
-function Stat({ value, label, icon }: { value: number; label: string; icon?: ReactNode }) {
-  return (
-    <View style={styles.stat}>
+type Content = {
+  days: DayKey[];
+  posts: PostThumbnail[];
+  highlights: Highlight[];
+  /** Active stories I may see (followed, or public with "everyone"). */
+  hasStories: boolean;
+  storiesUnseen: boolean;
+};
+
+type StatProps = { value: number; label: string; icon?: ReactNode; onPress?: () => void };
+
+function Stat({ value, label, icon, onPress }: StatProps) {
+  const content = (
+    <>
       <View style={styles.statValueRow}>
         {icon}
         <Text style={styles.statValue}>{value}</Text>
       </View>
       <Text style={styles.statLabel}>{label}</Text>
-    </View>
+    </>
+  );
+  return onPress !== undefined ? (
+    <Pressable onPress={onPress} accessibilityRole="button" accessibilityLabel={`${value} ${label}`} style={styles.stat}>
+      {content}
+    </Pressable>
+  ) : (
+    <View style={styles.stat}>{content}</View>
   );
 }
 
@@ -51,7 +70,6 @@ export default function UserProfileScreen() {
 
   const [summary, setSummary] = useState<UserProfileSummary | null | undefined>(undefined);
   const [content, setContent] = useState<Content | null>(null);
-  const [followBusy, setFollowBusy] = useState(false);
   const [chatBusy, setChatBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -63,13 +81,21 @@ export default function UserProfileScreen() {
     try {
       const result = await fetchUserProfile(userId);
       setSummary(result);
-      if (result?.isFollowing) {
-        const [days, posts, highlights] = await Promise.all([
-          fetchUserWorkoutDays(userId),
-          fetchProfileGrid(userId),
-          listHighlights(userId),
+      if (result !== null && (result.canSeePosts || result.canSeeStories)) {
+        // Only ask for what the settings allow; RLS enforces the same rules anyway.
+        const [days, posts, highlights, stories] = await Promise.all([
+          result.canSeePosts ? fetchUserWorkoutDays(userId) : Promise.resolve([]),
+          result.canSeePosts ? fetchProfileGrid(userId) : Promise.resolve([]),
+          result.canSeeStories ? listHighlights(userId) : Promise.resolve([]),
+          result.canSeeStories ? fetchUserStoryGroup(userId) : Promise.resolve(null),
         ]);
-        setContent({ days, posts, highlights });
+        setContent({
+          days,
+          posts,
+          highlights,
+          hasStories: stories !== null,
+          storiesUnseen: stories?.hasUnseen ?? false,
+        });
       } else {
         setContent(null);
       }
@@ -82,21 +108,6 @@ export default function UserProfileScreen() {
     void load();
   }, [userId]);
 
-  async function toggleFollow() {
-    if (summary === null || summary === undefined || followBusy) return;
-    const follow = !summary.isFollowing;
-    setFollowBusy(true);
-    setError(null);
-    try {
-      await setFollowing(userId, follow);
-      emitAppEvent("followChanged", undefined);
-      await load();
-    } catch (followError) {
-      setError(describeError(followError));
-    } finally {
-      setFollowBusy(false);
-    }
-  }
 
   async function openChat() {
     if (chatBusy) return;
@@ -136,9 +147,29 @@ export default function UserProfileScreen() {
       <Stack.Screen options={{ title: profile.username }} />
 
       <View style={styles.header}>
-        <Avatar uri={profile.avatarUrl} username={profile.username} size={88} />
+        {content?.hasStories ? (
+          <Pressable
+            onPress={() => router.push({ pathname: "/stories/[userId]", params: { userId, only: "1" } })}
+            accessibilityRole="button"
+            accessibilityLabel={`Story von ${profile.username} ansehen`}
+          >
+            <StoryRing size={AVATAR_SIZE + 2 * STORY_RING_INSET} state={content.storiesUnseen ? "unseen" : "seen"}>
+              <Avatar uri={profile.avatarUrl} username={profile.username} size={AVATAR_SIZE} />
+            </StoryRing>
+          </Pressable>
+        ) : (
+          <Avatar uri={profile.avatarUrl} username={profile.username} size={AVATAR_SIZE} />
+        )}
         <Text style={styles.username}>@{profile.username}</Text>
-        {summary.followsMe && <Text style={styles.followsYou}>Folgt dir</Text>}
+        <View style={styles.badges}>
+          {summary.isPrivate && (
+            <View style={styles.badge}>
+              <Ionicons name="lock-closed" size={11} color={colors.textMuted} />
+              <Text style={styles.badgeText}>Privat</Text>
+            </View>
+          )}
+          {summary.followsMe && <Text style={styles.followsYou}>Folgt dir</Text>}
+        </View>
       </View>
 
       <View style={styles.stats}>
@@ -152,19 +183,37 @@ export default function UserProfileScreen() {
           }
         />
         <Stat value={stats.longest} label="Rekord" />
-        <Stat value={summary.followerCount} label="Follower" />
-        <Stat value={summary.followingCount} label="Folgt" />
+        <Stat
+          value={summary.followerCount}
+          label="Follower"
+          onPress={
+            summary.canSeeLists
+              ? () => router.push({ pathname: "/follows/[userId]", params: { userId, list: "followers" } })
+              : undefined
+          }
+        />
+        <Stat
+          value={summary.followingCount}
+          label="Folgt"
+          onPress={
+            summary.canSeeLists
+              ? () => router.push({ pathname: "/follows/[userId]", params: { userId, list: "following" } })
+              : undefined
+          }
+        />
       </View>
 
       <View style={styles.actions}>
-        <Button
-          label={summary.isFollowing ? "Gefolgt" : "Folgen"}
-          variant={summary.isFollowing ? "secondary" : "primary"}
-          onPress={() => void toggleFollow()}
-          loading={followBusy}
-          style={styles.action}
-        />
-        {summary.isFollowing && (
+        <View style={styles.action}>
+          <FollowButton
+            userId={userId}
+            username={profile.username}
+            status={summary.followStatus}
+            size="md"
+            onChange={() => void load()}
+          />
+        </View>
+        {summary.followStatus === "accepted" && (
           <Button
             label="Nachricht"
             variant="secondary"
@@ -177,11 +226,15 @@ export default function UserProfileScreen() {
 
       {error !== null && <Text style={styles.error}>{error}</Text>}
 
-      {!summary.isFollowing ? (
+      {!summary.canSeePosts && !summary.canSeeStories ? (
         <View style={styles.locked}>
           <Ionicons name="lock-closed-outline" size={36} color={colors.textMuted} />
-          <Text style={styles.lockedTitle}>Workouts sind privat</Text>
-          <Text style={styles.muted}>Folge @{profile.username}, um Kalender und Workout-Fotos zu sehen.</Text>
+          <Text style={styles.lockedTitle}>Dieses Profil ist privat</Text>
+          <Text style={styles.muted}>
+            {summary.followStatus === "pending"
+              ? `Deine Anfrage ist gesendet. Sobald @${profile.username} sie bestätigt, siehst du Storys, Kalender und Beiträge.`
+              : `Folge @${profile.username}, um Storys, Kalender und Beiträge zu sehen.`}
+          </Text>
         </View>
       ) : content === null ? (
         <ActivityIndicator color={colors.primary} />
@@ -189,23 +242,32 @@ export default function UserProfileScreen() {
         <>
           <HighlightsRow highlights={content.highlights} editable={false} />
 
-          <View style={styles.calendar}>
-            <MonthCalendar
-              year={visibleMonth.year}
-              month={visibleMonth.month}
-              today={today}
-              runLengths={runLengths}
-              canGoNext={canGoNext}
-              onPrev={() => setVisibleMonth((m) => addMonths(m.year, m.month, -1))}
-              onNext={() => setVisibleMonth((m) => addMonths(m.year, m.month, 1))}
-              onSelectDay={(day) =>
-                router.push({ pathname: "/day/[date]", params: { date: day, userId } })
-              }
-            />
-          </View>
+          {!summary.canSeePosts ? (
+            <View style={styles.locked}>
+              <Ionicons name="images-outline" size={32} color={colors.textMuted} />
+              <Text style={styles.muted}>Kalender und Beiträge von @{profile.username} sehen nur Follower.</Text>
+            </View>
+          ) : (
+            <>
+              <View style={styles.calendar}>
+                <MonthCalendar
+                  year={visibleMonth.year}
+                  month={visibleMonth.month}
+                  today={today}
+                  runLengths={runLengths}
+                  canGoNext={canGoNext}
+                  onPrev={() => setVisibleMonth((m) => addMonths(m.year, m.month, -1))}
+                  onNext={() => setVisibleMonth((m) => addMonths(m.year, m.month, 1))}
+                  onSelectDay={(day) =>
+                    router.push({ pathname: "/day/[date]", params: { date: day, userId } })
+                  }
+                />
+              </View>
 
-          <Text style={styles.sectionTitle}>Beiträge</Text>
-          <PostGrid posts={content.posts} emptyText="Noch keine Beiträge sichtbar." />
+              <Text style={styles.sectionTitle}>Beiträge</Text>
+              <PostGrid posts={content.posts} emptyText="Noch keine Beiträge sichtbar." />
+            </>
+          )}
         </>
       )}
     </ScrollView>
@@ -238,6 +300,23 @@ const styles = StyleSheet.create({
     color: colors.text,
     fontSize: fontSize.xl,
     fontWeight: "700",
+  },
+  badges: {
+    flexDirection: "row",
+    gap: spacing.xs,
+  },
+  badge: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 3,
+    paddingHorizontal: spacing.sm,
+    paddingVertical: 2,
+    borderRadius: radius.sm,
+    backgroundColor: colors.surface,
+  },
+  badgeText: {
+    color: colors.textMuted,
+    fontSize: fontSize.sm,
   },
   followsYou: {
     color: colors.textMuted,
