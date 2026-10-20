@@ -44,7 +44,7 @@ export default function PostCreateScreen() {
       .catch((error: unknown) => setLoadError(describeError(error)));
   }, [mode, postId]);
 
-  async function submit({ photos: edited, mentionIds, caption }: MediaEditorResult): Promise<string | null> {
+  async function submit({ photos: edited, mentionIds, caption, showInProfile }: MediaEditorResult): Promise<string | null> {
     // Editor photos refer to existing ones by their index in `existing.photos`.
     const photos: PostPhotoInput[] = edited.map((photo) => {
       const before = photo.source !== null ? existing?.photos[Number(photo.source)] : undefined;
@@ -65,6 +65,7 @@ export default function PostCreateScreen() {
           await updatePost(postId, {
             photos,
             caption,
+            showInProfile,
             inFeed: publishing || existing?.inFeed === true,
             tagIds: mentionIds,
           });
@@ -75,6 +76,7 @@ export default function PostCreateScreen() {
           caption,
           inFeed: true,
           isDayPost: mode === "day",
+          showInProfile,
           tagIds: mentionIds,
         });
       }
@@ -110,6 +112,7 @@ export default function PostCreateScreen() {
           initialPhotos={existing.photos.map((p, index) => ({ uri: p.url, source: String(index), edits: p.edits }))}
           initialTags={existing.tags}
           initialCaption={existing.caption}
+          initialShowInProfile={existing.showInProfile}
           maxPhotos={MAX_PHOTOS}
           showCaption
           title={publishing ? "Im Feed posten" : "Post bearbeiten"}
@@ -129,6 +132,7 @@ export default function PostCreateScreen() {
         initialUris={photoUri !== undefined ? [photoUri] : []}
         maxPhotos={MAX_PHOTOS}
         showCaption={mode !== "append"}
+        initialShowInProfile={mode !== "append" ? true : undefined}
         title={mode === "day" ? "Workout von heute" : mode === "single" ? "Einzelner Post" : "Zur Slideshow von heute"}
         submitLabel={mode === "append" ? "Hinzufügen" : "Teilen"}
         onBack={() => router.back()}

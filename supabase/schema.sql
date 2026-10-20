@@ -15,6 +15,8 @@
 --                   a post shared into a chat is also readable by that chat's members;
 --                   tagged people can see a story, and the one post they are tagged in. Owners can hide their posts and/or
 --                   stories from specific people (audience_restrictions); that always wins.
+--   * highlights    readable by the owner and followers; stories in a highlight stay
+--                   readable for them after expiring (other expired stories: owner only)
 --   * chats         only members can read conversations, members and messages
 --   * storage       bucket "photos" (private), objects live under {user_id}/{kind}/...;
 --                   a photo is readable exactly when its post/story is (avatars: everyone)
@@ -67,6 +69,8 @@ where p.id in (
   );
 create unique index if not exists posts_one_day_post_idx
   on public.posts (user_id, workout_date) where is_day_post;
+-- Shown in the profile grid (only posts that are also in the feed appear there).
+alter table public.posts add column if not exists show_in_profile boolean not null default true;
 
 -- All photos of a post in carousel order (a single photo is one row).
 create table if not exists public.post_media (
@@ -167,6 +171,24 @@ create table if not exists public.story_views (
   primary key (story_id, user_id)
 );
 create index if not exists story_views_user_idx on public.story_views (user_id);
+
+-- Story highlights on the profile. The cover is one of the owner's stories.
+create table if not exists public.highlights (
+  id             uuid primary key default gen_random_uuid(),
+  user_id        uuid not null references public.profiles (id) on delete cascade,
+  title          text not null check (char_length(title) between 1 and 30),
+  cover_story_id uuid references public.stories (id) on delete set null,
+  created_at     timestamptz not null default now()
+);
+create index if not exists highlights_user_idx on public.highlights (user_id, created_at);
+
+create table if not exists public.highlight_items (
+  highlight_id uuid not null references public.highlights (id) on delete cascade,
+  story_id     uuid not null references public.stories (id) on delete cascade,
+  added_at     timestamptz not null default now(),
+  primary key (highlight_id, story_id)
+);
+create index if not exists highlight_items_story_idx on public.highlight_items (story_id);
 
 -- "Hide my stories / posts from this person". Only the owner can read or change it.
 create table if not exists public.audience_restrictions (
@@ -375,6 +397,47 @@ as $$
   select exists (select 1 from public.comments c where c.id = comment and c.post_id = post);
 $$;
 
+create or replace function public.is_my_story(story uuid)
+returns boolean
+language sql stable security definer set search_path = ''
+as $$
+  select exists (select 1 from public.stories s where s.id = story and s.user_id = (select auth.uid()));
+$$;
+
+create or replace function public.is_my_highlight(highlight uuid)
+returns boolean
+language sql stable security definer set search_path = ''
+as $$
+  select exists (select 1 from public.highlights h where h.id = highlight and h.user_id = (select auth.uid()));
+$$;
+
+-- Highlights are for the owner and followers, unless the owner hid their stories from the caller.
+create or replace function public.can_view_highlight(highlight uuid)
+returns boolean
+language sql stable security definer set search_path = ''
+as $$
+  select exists (
+    select 1 from public.highlights h
+    where h.id = highlight
+      and (
+        h.user_id = (select auth.uid())
+        or (public.is_following(h.user_id) and not public.is_hidden_from_me(h.user_id, 'stories'))
+      )
+  );
+$$;
+
+-- True if the story is in a highlight the caller may see. Only this keeps expired stories
+-- readable; stories can only be added to their owner's highlights (insert policy).
+create or replace function public.is_in_visible_highlight(story uuid)
+returns boolean
+language sql stable security definer set search_path = ''
+as $$
+  select exists (
+    select 1 from public.highlight_items hi
+    where hi.story_id = story and public.can_view_highlight(hi.highlight_id)
+  );
+$$;
+
 create or replace function public.can_view_story(story uuid)
 returns boolean
 language sql stable security definer set search_path = ''
@@ -389,6 +452,7 @@ as $$
           and (public.is_following(s.user_id) or (select auth.uid()) = any (s.mentioned_user_ids))
           and not public.is_hidden_from_me(s.user_id, 'stories')
         )
+        or public.is_in_visible_highlight(s.id)
       )
   );
 $$;
@@ -531,6 +595,7 @@ grant execute on function public.set_message_pinned(uuid, boolean) to authentica
 grant select, insert, update, delete on
   public.profiles, public.posts, public.post_media, public.post_tags, public.post_likes, public.comments, public.comment_likes, public.follows,
   public.stories, public.story_likes, public.story_views, public.audience_restrictions,
+  public.highlights, public.highlight_items,
   public.conversations, public.conversation_members, public.messages, public.message_reactions
 to authenticated;
 
@@ -551,6 +616,8 @@ alter table public.stories              enable row level security;
 alter table public.story_likes          enable row level security;
 alter table public.story_views          enable row level security;
 alter table public.audience_restrictions enable row level security;
+alter table public.highlights           enable row level security;
+alter table public.highlight_items      enable row level security;
 alter table public.conversations        enable row level security;
 alter table public.conversation_members enable row level security;
 alter table public.messages             enable row level security;
@@ -712,7 +779,8 @@ drop policy if exists "follows: unfollow as yourself" on public.follows;
 create policy "follows: unfollow as yourself" on public.follows
   for delete to authenticated using (follower_id = (select auth.uid()));
 
--- stories: expired stories are invisible to everyone but their owner.
+-- stories: expired stories are invisible to everyone but their owner, except stories in a
+-- highlight the caller may see (owner and followers, see can_view_highlight).
 drop policy if exists "stories: read active from followed, own always" on public.stories;
 create policy "stories: read active from followed, own always" on public.stories
   for select to authenticated
@@ -723,6 +791,7 @@ create policy "stories: read active from followed, own always" on public.stories
       and (public.is_following(user_id) or (select auth.uid()) = any (mentioned_user_ids))
       and not public.is_hidden_from_me(user_id, 'stories')
     )
+    or public.is_in_visible_highlight(id)
   );
 
 -- You can only tag people you follow.
@@ -776,6 +845,46 @@ drop policy if exists "story_views: record own view" on public.story_views;
 create policy "story_views: record own view" on public.story_views
   for insert to authenticated
   with check (user_id = (select auth.uid()) and public.can_view_story(story_id));
+
+-- highlights: owner manages them; owner and followers read them.
+drop policy if exists "highlights: read" on public.highlights;
+create policy "highlights: read" on public.highlights
+  for select to authenticated using (public.can_view_highlight(id));
+
+drop policy if exists "highlights: create own" on public.highlights;
+create policy "highlights: create own" on public.highlights
+  for insert to authenticated
+  with check (
+    user_id = (select auth.uid())
+    and (cover_story_id is null or public.is_my_story(cover_story_id))
+  );
+
+drop policy if exists "highlights: update own" on public.highlights;
+create policy "highlights: update own" on public.highlights
+  for update to authenticated
+  using (user_id = (select auth.uid()))
+  with check (
+    user_id = (select auth.uid())
+    and (cover_story_id is null or public.is_my_story(cover_story_id))
+  );
+
+drop policy if exists "highlights: delete own" on public.highlights;
+create policy "highlights: delete own" on public.highlights
+  for delete to authenticated using (user_id = (select auth.uid()));
+
+-- highlight_items: only own stories into own highlights.
+drop policy if exists "highlight_items: read" on public.highlight_items;
+create policy "highlight_items: read" on public.highlight_items
+  for select to authenticated using (public.can_view_highlight(highlight_id));
+
+drop policy if exists "highlight_items: add own story" on public.highlight_items;
+create policy "highlight_items: add own story" on public.highlight_items
+  for insert to authenticated
+  with check (public.is_my_highlight(highlight_id) and public.is_my_story(story_id));
+
+drop policy if exists "highlight_items: remove own" on public.highlight_items;
+create policy "highlight_items: remove own" on public.highlight_items
+  for delete to authenticated using (public.is_my_highlight(highlight_id));
 
 -- audience_restrictions: private to the owner (the hidden person must not find out).
 drop policy if exists "audience_restrictions: owner reads" on public.audience_restrictions;

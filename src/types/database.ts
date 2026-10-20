@@ -41,6 +41,7 @@ export type Database = {
           created_at: Timestamp;
           in_feed: boolean;
           is_day_post: boolean;
+          show_in_profile: boolean;
         };
         Insert: {
           id?: Uuid;
@@ -51,8 +52,9 @@ export type Database = {
           created_at?: Timestamp;
           in_feed?: boolean;
           is_day_post?: boolean;
+          show_in_profile?: boolean;
         };
-        Update: { caption?: string | null; in_feed?: boolean; photo_path?: string };
+        Update: { caption?: string | null; in_feed?: boolean; photo_path?: string; show_in_profile?: boolean };
         Relationships: [Rel<"posts_user_id_fkey", "user_id", "profiles">];
       };
       post_media: {
@@ -178,6 +180,24 @@ export type Database = {
         Relationships: [
           Rel<"story_views_story_id_fkey", "story_id", "stories">,
           Rel<"story_views_user_id_fkey", "user_id", "profiles">,
+        ];
+      };
+      highlights: {
+        Row: { id: Uuid; user_id: Uuid; title: string; cover_story_id: Uuid | null; created_at: Timestamp };
+        Insert: { id?: Uuid; user_id: Uuid; title: string; cover_story_id?: Uuid | null; created_at?: Timestamp };
+        Update: { title?: string; cover_story_id?: Uuid | null };
+        Relationships: [
+          Rel<"highlights_user_id_fkey", "user_id", "profiles">,
+          Rel<"highlights_cover_story_id_fkey", "cover_story_id", "stories">,
+        ];
+      };
+      highlight_items: {
+        Row: { highlight_id: Uuid; story_id: Uuid; added_at: Timestamp };
+        Insert: { highlight_id: Uuid; story_id: Uuid; added_at?: Timestamp };
+        Update: Record<string, never>;
+        Relationships: [
+          Rel<"highlight_items_highlight_id_fkey", "highlight_id", "highlights">,
+          Rel<"highlight_items_story_id_fkey", "story_id", "stories">,
         ];
       };
       audience_restrictions: {

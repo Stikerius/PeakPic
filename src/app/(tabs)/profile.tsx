@@ -1,7 +1,7 @@
 import Ionicons from "@expo/vector-icons/Ionicons";
 import * as ImagePicker from "expo-image-picker";
 import { useFocusEffect } from "expo-router";
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
@@ -14,14 +14,19 @@ import {
 
 import { Avatar } from "@/components/avatar";
 import { Button } from "@/components/button";
+import { HighlightsRow } from "@/components/profile/highlights-row";
+import { PostGrid } from "@/components/profile/post-grid";
 import { FlameIcon } from "@/components/streak/flame-icon";
 import { colors, fontSize, radius, spacing } from "@/constants/theme";
 import { useWorkoutDays } from "@/hooks/use-workout-days";
 import { signOut } from "@/lib/auth";
 import { describeError } from "@/lib/errors";
+import { onAppEvent } from "@/lib/events";
+import { listMyHighlights, type Highlight } from "@/lib/highlightRepo";
 import { getMyProfile, updateMyAvatar, type Profile } from "@/lib/profileRepo";
 import { useSession } from "@/lib/session";
 import { computeStreakStatsFromDays, flameTier, toDayKey } from "@/lib/streak";
+import { fetchProfileGrid, type PostThumbnail } from "@/lib/userProfileRepo";
 
 const AVATAR_SIZE = 112;
 
@@ -32,15 +37,33 @@ export default function ProfileScreen() {
   const [profile, setProfile] = useState<Profile | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [uploading, setUploading] = useState(false);
+  const [highlights, setHighlights] = useState<Highlight[]>([]);
+  const [posts, setPosts] = useState<PostThumbnail[] | null>(null);
+  // Bumped when posts or highlights change elsewhere, to reload them.
+  const [version, setVersion] = useState(0);
+
+  useEffect(() => {
+    const bump = () => setVersion((v) => v + 1);
+    const unsubscribers = [
+      onAppEvent("postCreated", bump),
+      onAppEvent("postDeleted", bump),
+      onAppEvent("highlightsChanged", bump),
+    ];
+    return () => unsubscribers.forEach((unsubscribe) => unsubscribe());
+  }, []);
 
   useFocusEffect(
     useCallback(() => {
       let active = true;
       getMyProfile()
-        .then((result) => {
+        .then(async (result) => {
           if (!active) return;
           setProfile(result);
           setError(null);
+          const [mine, grid] = await Promise.all([listMyHighlights(), fetchProfileGrid(result.id)]);
+          if (!active) return;
+          setHighlights(mine);
+          setPosts(grid);
         })
         .catch(() => {
           if (active) setError("Profil konnte nicht geladen werden.");
@@ -48,7 +71,7 @@ export default function ProfileScreen() {
       return () => {
         active = false;
       };
-    }, []),
+    }, [version]),
   );
 
   const stats = computeStreakStatsFromDays(days, toDayKey(new Date()));
@@ -97,58 +120,73 @@ export default function ProfileScreen() {
 
   return (
     <ScrollView style={styles.screen} contentContainerStyle={styles.content}>
-      <View style={styles.header}>
-        <Pressable
-          onPress={() => void changeAvatar()}
-          disabled={uploading}
-          accessibilityRole="button"
-          accessibilityLabel="Profilbild ändern"
-          style={({ pressed }) => pressed && styles.pressed}
-        >
-          <Avatar uri={profile.avatarUrl} username={profile.username} size={AVATAR_SIZE} />
-          <View style={styles.avatarBadge}>
-            {uploading ? (
-              <ActivityIndicator size="small" color={colors.text} />
-            ) : (
-              <Ionicons name="camera" size={16} color={colors.text} />
-            )}
-          </View>
-        </Pressable>
-        <Text style={styles.username}>@{profile.username}</Text>
-        {email !== undefined && <Text style={styles.email}>{email}</Text>}
-      </View>
-
-      {error !== null && <Text style={styles.error}>{error}</Text>}
-
-      <View style={styles.stats}>
-        <View style={styles.stat}>
-          <View style={styles.statIcon}>
-            {stats.current > 0 ? (
-              <FlameIcon tier={flameTier(stats.current)} baseSize={28} />
-            ) : (
-              <Ionicons name="flame-outline" size={28} color={colors.textMuted} />
-            )}
-          </View>
-          <Text style={styles.statValue}>{stats.current}</Text>
-          <Text style={styles.statLabel}>Aktueller Streak</Text>
-        </View>
-        <View style={styles.stat}>
-          <View style={styles.statIcon}>
-            <Ionicons name="trophy" size={28} color={colors.warning} />
-          </View>
-          <Text style={styles.statValue}>{stats.longest}</Text>
-          <Text style={styles.statLabel}>Längster Streak</Text>
-        </View>
-        <View style={styles.stat}>
-          <View style={styles.statIcon}>
-            <Ionicons name="barbell" size={28} color={colors.primary} />
-          </View>
-          <Text style={styles.statValue}>{stats.trainingDays.size}</Text>
-          <Text style={styles.statLabel}>Trainingstage</Text>
+      <View style={[styles.padded, styles.section]}>
+        <View style={styles.header}>
+          <Pressable
+            onPress={() => void changeAvatar()}
+            disabled={uploading}
+            accessibilityRole="button"
+            accessibilityLabel="Profilbild ändern"
+            style={({ pressed }) => pressed && styles.pressed}
+          >
+            <Avatar uri={profile.avatarUrl} username={profile.username} size={AVATAR_SIZE} />
+            <View style={styles.avatarBadge}>
+              {uploading ? (
+                <ActivityIndicator size="small" color={colors.text} />
+              ) : (
+                <Ionicons name="camera" size={16} color={colors.text} />
+              )}
+            </View>
+          </Pressable>
+          <Text style={styles.username}>@{profile.username}</Text>
+          {email !== undefined && <Text style={styles.email}>{email}</Text>}
         </View>
       </View>
 
-      <Button label="Abmelden" variant="secondary" onPress={confirmSignOut} />
+      <HighlightsRow highlights={highlights} editable />
+
+      <View style={[styles.padded, styles.section]}>
+        {error !== null && <Text style={styles.error}>{error}</Text>}
+
+        <View style={styles.stats}>
+          <View style={styles.stat}>
+            <View style={styles.statIcon}>
+              {stats.current > 0 ? (
+                <FlameIcon tier={flameTier(stats.current)} baseSize={28} />
+              ) : (
+                <Ionicons name="flame-outline" size={28} color={colors.textMuted} />
+              )}
+            </View>
+            <Text style={styles.statValue}>{stats.current}</Text>
+            <Text style={styles.statLabel}>Aktueller Streak</Text>
+          </View>
+          <View style={styles.stat}>
+            <View style={styles.statIcon}>
+              <Ionicons name="trophy" size={28} color={colors.warning} />
+            </View>
+            <Text style={styles.statValue}>{stats.longest}</Text>
+            <Text style={styles.statLabel}>Längster Streak</Text>
+          </View>
+          <View style={styles.stat}>
+            <View style={styles.statIcon}>
+              <Ionicons name="barbell" size={28} color={colors.primary} />
+            </View>
+            <Text style={styles.statValue}>{stats.trainingDays.size}</Text>
+            <Text style={styles.statLabel}>Trainingstage</Text>
+          </View>
+        </View>
+      </View>
+
+      <Text style={[styles.sectionTitle, styles.padded]}>Beiträge</Text>
+      {posts === null ? (
+        <ActivityIndicator color={colors.primary} />
+      ) : (
+        <PostGrid posts={posts} emptyText="Noch keine Beiträge im Profil. Teile ein Workout im Feed." />
+      )}
+
+      <View style={styles.padded}>
+        <Button label="Abmelden" variant="secondary" onPress={confirmSignOut} />
+      </View>
     </ScrollView>
   );
 }
@@ -159,8 +197,20 @@ const styles = StyleSheet.create({
     backgroundColor: colors.background,
   },
   content: {
-    padding: spacing.md,
+    paddingVertical: spacing.md,
     gap: spacing.lg,
+  },
+  padded: {
+    paddingHorizontal: spacing.md,
+  },
+  section: {
+    gap: spacing.lg,
+  },
+  sectionTitle: {
+    color: colors.text,
+    fontSize: fontSize.lg,
+    fontWeight: "700",
+    marginBottom: -spacing.sm,
   },
   centered: {
     flex: 1,

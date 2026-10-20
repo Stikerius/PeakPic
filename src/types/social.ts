@@ -18,6 +18,8 @@ export type FeedPost = {
   tags: PublicProfile[];
   /** The day's slideshow (several photos of one training day). */
   isDayPost: boolean;
+  /** Shown in the author's profile grid. */
+  showInProfile: boolean;
   caption: string | null;
   workoutDate: DayKey;
   createdAt: string;

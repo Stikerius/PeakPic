@@ -3,6 +3,7 @@ import { ActionSheetIOS, Alert, Platform } from "react-native";
 
 import { describeError } from "@/lib/errors";
 import { emitAppEvent } from "@/lib/events";
+import { setPostShownInProfile } from "@/lib/postRepo";
 import { workoutRepo } from "@/lib/workoutRepo";
 
 type PostActionsOptions = {
@@ -10,7 +11,7 @@ type PostActionsOptions = {
   onDeleted?: () => void;
 };
 
-/** Menu for one of my own posts: edit (photos, order, caption, tags) or delete. */
+/** Menu for one of my own posts: edit, show in or hide from the profile grid, delete. */
 export function usePostActions({ onDeleted }: PostActionsOptions = {}) {
   function edit(postId: string) {
     router.push({ pathname: "/post-create", params: { mode: "edit", postId } });
@@ -35,19 +36,28 @@ export function usePostActions({ onDeleted }: PostActionsOptions = {}) {
     ]);
   }
 
-  return function showPostActions(postId: string) {
+  function toggleProfile(postId: string, show: boolean) {
+    setPostShownInProfile(postId, show)
+      .then(() => emitAppEvent("postCreated", undefined))
+      .catch((error: unknown) => Alert.alert("Ändern fehlgeschlagen", describeError(error)));
+  }
+
+  return function showPostActions(post: { id: string; showInProfile: boolean }) {
+    const profileLabel = post.showInProfile ? "Im Profil ausblenden" : "Im Profil anzeigen";
     if (Platform.OS === "ios") {
       ActionSheetIOS.showActionSheetWithOptions(
-        { options: ["Bearbeiten", "Löschen", "Abbrechen"], destructiveButtonIndex: 1, cancelButtonIndex: 2 },
+        { options: ["Bearbeiten", profileLabel, "Löschen", "Abbrechen"], destructiveButtonIndex: 2, cancelButtonIndex: 3 },
         (index) => {
-          if (index === 0) edit(postId);
-          else if (index === 1) confirmDelete(postId);
+          if (index === 0) edit(post.id);
+          else if (index === 1) toggleProfile(post.id, !post.showInProfile);
+          else if (index === 2) confirmDelete(post.id);
         },
       );
     } else {
       Alert.alert("Post", undefined, [
-        { text: "Bearbeiten", onPress: () => edit(postId) },
-        { text: "Löschen", style: "destructive", onPress: () => confirmDelete(postId) },
+        { text: "Bearbeiten", onPress: () => edit(post.id) },
+        { text: profileLabel, onPress: () => toggleProfile(post.id, !post.showInProfile) },
+        { text: "Löschen", style: "destructive", onPress: () => confirmDelete(post.id) },
         { text: "Abbrechen", style: "cancel" },
       ]);
     }

@@ -3,7 +3,7 @@ import { Image } from "expo-image";
 import { router, useLocalSearchParams } from "expo-router";
 import { StatusBar } from "expo-status-bar";
 import { useEffect, useRef, useState, type ReactNode } from "react";
-import { Alert, Pressable, StyleSheet, Text, View, useWindowDimensions } from "react-native";
+import { ActivityIndicator, Alert, Pressable, StyleSheet, Text, View, useWindowDimensions } from "react-native";
 import { Gesture, GestureDetector } from "react-native-gesture-handler";
 import Animated, {
   cancelAnimation,
@@ -18,11 +18,21 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { scheduleOnRN } from "react-native-worklets";
 
 import { Avatar } from "@/components/avatar";
+import { HighlightPicker } from "@/components/stories/highlight-picker";
 import { StoryActivitySheet } from "@/components/stories/story-activity-sheet";
 import { useOpenProfile } from "@/hooks/use-open-profile";
 import { useSwipeToDismiss } from "@/hooks/use-swipe-to-dismiss";
 import { colors, fontSize, radius, spacing } from "@/constants/theme";
+import { describeError } from "@/lib/errors";
+import { emitAppEvent } from "@/lib/events";
 import { formatRelativeTime } from "@/lib/format";
+import {
+  applyHighlightChoice,
+  deleteHighlight,
+  fetchHighlightGroup,
+  removeStoryFromHighlight,
+  type HighlightChoice,
+} from "@/lib/highlightRepo";
 import { fetchStoryActivity, type StoryActivity } from "@/lib/storyRepo";
 import { deleteStory, markSeen, resortStories, toggleLike, useStories } from "@/lib/storyStore";
 import type { StoryGroup } from "@/types/social";
@@ -111,8 +121,14 @@ function ProgressSegment({ state, progress }: { state: "done" | "active" | "todo
 }
 
 export default function StoryViewerScreen() {
-  const { userId } = useLocalSearchParams<{ userId: string }>();
-  const { groups } = useStories();
+  // With highlightId: the stories of one highlight (also expired ones), no other people.
+  const { userId, highlightId } = useLocalSearchParams<{ userId: string; highlightId?: string }>();
+  const store = useStories();
+  const inHighlight = highlightId !== undefined;
+  // undefined while loading, null if the highlight is gone or empty.
+  const [highlightGroup, setHighlightGroup] = useState<StoryGroup | null | undefined>(undefined);
+  const groups = inHighlight ? (highlightGroup ? [highlightGroup] : []) : store.groups;
+  const [highlightPickerOpen, setHighlightPickerOpen] = useState(false);
   const insets = useSafeAreaInsets();
   const { width } = useWindowDimensions();
 
@@ -134,6 +150,13 @@ export default function StoryViewerScreen() {
   const openProfile = useOpenProfile();
   const [activity, setActivity] = useState<StoryActivity | null>(null);
   const [activityOpen, setActivityOpen] = useState(false);
+
+  useEffect(() => {
+    if (highlightId === undefined) return;
+    fetchHighlightGroup(highlightId)
+      .then(setHighlightGroup)
+      .catch(() => setHighlightGroup(null));
+  }, [highlightId]);
 
   const group = groups[groupIndex];
   const story = group?.stories[Math.min(storyIndex, group.stories.length - 1)];
@@ -215,7 +238,7 @@ export default function StoryViewerScreen() {
 
   // Run the timer once the image is shown; pausing keeps the current progress.
   useEffect(() => {
-    if (!loaded || paused || moving || activityOpen) return;
+    if (!loaded || paused || moving || activityOpen || highlightPickerOpen) return;
     progress.value = withTiming(
       1,
       { duration: (1 - progress.value) * STORY_DURATION_MS },
@@ -224,11 +247,12 @@ export default function StoryViewerScreen() {
       },
     );
     return () => cancelAnimation(progress);
-  }, [loaded, paused, moving, activityOpen, story?.id]);
+  }, [loaded, paused, moving, activityOpen, highlightPickerOpen, story?.id]);
 
   // Group disappeared (e.g. last own story deleted): leave the viewer.
   useEffect(() => {
-    if (story === undefined) close();
+    const loadingHighlight = inHighlight && highlightGroup === undefined;
+    if (story === undefined && !loadingHighlight) close();
   }, [story]);
 
   const tap = Gesture.Tap()
@@ -298,7 +322,55 @@ export default function StoryViewerScreen() {
 
   const gestures = Gesture.Race(swipeDown.gesture, swipeUp, swipeSideways, holdToPause, tap);
 
-  if (group === undefined || story === undefined) return <View style={styles.screen} />;
+  if (group === undefined || story === undefined) {
+    return (
+      <View style={[styles.screen, styles.missing]}>
+        {inHighlight && highlightGroup === undefined && <ActivityIndicator color={colors.text} />}
+      </View>
+    );
+  }
+
+  async function addToHighlight(choice: HighlightChoice) {
+    setHighlightPickerOpen(false);
+    if (story === undefined) return;
+    try {
+      await applyHighlightChoice(choice, story.id);
+      emitAppEvent("highlightsChanged", undefined);
+      Alert.alert("Gespeichert", `Die Story ist jetzt im Highlight „${choice.title}“.`);
+    } catch (error) {
+      Alert.alert("Highlight speichern fehlgeschlagen", describeError(error));
+    }
+  }
+
+  function confirmRemoveFromHighlight() {
+    if (story === undefined || highlightId === undefined || group === undefined) return;
+    const storyId = story.id;
+    const isLast = group.stories.length <= 1;
+    setPaused(true);
+    Alert.alert(
+      "Aus Highlight entfernen?",
+      isLast
+        ? "Es ist die letzte Story. Das Highlight wird danach gelöscht."
+        : "Die Story bleibt erhalten, sie ist nur nicht mehr in diesem Highlight.",
+      [
+        { text: "Abbrechen", style: "cancel", onPress: () => setPaused(false) },
+        {
+          text: "Entfernen",
+          style: "destructive",
+          onPress: () => {
+            (isLast ? deleteHighlight(highlightId) : removeStoryFromHighlight(highlightId, storyId))
+              .then(() => {
+                emitAppEvent("highlightsChanged", undefined);
+                if (isLast) return close();
+                setHighlightGroup((g) => (g ? { ...g, stories: g.stories.filter((s) => s.id !== storyId) } : g));
+              })
+              .catch((error: unknown) => Alert.alert("Entfernen fehlgeschlagen", describeError(error)))
+              .finally(() => setPaused(false));
+          },
+        },
+      ],
+    );
+  }
 
   function confirmDelete() {
     if (story === undefined) return;
@@ -416,16 +488,35 @@ export default function StoryViewerScreen() {
                 </Pressable>
               ))}
             </View>
-            {group.isMine ? (
+            {group.isMine && inHighlight ? (
               <Pressable
-                onPress={confirmDelete}
+                onPress={confirmRemoveFromHighlight}
                 accessibilityRole="button"
-                accessibilityLabel="Story löschen"
+                accessibilityLabel="Aus Highlight entfernen"
                 style={styles.roundButton}
               >
-                <Ionicons name="trash-outline" size={24} color={colors.text} />
+                <Ionicons name="remove-circle-outline" size={26} color={colors.text} />
               </Pressable>
-            ) : (
+            ) : group.isMine ? (
+              <View style={styles.ownActions}>
+                <Pressable
+                  onPress={() => setHighlightPickerOpen(true)}
+                  accessibilityRole="button"
+                  accessibilityLabel="Zu Highlight hinzufügen"
+                  style={styles.roundButton}
+                >
+                  <Ionicons name="bookmark-outline" size={24} color={colors.text} />
+                </Pressable>
+                <Pressable
+                  onPress={confirmDelete}
+                  accessibilityRole="button"
+                  accessibilityLabel="Story löschen"
+                  style={styles.roundButton}
+                >
+                  <Ionicons name="trash-outline" size={24} color={colors.text} />
+                </Pressable>
+              </View>
+            ) : inHighlight ? null : (
               <Pressable
                 onPress={() => void toggleLike(story)}
                 accessibilityRole="button"
@@ -443,6 +534,12 @@ export default function StoryViewerScreen() {
           </View>
         </PageSlot>
       </Animated.View>
+
+      <HighlightPicker
+        visible={highlightPickerOpen}
+        onPick={(choice) => void addToHighlight(choice)}
+        onClose={() => setHighlightPickerOpen(false)}
+      />
 
       <StoryActivitySheet
         activity={activity}
@@ -560,6 +657,10 @@ const styles = StyleSheet.create({
     color: colors.background,
     fontSize: fontSize.sm,
     fontWeight: "700",
+  },
+  ownActions: {
+    flexDirection: "row",
+    gap: spacing.sm,
   },
   roundButton: {
     width: 52,

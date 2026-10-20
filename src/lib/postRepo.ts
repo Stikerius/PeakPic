@@ -28,6 +28,8 @@ export type NewPost = {
   inFeed: boolean;
   /** The day's slideshow (first proof of the day) or an extra single post. */
   isDayPost: boolean;
+  /** Shown in the profile grid (if it is also in the feed). */
+  showInProfile: boolean;
   tagIds: string[];
 };
 
@@ -134,6 +136,7 @@ export async function createPost(input: NewPost): Promise<string> {
       workout_date: toDayKey(new Date()),
       in_feed: input.inFeed,
       is_day_post: input.isDayPost,
+      show_in_profile: input.showInProfile,
     })
     .select("id")
     .single();
@@ -192,6 +195,7 @@ export type EditablePost = {
   tags: PublicProfile[];
   caption: string;
   inFeed: boolean;
+  showInProfile: boolean;
 };
 
 /** One of my posts with originals and stored edits, to open it in the editor again. */
@@ -199,7 +203,7 @@ export async function fetchPostForEdit(postId: string): Promise<EditablePost> {
   const userId = await requireUserId();
   const { data, error } = await supabase
     .from("posts")
-    .select("id, photo_path, caption, in_feed")
+    .select("id, photo_path, caption, in_feed, show_in_profile")
     .eq("id", postId)
     .eq("user_id", userId)
     .single();
@@ -232,6 +236,7 @@ export async function fetchPostForEdit(postId: string): Promise<EditablePost> {
     tags: tags.get(postId) ?? [],
     caption: data.caption ?? "",
     inFeed: data.in_feed,
+    showInProfile: data.show_in_profile,
   };
 }
 
@@ -240,6 +245,7 @@ export type PostUpdate = {
   photos: PostPhotoInput[];
   caption: string;
   inFeed: boolean;
+  showInProfile: boolean;
   /** The post's tags afterwards (removed people are untagged). */
   tagIds: string[];
 };
@@ -272,6 +278,7 @@ export async function updatePost(postId: string, update: PostUpdate): Promise<vo
       photo_path: cover.photo_path,
       caption: update.caption.length > 0 ? update.caption : null,
       in_feed: update.inFeed,
+      show_in_profile: update.showInProfile,
     })
     .eq("id", postId)
     .eq("user_id", userId);
@@ -289,6 +296,17 @@ export async function updatePost(postId: string, update: PostUpdate): Promise<vo
   await removePhotos([...oldPaths].filter((path) => !stillUsed.has(path))).catch((removeError: unknown) =>
     console.warn("[post] Alte Fotos konnten nicht gelöscht werden:", removeError),
   );
+}
+
+/** "Im Profil anzeigen" for one of my posts. */
+export async function setPostShownInProfile(postId: string, show: boolean): Promise<void> {
+  const userId = await requireUserId();
+  const { error } = await supabase
+    .from("posts")
+    .update({ show_in_profile: show })
+    .eq("id", postId)
+    .eq("user_id", userId);
+  if (error) throw error;
 }
 
 /**

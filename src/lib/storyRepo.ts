@@ -10,21 +10,36 @@ import type { PublicProfile, Story, StoryGroup } from "@/types/social";
  * Active stories (not expired) of people I follow, my own, and stories I'm tagged in,
  * grouped by author, in story bar order (see sortStoryGroups).
  */
+export const STORY_SELECT =
+  "id, user_id, photo_path, created_at, expires_at, mentioned_user_ids, author:profiles!stories_user_id_fkey(id, username, avatar_path)";
+
+export type StoryRow = {
+  id: string;
+  user_id: string;
+  photo_path: string;
+  created_at: string;
+  expires_at: string;
+  mentioned_user_ids: string[];
+  author: { id: string; username: string; avatar_path: string | null };
+};
+
 export async function fetchStoryGroups(): Promise<StoryGroup[]> {
   const userId = await requireUserId();
   const authorIds = [userId, ...(await getFollowingIds())];
 
   const { data: rows, error } = await supabase
     .from("stories")
-    .select(
-      "id, user_id, photo_path, created_at, expires_at, mentioned_user_ids, author:profiles!stories_user_id_fkey(id, username, avatar_path)",
-    )
+    .select(STORY_SELECT)
     .or(`user_id.in.(${authorIds.join(",")}),mentioned_user_ids.cs.{${userId}}`)
     .gt("expires_at", new Date().toISOString())
     .order("created_at", { ascending: true });
   if (error) throw error;
-  if (rows.length === 0) return [];
+  return sortStoryGroups(await groupStoryRows(rows, userId));
+}
 
+/** Stories with photos, seen/liked state and mentions, grouped by author (oldest first). */
+export async function groupStoryRows(rows: StoryRow[], userId: string): Promise<StoryGroup[]> {
+  if (rows.length === 0) return [];
   const storyIds = rows.map((r) => r.id);
   const mentionedIds = [...new Set(rows.flatMap((r) => r.mentioned_user_ids))];
   const [viewsResult, likesResult, mentionedResult, photoUrls, authors] = await Promise.all([
@@ -76,19 +91,23 @@ export async function fetchStoryGroups(): Promise<StoryGroup[]> {
     }
   }
 
-  return sortStoryGroups([...groups.values()]);
+  return [...groups.values()];
 }
 
-export async function addStory(sourceUri: string, mentionedUserIds: string[]): Promise<void> {
+/** Returns the new story's id. */
+export async function addStory(sourceUri: string, mentionedUserIds: string[]): Promise<string> {
   const userId = await requireUserId();
   const photoPath = await uploadPhoto(userId, "stories", sourceUri);
-  const { error } = await supabase
+  const { data, error } = await supabase
     .from("stories")
-    .insert({ user_id: userId, photo_path: photoPath, mentioned_user_ids: mentionedUserIds });
+    .insert({ user_id: userId, photo_path: photoPath, mentioned_user_ids: mentionedUserIds })
+    .select("id")
+    .single();
   if (error) {
     await removePhotos([photoPath]).catch(() => undefined);
     throw error;
   }
+  return data.id;
 }
 
 export async function deleteStory(storyId: string): Promise<void> {

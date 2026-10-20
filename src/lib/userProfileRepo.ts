@@ -15,9 +15,9 @@ export type UserProfileSummary = {
   followsMe: boolean;
 };
 
-export type PostThumbnail = { id: string; photoUrl: string | null };
+export type PostThumbnail = { id: string; photoUrl: string | null; photoCount: number };
 
-const RECENT_POSTS_LIMIT = 30;
+const GRID_POSTS_LIMIT = 60;
 
 export async function fetchUserProfile(userId: string): Promise<UserProfileSummary | null> {
   const myId = await requireUserId();
@@ -58,18 +58,39 @@ export async function fetchUserWorkoutDays(userId: string): Promise<DayKey[]> {
   return data.map((row) => row.workout_date);
 }
 
-/** Recent posts for the profile grid; streak-only proofs (not in the feed) are left out. */
-export async function fetchUserRecentPosts(userId: string): Promise<PostThumbnail[]> {
+/**
+ * Posts for the profile grid, newest first: only posts in the feed with "Im Profil anzeigen"
+ * (streak-only proofs stay out). RLS decides what other people may see at all.
+ */
+export async function fetchProfileGrid(userId: string): Promise<PostThumbnail[]> {
   const { data, error } = await supabase
     .from("posts")
     .select("id, photo_path")
     .eq("user_id", userId)
     .eq("in_feed", true)
+    .eq("show_in_profile", true)
     .order("created_at", { ascending: false })
-    .limit(RECENT_POSTS_LIMIT);
+    .limit(GRID_POSTS_LIMIT);
   if (error) throw error;
-  const urls = await getSignedPhotoUrls(data.map((row) => row.photo_path));
-  return data.map((row) => ({ id: row.id, photoUrl: urls.get(row.photo_path) ?? null }));
+  if (data.length === 0) return [];
+  const [urls, media] = await Promise.all([
+    getSignedPhotoUrls(data.map((row) => row.photo_path)),
+    supabase
+      .from("post_media")
+      .select("post_id")
+      .in(
+        "post_id",
+        data.map((row) => row.id),
+      ),
+  ]);
+  if (media.error) throw media.error;
+  const counts = new Map<string, number>();
+  for (const row of media.data) counts.set(row.post_id, (counts.get(row.post_id) ?? 0) + 1);
+  return data.map((row) => ({
+    id: row.id,
+    photoUrl: urls.get(row.photo_path) ?? null,
+    photoCount: counts.get(row.id) ?? 1,
+  }));
 }
 
 /** Another user's workouts on one day (read-only), oldest first; streak-only proofs stay private. */

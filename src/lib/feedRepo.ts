@@ -14,7 +14,7 @@ export type FeedPage = {
 };
 
 const POST_SELECT =
-  "id, photo_path, caption, workout_date, created_at, is_day_post, author:profiles!posts_user_id_fkey(id, username, avatar_path)";
+  "id, photo_path, caption, workout_date, created_at, is_day_post, show_in_profile, author:profiles!posts_user_id_fkey(id, username, avatar_path)";
 
 type PostRow = {
   id: string;
@@ -23,6 +23,7 @@ type PostRow = {
   workout_date: string;
   created_at: string;
   is_day_post: boolean;
+  show_in_profile: boolean;
   author: { id: string; username: string; avatar_path: string | null };
 };
 
@@ -58,6 +59,7 @@ async function hydratePosts(rows: PostRow[], userId: string): Promise<FeedPost[]
     photoUrls: photoUrls.get(r.id) ?? [],
     tags: tags.get(r.id) ?? [],
     isDayPost: r.is_day_post,
+    showInProfile: r.show_in_profile,
     caption: r.caption,
     workoutDate: r.workout_date,
     createdAt: r.created_at,

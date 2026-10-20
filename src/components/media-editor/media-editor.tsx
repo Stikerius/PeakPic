@@ -1,7 +1,7 @@
 import Ionicons from "@expo/vector-icons/Ionicons";
 import { Image } from "expo-image";
 import * as ImagePicker from "expo-image-picker";
-import { useState } from "react";
+import { useState, type ReactNode } from "react";
 import {
   ActivityIndicator,
   Alert,
@@ -11,6 +11,7 @@ import {
   Pressable,
   ScrollView,
   StyleSheet,
+  Switch,
   Text,
   TextInput,
   View,
@@ -61,6 +62,8 @@ export type MediaEditorResult = {
   /** Everyone tagged: on the photos, plus earlier tags that weren't removed. */
   mentionIds: string[];
   caption: string;
+  /** "Im Profil anzeigen" (post variant with the switch shown). */
+  showInProfile: boolean;
 };
 
 /** A photo that already exists, opened for editing again. */
@@ -76,6 +79,10 @@ type MediaEditorProps = {
   /** People tagged before; shown as removable tags even without a mention on a photo. */
   initialTags?: PublicProfile[];
   initialCaption?: string;
+  /** Post variant: shows the "Im Profil anzeigen" switch with this starting value. */
+  initialShowInProfile?: boolean;
+  /** Story variant: extra controls above the filters (e.g. "add to highlight"). */
+  storyExtras?: ReactNode;
   /** Post variant: how many photos may be in the carousel (1 hides "add"). */
   maxPhotos?: number;
   showCaption?: boolean;
@@ -99,6 +106,8 @@ export function MediaEditor({
   initialPhotos = [],
   initialTags = [],
   initialCaption = "",
+  initialShowInProfile,
+  storyExtras,
   maxPhotos = 1,
   showCaption = false,
   title,
@@ -120,6 +129,7 @@ export function MediaEditor({
   const [extraTags, setExtraTags] = useState<PublicProfile[]>(initialTags);
   const [current, setCurrent] = useState(0);
   const [caption, setCaption] = useState(initialCaption);
+  const [showInProfile, setShowInProfile] = useState(initialShowInProfile ?? true);
   const [textEditing, setTextEditing] = useState<TextEditing | null>(null);
   const [mentionPickerOpen, setMentionPickerOpen] = useState(false);
   const [dragging, setDragging] = useState(false);
@@ -242,7 +252,7 @@ export function MediaEditor({
           changed,
         });
       }
-      const error = await onSubmit({ photos: result, mentionIds, caption: caption.trim() });
+      const error = await onSubmit({ photos: result, mentionIds, caption: caption.trim(), showInProfile });
       if (error !== null) Alert.alert("Hochladen fehlgeschlagen", error);
     } catch (error) {
       Alert.alert("Bild konnte nicht erstellt werden", describeError(error));
@@ -352,6 +362,7 @@ export function MediaEditor({
         )}
         {showChrome && (
           <View style={[styles.storyBottom, { paddingBottom: insets.bottom + spacing.md }]}>
+            {storyExtras}
             {filterChips}
             {submitButton}
           </View>
@@ -487,6 +498,18 @@ export function MediaEditor({
               submitBehavior="blurAndSubmit"
               accessibilityLabel="Beschriftung"
             />
+          )}
+
+          {initialShowInProfile !== undefined && (
+            <View style={styles.switchRow}>
+              <Text style={styles.switchLabel}>Im Profil anzeigen</Text>
+              <Switch
+                value={showInProfile}
+                onValueChange={setShowInProfile}
+                trackColor={{ true: colors.primary, false: colors.border }}
+                accessibilityLabel="Im Profil anzeigen"
+              />
+            </View>
           )}
 
           <View style={{ paddingBottom: insets.bottom + spacing.sm }}>{submitButton}</View>
@@ -680,6 +703,16 @@ const styles = StyleSheet.create({
     color: colors.text,
     fontSize: fontSize.sm,
     fontWeight: "600",
+  },
+  switchRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    paddingHorizontal: spacing.md,
+  },
+  switchLabel: {
+    color: colors.text,
+    fontSize: fontSize.md,
   },
   caption: {
     minHeight: 44,

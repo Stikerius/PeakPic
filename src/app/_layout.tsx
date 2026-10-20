@@ -60,7 +60,8 @@ function RootNavigator() {
         <Stack.Screen name="day/[date]" options={{ title: "", presentation: "modal" }} />
         <Stack.Screen name="chats/new" options={{ title: "Neuer Chat", presentation: "modal" }} />
         <Stack.Screen name="chats/[conversationId]" options={{ title: "", headerBackTitle: "Chats" }} />
-        <Stack.Screen name="post/[postId]" options={{ title: "Post" }} />
+        <Stack.Screen name="post/[postId]" options={{ title: "Post", presentation: "modal" }} />
+        <Stack.Screen name="highlight/[highlightId]" options={{ title: "Highlight", presentation: "modal" }} />
         <Stack.Screen name="user/[userId]" options={{ title: "" }} />
         <Stack.Screen name="notifications" options={{ title: "Mitteilungen" }} />
         <Stack.Screen name="settings" options={{ title: "Einstellungen", headerBackTitle: "Profil" }} />

@@ -1,6 +1,7 @@
 import { useSyncExternalStore } from "react";
 
 import { describeError } from "@/lib/errors";
+import { applyHighlightChoice, type HighlightChoice } from "@/lib/highlightRepo";
 import {
   addStory as addStoryRemote,
   deleteStory as deleteStoryRemote,
@@ -84,15 +85,24 @@ export async function toggleLike(story: Story): Promise<void> {
   }
 }
 
-/** Uploads a story and reloads the bar. Returns an error message or null. */
+/** Uploads a story (optionally into a highlight) and reloads the bar. Returns an error message or null. */
 export async function addStory(
   sourceUri: string,
   mentionedUserIds: string[] = [],
+  highlight: HighlightChoice | null = null,
 ): Promise<string | null> {
   setState({ uploading: true });
   try {
-    await addStoryRemote(sourceUri, mentionedUserIds);
+    const storyId = await addStoryRemote(sourceUri, mentionedUserIds);
     await refreshStories();
+    if (highlight !== null) {
+      try {
+        await applyHighlightChoice(highlight, storyId);
+      } catch (highlightError) {
+        console.error("[stories] Highlight speichern fehlgeschlagen:", highlightError);
+        return `Story gepostet, aber nicht zum Highlight hinzugefügt – ${describeError(highlightError)}`;
+      }
+    }
     return null;
   } catch (error) {
     console.error("[stories] Story-Upload fehlgeschlagen:", error);

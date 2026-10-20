@@ -62,6 +62,7 @@ export default function CameraScreen() {
         caption: "",
         inFeed: false,
         isDayPost: true,
+        showInProfile: true,
         tagIds: [],
       });
       emitAppEvent("postCreated", undefined);

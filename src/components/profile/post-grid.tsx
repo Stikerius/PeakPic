@@ -1,0 +1,79 @@
+import Ionicons from "@expo/vector-icons/Ionicons";
+import { Image } from "expo-image";
+import { router } from "expo-router";
+import { Pressable, StyleSheet, Text, View, useWindowDimensions } from "react-native";
+
+import { colors, fontSize, spacing } from "@/constants/theme";
+import type { PostThumbnail } from "@/lib/userProfileRepo";
+
+const COLUMNS = 3;
+const GAP = 2;
+
+type PostGridProps = {
+  posts: PostThumbnail[];
+  emptyText: string;
+};
+
+/** 3-column profile grid (4:5 tiles); slideshows get a carousel icon. Tap opens the post. */
+export function PostGrid({ posts, emptyText }: PostGridProps) {
+  const { width } = useWindowDimensions();
+  const tileWidth = (width - GAP * (COLUMNS - 1)) / COLUMNS;
+
+  if (posts.length === 0) return <Text style={styles.empty}>{emptyText}</Text>;
+
+  return (
+    <View style={styles.grid}>
+      {posts.map((post) => (
+        <Pressable
+          key={post.id}
+          onPress={() => router.push({ pathname: "/post/[postId]", params: { postId: post.id } })}
+          accessibilityRole="button"
+          accessibilityLabel={post.photoCount > 1 ? `Slideshow mit ${post.photoCount} Bildern öffnen` : "Post öffnen"}
+          style={{ width: tileWidth, height: tileWidth * 1.25 }}
+        >
+          {post.photoUrl !== null ? (
+            <Image source={{ uri: post.photoUrl }} style={styles.tile} contentFit="cover" transition={100} />
+          ) : (
+            <View style={[styles.tile, styles.missing]} />
+          )}
+          {post.photoCount > 1 && (
+            <View style={styles.badge} pointerEvents="none">
+              <Ionicons name="copy" size={16} color={colors.text} />
+            </View>
+          )}
+        </Pressable>
+      ))}
+    </View>
+  );
+}
+
+const styles = StyleSheet.create({
+  grid: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: GAP,
+  },
+  tile: {
+    width: "100%",
+    height: "100%",
+    backgroundColor: colors.surface,
+  },
+  missing: {
+    backgroundColor: colors.surfaceElevated,
+  },
+  badge: {
+    position: "absolute",
+    top: 6,
+    right: 6,
+    shadowColor: "#000000",
+    shadowOpacity: 0.5,
+    shadowRadius: 3,
+    shadowOffset: { width: 0, height: 1 },
+  },
+  empty: {
+    color: colors.textMuted,
+    fontSize: fontSize.md,
+    textAlign: "center",
+    paddingHorizontal: spacing.md,
+  },
+});

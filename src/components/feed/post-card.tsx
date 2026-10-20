@@ -14,7 +14,7 @@ type PostCardProps = {
   onShare: (postId: string) => void;
   onOpenProfile: (userId: string) => void;
   /** Shown for my own posts: opens the edit/delete menu. */
-  onMore?: (postId: string) => void;
+  onMore?: (post: FeedPost) => void;
 };
 
 export function PostCard({ post, onToggleLike, onOpenComments, onShare, onOpenProfile, onMore }: PostCardProps) {
@@ -35,7 +35,7 @@ export function PostCard({ post, onToggleLike, onOpenComments, onShare, onOpenPr
         </Pressable>
         {onMore !== undefined && (
           <Pressable
-            onPress={() => onMore(post.id)}
+            onPress={() => onMore(post)}
             accessibilityRole="button"
             accessibilityLabel="Post bearbeiten oder löschen"
             hitSlop={spacing.sm}

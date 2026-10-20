@@ -1,25 +1,19 @@
 import Ionicons from "@expo/vector-icons/Ionicons";
-import { Image } from "expo-image";
 import { router, Stack, useLocalSearchParams } from "expo-router";
 import { useEffect, useState, type ReactNode } from "react";
-import {
-  ActivityIndicator,
-  Pressable,
-  ScrollView,
-  StyleSheet,
-  Text,
-  View,
-  useWindowDimensions,
-} from "react-native";
+import { ActivityIndicator, ScrollView, StyleSheet, Text, View } from "react-native";
 
 import { Avatar } from "@/components/avatar";
 import { Button } from "@/components/button";
+import { HighlightsRow } from "@/components/profile/highlights-row";
+import { PostGrid } from "@/components/profile/post-grid";
 import { FlameIcon } from "@/components/streak/flame-icon";
 import { MonthCalendar } from "@/components/streak/month-calendar";
 import { colors, fontSize, radius, spacing } from "@/constants/theme";
 import { getOrCreateDirectConversation } from "@/lib/chatRepo";
 import { describeError } from "@/lib/errors";
 import { emitAppEvent } from "@/lib/events";
+import { listHighlights, type Highlight } from "@/lib/highlightRepo";
 import { setFollowing } from "@/lib/socialRepo";
 import {
   addMonths,
@@ -31,17 +25,14 @@ import {
   type DayKey,
 } from "@/lib/streak";
 import {
+  fetchProfileGrid,
   fetchUserProfile,
-  fetchUserRecentPosts,
   fetchUserWorkoutDays,
   type PostThumbnail,
   type UserProfileSummary,
 } from "@/lib/userProfileRepo";
 
-const GRID_COLUMNS = 3;
-const GRID_GAP = 2;
-
-type Content = { days: DayKey[]; posts: PostThumbnail[] };
+type Content = { days: DayKey[]; posts: PostThumbnail[]; highlights: Highlight[] };
 
 function Stat({ value, label, icon }: { value: number; label: string; icon?: ReactNode }) {
   return (
@@ -57,7 +48,6 @@ function Stat({ value, label, icon }: { value: number; label: string; icon?: Rea
 
 export default function UserProfileScreen() {
   const { userId } = useLocalSearchParams<{ userId: string }>();
-  const { width } = useWindowDimensions();
 
   const [summary, setSummary] = useState<UserProfileSummary | null | undefined>(undefined);
   const [content, setContent] = useState<Content | null>(null);
@@ -74,8 +64,12 @@ export default function UserProfileScreen() {
       const result = await fetchUserProfile(userId);
       setSummary(result);
       if (result?.isFollowing) {
-        const [days, posts] = await Promise.all([fetchUserWorkoutDays(userId), fetchUserRecentPosts(userId)]);
-        setContent({ days, posts });
+        const [days, posts, highlights] = await Promise.all([
+          fetchUserWorkoutDays(userId),
+          fetchProfileGrid(userId),
+          listHighlights(userId),
+        ]);
+        setContent({ days, posts, highlights });
       } else {
         setContent(null);
       }
@@ -135,7 +129,6 @@ export default function UserProfileScreen() {
   const { profile } = summary;
   const stats = computeStreakStatsFromDays(content?.days ?? [], today);
   const runLengths = runLengthByDay(stats.trainingDays);
-  const tileSize = (width - GRID_GAP * (GRID_COLUMNS - 1)) / GRID_COLUMNS;
   const canGoNext = visibleMonth.year * 12 + visibleMonth.month < currentYear * 12 + currentMonth;
 
   return (
@@ -194,6 +187,8 @@ export default function UserProfileScreen() {
         <ActivityIndicator color={colors.primary} />
       ) : (
         <>
+          <HighlightsRow highlights={content.highlights} editable={false} />
+
           <View style={styles.calendar}>
             <MonthCalendar
               year={visibleMonth.year}
@@ -209,28 +204,8 @@ export default function UserProfileScreen() {
             />
           </View>
 
-          <Text style={styles.sectionTitle}>Workouts</Text>
-          {content.posts.length === 0 ? (
-            <Text style={[styles.muted, styles.padded]}>Noch keine Workouts sichtbar.</Text>
-          ) : (
-            <View style={styles.grid}>
-              {content.posts.map((post) => (
-                <Pressable
-                  key={post.id}
-                  onPress={() => router.push({ pathname: "/post/[postId]", params: { postId: post.id } })}
-                  accessibilityRole="button"
-                  accessibilityLabel="Workout öffnen"
-                  style={{ width: tileSize, height: tileSize * 1.25 }}
-                >
-                  {post.photoUrl !== null ? (
-                    <Image source={{ uri: post.photoUrl }} style={styles.tile} contentFit="cover" transition={100} />
-                  ) : (
-                    <View style={[styles.tile, styles.tileMissing]} />
-                  )}
-                </Pressable>
-              ))}
-            </View>
-          )}
+          <Text style={styles.sectionTitle}>Beiträge</Text>
+          <PostGrid posts={content.posts} emptyText="Noch keine Beiträge sichtbar." />
         </>
       )}
     </ScrollView>
@@ -329,26 +304,10 @@ const styles = StyleSheet.create({
     fontWeight: "700",
     paddingHorizontal: spacing.md,
   },
-  grid: {
-    flexDirection: "row",
-    flexWrap: "wrap",
-    gap: GRID_GAP,
-  },
-  tile: {
-    width: "100%",
-    height: "100%",
-    backgroundColor: colors.surface,
-  },
-  tileMissing: {
-    backgroundColor: colors.surfaceElevated,
-  },
   muted: {
     color: colors.textMuted,
     fontSize: fontSize.md,
     textAlign: "center",
-  },
-  padded: {
-    paddingHorizontal: spacing.md,
   },
   error: {
     color: colors.danger,
