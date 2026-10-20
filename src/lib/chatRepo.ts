@@ -27,20 +27,27 @@ export async function getOrCreateDirectConversation(otherUserId: string): Promis
   return data;
 }
 
-/** Sends a post into the direct chat with `otherUserId`. */
-export async function sharePostWithUser(postId: string, otherUserId: string): Promise<void> {
+/** Optional text sent along with a shared post or comment; shown below the card. */
+function noteBody(note: string | undefined): string | null {
+  const trimmed = note?.trim() ?? "";
+  return trimmed.length > 0 ? trimmed : null;
+}
+
+/** Sends a post (with an optional note) into the direct chat with `otherUserId`. */
+export async function sharePostWithUser(postId: string, otherUserId: string, note?: string): Promise<void> {
   const userId = await requireUserId();
   const conversationId = await getOrCreateDirectConversation(otherUserId);
   const { error } = await supabase
     .from("messages")
-    .insert({ conversation_id: conversationId, sender_id: userId, post_id: postId });
+    .insert({ conversation_id: conversationId, sender_id: userId, post_id: postId, body: noteBody(note) });
   if (error) throw error;
 }
 
-/** Sends a comment (as a card linking to its post) into the direct chat with `otherUserId`. */
+/** Sends a comment (as a card linking to its post, with an optional note) into the direct chat with `otherUserId`. */
 export async function shareCommentWithUser(
   comment: { id: string; postId: string },
   otherUserId: string,
+  note?: string,
 ): Promise<void> {
   const userId = await requireUserId();
   const conversationId = await getOrCreateDirectConversation(otherUserId);
@@ -49,6 +56,7 @@ export async function shareCommentWithUser(
     sender_id: userId,
     post_id: comment.postId,
     comment_id: comment.id,
+    body: noteBody(note),
   });
   if (error) throw error;
 }
