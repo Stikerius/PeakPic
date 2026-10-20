@@ -5,21 +5,27 @@
 // Uses only the public anon key from .env (same permissions as the app), so it
 // requires "Confirm email" to be OFF in Supabase → Authentication → Email.
 // Re-running is safe: existing fake users are signed in and skipped if they
-// already have posts. Fake users follow each other and every existing real account.
+// already have posts. Fake users follow each other and send requests to every real account.
 import { createClient } from "@supabase/supabase-js";
 import { deflateSync } from "node:zlib";
 
-const PASSWORD = "PeakPic-Fake-2026!";
+// Supabase requires at least 6 characters.
+const PASSWORD = "123456";
+// Credentials of earlier seed runs; such accounts are migrated to the current ones.
+const LEGACY_PASSWORD = "PeakPic-Fake-2026!";
 const TIME_ZONE = "Europe/Zurich";
 
 /** streakDays: consecutive training days ending today (or yesterday if endsYesterday). */
 const FAKE_USERS = [
-  { username: "lena.lifts", hue: 12, streakDays: 12, endsYesterday: false },
-  { username: "marco_runs", hue: 200, streakDays: 4, endsYesterday: true },
-  { username: "sara.squats", hue: 280, streakDays: 31, endsYesterday: false },
-  { username: "jonas.gym", hue: 140, streakDays: 2, endsYesterday: false },
-  { username: "mia_moves", hue: 330, streakDays: 7, endsYesterday: false },
+  { username: "lena.lifts", login: "lena", hue: 12, streakDays: 12, endsYesterday: false },
+  { username: "marco_runs", login: "marco", hue: 200, streakDays: 4, endsYesterday: true },
+  { username: "sara.squats", login: "sara", hue: 280, streakDays: 31, endsYesterday: false },
+  { username: "jonas.gym", login: "jonas", hue: 140, streakDays: 2, endsYesterday: false },
+  { username: "mia_moves", login: "mia", hue: 330, streakDays: 7, endsYesterday: false },
 ];
+
+const emailOf = (fake) => `${fake.login}@mailinator.com`;
+const legacyEmailOf = (fake) => `peakpic.fake.${fake.username.replace(/[^a-z0-9]/g, "")}@mailinator.com`;
 
 const CAPTIONS = [
   "Leg Day erledigt 🦵",
@@ -142,10 +148,31 @@ function fail(step, error) {
 
 async function signInOrUp(fake) {
   const client = createClient(url, anonKey, { auth: { persistSession: false } });
-  const email = `peakpic.fake.${fake.username.replace(/[^a-z0-9]/g, "")}@mailinator.com`;
+  const email = emailOf(fake);
 
   const signIn = await client.auth.signInWithPassword({ email, password: PASSWORD });
   if (!signIn.error) return { client, userId: signIn.data.user.id, created: false };
+
+  // A previous migration may have changed the password while the email change stayed pending.
+  let legacy;
+  let legacyPassword;
+  for (legacyPassword of [PASSWORD, LEGACY_PASSWORD]) {
+    legacy = await client.auth.signInWithPassword({ email: legacyEmailOf(fake), password: legacyPassword });
+    if (!legacy.error) break;
+  }
+  if (!legacy.error) {
+    // Supabase rejects setting the password it already has.
+    const changes = legacyPassword === PASSWORD ? { email } : { email, password: PASSWORD };
+    const update = await client.auth.updateUser(changes);
+    if (update.error) fail(`Login-Daten von ${fake.username} umstellen`, update.error);
+    if (update.data.user.email !== email) {
+      fail(
+        `Login-Daten von ${fake.username} umstellen`,
+        'Die E-Mail-Änderung wartet auf Bestätigung. Bitte in Supabase "Confirm email" ausschalten und das Skript erneut starten.',
+      );
+    }
+    return { client, userId: legacy.data.user.id, created: false };
+  }
 
   const signUp = await client.auth.signUp({
     email,
@@ -262,6 +289,17 @@ async function main() {
       );
     if (error) fail(`Folgen (@${s.fake.username})`, error);
   }
+  // Profiles are private by default, so those follows are requests. Fake users accept the
+  // ones among each other; requests to real accounts stay open for you to answer.
+  for (const s of sessions) {
+    const { error } = await s.client
+      .from("follows")
+      .update({ status: "accepted" })
+      .eq("following_id", s.userId)
+      .eq("status", "pending")
+      .in("follower_id", [...fakeIds]);
+    if (error) fail(`Anfragen bestätigen (@${s.fake.username})`, error);
+  }
 
   // A few likes and comments on the newest posts of the others.
   for (const s of sessions) {
@@ -284,7 +322,9 @@ async function main() {
 
   console.log("\n\n✔ Fertig. Fake-User (Passwort für alle: " + PASSWORD + "):");
   for (const s of sessions) {
-    console.log(`  @${s.fake.username.padEnd(12)} ${s.postIds.length} neue Posts, ${s.storyCount} neue Storys`);
+    console.log(
+      `  @${s.fake.username.padEnd(12)} ${emailOf(s.fake).padEnd(22)} ${s.postIds.length} neue Posts, ${s.storyCount} neue Storys`,
+    );
   }
   if (realProfiles.length > 0) {
     console.log(`\nDie Fake-User folgen jetzt: ${realProfiles.map((p) => "@" + p.username).join(", ")}`);
