@@ -34,9 +34,50 @@ import { TextOverlayEditor, type TextOverlayValue } from "@/components/media-edi
 import { colors, fontSize, radius, spacing } from "@/constants/theme";
 import { describeError } from "@/lib/errors";
 import { filterTaggable } from "@/lib/inboxRepo";
+import { resolveUsernames } from "@/lib/tagSuggestRepo";
+import { extractMentions } from "@/lib/taggedText";
 import { MAX_TAGS } from "@/lib/workoutLinks";
 import { STORY_FILTERS } from "@/lib/storyFilters";
 import type { PublicProfile } from "@/types/social";
+
+/**
+ * @usernames typed into texts on the photos become real tags: resolved to users and kept
+ * only if I may tag them (same rule as the database). Returns them per photo, plus the
+ * names that couldn't be tagged.
+ */
+async function resolveTextMentions(
+  photos: EditedPhoto[],
+  size: CanvasSize,
+  scope: "posts" | "stories",
+): Promise<{ perPhoto: EditorPhoto["textMentions"][]; skipped: string[] }> {
+  const found = photos.map((p) =>
+    p.items.flatMap((item) =>
+      item.kind === "text"
+        ? extractMentions(item.text).map((username) => ({
+            username,
+            x: item.x / size.width,
+            y: item.y / size.height,
+          }))
+        : [],
+    ),
+  );
+  const usernames = [...new Set(found.flat().map((m) => m.username))];
+  if (usernames.length === 0) return { perPhoto: found.map(() => []), skipped: [] };
+  const profiles = await resolveUsernames(usernames);
+  const ids = [...profiles.values()].flatMap((p) => (p !== null ? [p.id] : []));
+  const allowed = await filterTaggable(ids, scope);
+  const perPhoto = found.map((list) =>
+    list.flatMap((m) => {
+      const profile = profiles.get(m.username);
+      return profile != null && allowed.has(profile.id) ? [{ ...m, userId: profile.id }] : [];
+    }),
+  );
+  const skipped = usernames.filter((name) => {
+    const profile = profiles.get(name);
+    return profile == null || !allowed.has(profile.id);
+  });
+  return { perPhoto, skipped };
+}
 
 export const CAPTION_MAX_LENGTH = 200;
 /** Exported post photos are this wide (4:5); stories use the screen's pixel width. */
@@ -56,6 +97,8 @@ export type EditorPhoto = {
   edits: PhotoEdits | null;
   /** New photo, or its edits differ from when the editor opened. */
   changed: boolean;
+  /** People @mentioned in texts on this photo (resolved and taggable), at the text's spot. */
+  textMentions: { userId: string; username: string; x: number; y: number }[];
 };
 
 export type MediaEditorResult = {
@@ -271,8 +314,9 @@ export function MediaEditor({
       const outputWidth = isStory
         ? Math.min(STORY_EXPORT_MAX_WIDTH, Math.round(width * PixelRatio.get()))
         : POST_EXPORT_WIDTH;
+      const textMentions = await resolveTextMentions(photos, size, isStory ? "stories" : "posts");
       const result: EditorPhoto[] = [];
-      for (const p of photos) {
+      for (const [index, p] of photos.entries()) {
         const edits = toPhotoEdits(p.filterIndex, p.items, size);
         const changed = p.source === null || !sameEdits(edits, p.initialEdits);
         // Stories are always rendered (cropped to the screen); post photos only when edited
@@ -284,11 +328,22 @@ export function MediaEditor({
           renderedUri: render ? await renderEditedPhoto(p, size, fonts, outputWidth) : null,
           edits,
           changed,
+          textMentions: textMentions.perPhoto[index] ?? [],
         });
+      }
+      // Tags from the photo labels plus @names in texts, at most MAX_TAGS people.
+      const allMentionIds = [
+        ...new Set([...mentionIds, ...result.flatMap((p) => p.textMentions.map((m) => m.userId))]),
+      ].slice(0, MAX_TAGS);
+      if (textMentions.skipped.length > 0) {
+        Alert.alert(
+          "Nicht alle markiert",
+          `${textMentions.skipped.map((name) => `@${name}`).join(", ")} lässt sich von dir nicht markieren. Der Text bleibt trotzdem auf dem Bild.`,
+        );
       }
       const error = await onSubmit({
         photos: result,
-        mentionIds,
+        mentionIds: allMentionIds,
         workoutLinkIds: mentionIds.filter((id) => workoutLinks.has(id)),
         caption: caption.trim(),
         showInProfile,

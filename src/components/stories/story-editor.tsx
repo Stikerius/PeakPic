@@ -58,9 +58,12 @@ export function StoryEditor({ photoUri, onBack, onShared }: StoryEditorProps) {
           const items = photo.edits?.items ?? [];
           const error = await addStory(photo.renderedUri ?? photo.originalUri, mentionIds, highlight, {
             // Positions make the @labels on the photo tappable in the viewer.
-            mentionSpots: items.flatMap((item) =>
-              item.kind === "mention" ? [{ userId: item.user.id, x: item.x, y: item.y }] : [],
-            ),
+            mentionSpots: [
+              ...items.flatMap((item) =>
+                item.kind === "mention" ? [{ userId: item.user.id, x: item.x, y: item.y }] : [],
+              ),
+              ...photo.textMentions.map((m) => ({ userId: m.userId, x: m.x, y: m.y })),
+            ],
             canvasAspect,
             overlayText: items.flatMap((item) => (item.kind === "text" ? [item.text] : [])).join("\n"),
           });

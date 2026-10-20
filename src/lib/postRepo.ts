@@ -1,6 +1,8 @@
 import { StepError } from "@/lib/errors";
 import { getSignedPhotoUrls, removePhotos, uploadPhoto } from "@/lib/photoUpload";
 import { parsePhotoEdits, type PhotoEdits } from "@/lib/photoEdits";
+import { resolveUsernames } from "@/lib/tagSuggestRepo";
+import { extractMentions } from "@/lib/taggedText";
 import { PROFILE_COLUMNS, toPublicProfiles } from "@/lib/profiles";
 import { requireUserId } from "@/lib/session";
 import { toDayKey } from "@/lib/streak";
@@ -331,15 +333,32 @@ export async function fetchPostPhotos(
     .order("position", { ascending: true });
   if (error) throw error;
 
-  type Entry = { path: string; mentions: PhotoMention[] };
+  type Entry = { path: string; mentions: PhotoMention[]; textMentions: { username: string; x: number; y: number }[] };
   const byPost = new Map<string, Entry[]>();
   for (const row of data) {
-    const mentions = (parsePhotoEdits(row.edits)?.items ?? []).flatMap((item) =>
+    const items = parsePhotoEdits(row.edits)?.items ?? [];
+    const mentions = items.flatMap((item) =>
       item.kind === "mention" ? [{ userId: item.user.id, username: item.user.username, x: item.x, y: item.y }] : [],
     );
-    byPost.set(row.post_id, [...(byPost.get(row.post_id) ?? []), { path: row.photo_path, mentions }]);
+    // @names typed into texts on the photo, tappable at the text.
+    const textMentions = items.flatMap((item) =>
+      item.kind === "text" ? extractMentions(item.text).map((username) => ({ username, x: item.x, y: item.y })) : [],
+    );
+    byPost.set(row.post_id, [...(byPost.get(row.post_id) ?? []), { path: row.photo_path, mentions, textMentions }]);
   }
-  for (const post of posts) if (!byPost.has(post.id)) byPost.set(post.id, [{ path: post.photo_path, mentions: [] }]);
+  const textNames = [...new Set([...byPost.values()].flat().flatMap((e) => e.textMentions.map((m) => m.username)))];
+  const textProfiles = textNames.length > 0 ? await resolveUsernames(textNames) : new Map<string, PublicProfile | null>();
+  for (const entries of byPost.values()) {
+    for (const entry of entries) {
+      for (const m of entry.textMentions) {
+        const profile = textProfiles.get(m.username);
+        if (profile != null) entry.mentions.push({ userId: profile.id, username: profile.username, x: m.x, y: m.y });
+      }
+    }
+  }
+  for (const post of posts) {
+    if (!byPost.has(post.id)) byPost.set(post.id, [{ path: post.photo_path, mentions: [], textMentions: [] }]);
+  }
 
   const urls = await getSignedPhotoUrls([...byPost.values()].flat().map((e) => e.path));
   for (const [postId, entries] of byPost) {
