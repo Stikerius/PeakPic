@@ -1660,7 +1660,7 @@ begin
   end if;
   -- Locks the budget row, so parallel calls can't both take the last rest day.
   select * into budget from public.rest_budgets b where b.user_id = me for update;
-  if not found or budget.rests_per_cycle = 0 or d < budget.cycle_start then
+  if not found or budget.rests_per_cycle = 0 then
     raise exception 'rest_day_no_budget';
   end if;
   if public.is_training_day(me, d) then

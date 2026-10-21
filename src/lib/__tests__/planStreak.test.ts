@@ -167,6 +167,11 @@ describe("rest day budget", () => {
     expect(canUseRestDay("2026-10-19", "2026-10-20", null, [], training)).toBe(false);
   });
 
+  it("allows yesterday also when the budget was only set up today", () => {
+    const setToday = { restsPerWeek: 1, cycleStart: "2026-10-20" };
+    expect(canUseRestDay("2026-10-19", "2026-10-20", setToday, [], new Set())).toBe(true);
+  });
+
   it("uses the budget of the week the day belongs to", () => {
     // Yesterday (Sunday) is the last day of a used-up week, today (Monday) starts a fresh one.
     const uses = ["2026-10-20", "2026-10-21"];

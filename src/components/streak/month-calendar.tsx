@@ -29,6 +29,9 @@ type MonthCalendarProps = {
   onNext: () => void;
   /** Called when a training day is tapped. */
   onSelectDay: (day: DayKey) => void;
+  /** Days without training that can be tapped too (e.g. yesterday and today for a rest day). */
+  actionDays?: ReadonlySet<DayKey>;
+  onSelectActionDay?: (day: DayKey) => void;
 };
 
 export function MonthCalendar({
@@ -42,6 +45,8 @@ export function MonthCalendar({
   onPrev,
   onNext,
   onSelectDay,
+  actionDays,
+  onSelectActionDay,
 }: MonthCalendarProps) {
   const { colors } = useTheme();
   const styles = useStyles();
@@ -116,6 +121,20 @@ export function MonthCalendar({
                 )}
               </>
             );
+            if (run === undefined && actionDays?.has(day) === true && onSelectActionDay !== undefined) {
+              return (
+                <Pressable
+                  key={day}
+                  onPress={() => onSelectActionDay(day)}
+                  style={({ pressed }) => [styles.cell, isToday && styles.today, pressed && styles.pressedCell]}
+                  accessibilityRole="button"
+                  accessibilityLabel={label}
+                  accessibilityHint={rested ? "Ruhetag zurücknehmen" : "Ruhetag setzen"}
+                >
+                  {content}
+                </Pressable>
+              );
+            }
             if (run === undefined) {
               return (
                 <View

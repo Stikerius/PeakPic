@@ -300,7 +300,7 @@ export function canUseRestDay(
 ): boolean {
   if (budget === null || budget.restsPerWeek === 0) return false;
   if (day !== today && day !== addDays(today, -1)) return false;
-  if (day < budget.cycleStart || trainingDays.has(day) || uses.includes(day)) return false;
+  if (trainingDays.has(day) || uses.includes(day)) return false;
   return restStatus(budget, uses, day).remaining > 0;
 }
 

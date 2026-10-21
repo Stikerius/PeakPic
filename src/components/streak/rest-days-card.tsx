@@ -1,11 +1,10 @@
 import Ionicons from "@expo/vector-icons/Ionicons";
-import { useState } from "react";
-import { Alert, StyleSheet, Text, View } from "react-native";
+import { StyleSheet, Text, View } from "react-native";
 
 import { Button } from "@/components/ui/button";
 import { radius, spacing, typography } from "@/constants/theme";
-import { describeError } from "@/lib/errors";
-import { applyRestDay, undoRestDay, type MyRestDays } from "@/lib/restRepo";
+import { useRestDayActions } from "@/hooks/use-rest-day-actions";
+import type { MyRestDays } from "@/lib/restRepo";
 import { addDays, canUseRestDay, parseDayKey, restStatus, type DayKey } from "@/lib/streak";
 import { makeStyles, useTheme } from "@/lib/theme";
 
@@ -29,7 +28,7 @@ function shortDate(day: DayKey): string {
 export function RestDaysCard({ rest, trainingDays, today, onChanged }: RestDaysCardProps) {
   const { colors } = useTheme();
   const styles = useStyles();
-  const [busy, setBusy] = useState(false);
+  const { busy, requestUse, requestUndo } = useRestDayActions(rest, trainingDays, today, onChanged);
   if (rest.budget === null || rest.budget.restsPerWeek === 0) return null;
 
   const status = restStatus(rest.budget, rest.uses, today);
@@ -39,25 +38,6 @@ export function RestDaysCard({ rest, trainingDays, today, onChanged }: RestDaysC
   const undoable = [yesterday, today].filter((day) => rest.uses.includes(day));
   const dayName = (day: DayKey) => (day === today ? "heute" : "gestern");
 
-  function run(action: () => Promise<void>) {
-    setBusy(true);
-    action()
-      .then(onChanged)
-      .catch((error: unknown) => Alert.alert("Hat nicht geklappt", describeError(error)))
-      .finally(() => setBusy(false));
-  }
-
-  function confirmUse(day: DayKey) {
-    Alert.alert(
-      `Ruhetag für ${dayName(day)} einsetzen?`,
-      `Dein Streak läuft weiter, ohne dass der Tag mitzählt. Danach übrig: ${status.remaining - 1} von ${status.total}.`,
-      [
-        { text: "Abbrechen", style: "cancel" },
-        { text: "Einsetzen", onPress: () => run(() => applyRestDay(day)) },
-      ],
-    );
-  }
-
   return (
     <View style={styles.card}>
       <View style={styles.header}>
@@ -66,7 +46,9 @@ export function RestDaysCard({ rest, trainingDays, today, onChanged }: RestDaysC
           <Text style={styles.title}>
             Ruhetage übrig: {status.remaining} von {status.total}
           </Text>
-          <Text style={styles.subtitle}>Diese Woche, bis So {shortDate(addDays(status.periodEnd, -1))}</Text>
+          <Text style={styles.subtitle}>
+            Diese Woche, bis So {shortDate(addDays(status.periodEnd, -1))} · Tag im Kalender antippen zum Setzen
+          </Text>
         </View>
       </View>
       {usable !== undefined && (
@@ -74,7 +56,7 @@ export function RestDaysCard({ rest, trainingDays, today, onChanged }: RestDaysC
           label={`Ruhetag für ${dayName(usable)} einsetzen`}
           variant="secondary"
           size="sm"
-          onPress={() => confirmUse(usable)}
+          onPress={() => requestUse(usable)}
           loading={busy}
         />
       )}
@@ -84,7 +66,7 @@ export function RestDaysCard({ rest, trainingDays, today, onChanged }: RestDaysC
           label={`Ruhetag ${dayName(day)} zurücknehmen`}
           variant="ghost"
           size="sm"
-          onPress={() => run(() => undoRestDay(day))}
+          onPress={() => requestUndo(day)}
           disabled={busy}
         />
       ))}

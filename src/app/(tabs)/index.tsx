@@ -8,8 +8,10 @@ import { RestDaysCard } from "@/components/streak/rest-days-card";
 import { StreakSummary } from "@/components/streak/streak-summary";
 import { fontSize, spacing } from "@/constants/theme";
 import { usePlanAndRest } from "@/hooks/use-plan-and-rest";
+import { useRestDayActions } from "@/hooks/use-rest-day-actions";
 import { useWorkoutDays } from "@/hooks/use-workout-days";
 import {
+  addDays,
   addMonths,
   computeStreakStatsFromDays,
   currentPlanStreak,
@@ -41,6 +43,17 @@ export default function HomeScreen() {
     plan !== null
       ? currentPlanStreak({ planDayIds, proofs, trainingDays: stats.trainingDays, restDays: restDaySet, today })
       : 0;
+  const reloadAll = () => {
+    reload();
+    reloadPlanAndRest();
+  };
+  const restActions = useRestDayActions(rest, stats.trainingDays, today, reloadAll);
+  // Only people with a rest day budget can tap yesterday / today in the calendar.
+  const restActionDays = new Set(
+    rest.budget !== null && rest.budget.restsPerWeek > 0
+      ? [addDays(today, -1), today].filter((day) => !stats.trainingDays.has(day))
+      : [],
+  );
   const canGoNext =
     visibleMonth.year * 12 + visibleMonth.month < currentYear * 12 + currentMonth;
 
@@ -67,10 +80,7 @@ export default function HomeScreen() {
         rest={rest}
         trainingDays={stats.trainingDays}
         today={today}
-        onChanged={() => {
-          reload();
-          reloadPlanAndRest();
-        }}
+        onChanged={reloadAll}
       />
       <MonthCalendar
         year={visibleMonth.year}
@@ -83,6 +93,8 @@ export default function HomeScreen() {
         onPrev={() => setVisibleMonth((m) => addMonths(m.year, m.month, -1))}
         onNext={() => setVisibleMonth((m) => addMonths(m.year, m.month, 1))}
         onSelectDay={(day) => router.push({ pathname: "/day/[date]", params: { date: day } })}
+        actionDays={restActionDays}
+        onSelectActionDay={restActions.requestToggle}
       />
     </ScrollView>
   );
