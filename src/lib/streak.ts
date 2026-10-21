@@ -239,10 +239,10 @@ export function currentPlanStreak({ planDayIds, proofs, trainingDays, restDays, 
 
 // ----------------------------------------------------------------------------- rest days
 
-/** A rest day budget covers this many days; then the next period starts (nothing carries over). */
-export const REST_PERIOD_DAYS = 21;
-/** Highest "rest days per period" the database accepts (set_rest_budget). */
-export const MAX_RESTS_PER_PERIOD = 9;
+/** The number of rest days per week can change again this many days after it was set. */
+export const REST_BUDGET_LOCK_DAYS = 21;
+/** Highest "rest days per week" the database accepts (set_rest_budget). */
+export const MAX_RESTS_PER_WEEK = 6;
 
 export function daysBetween(from: DayKey, to: DayKey): number {
   const a = parseDayKey(from);
@@ -250,13 +250,17 @@ export function daysBetween(from: DayKey, to: DayKey): number {
   return Math.round((Date.UTC(b.year, b.month - 1, b.day) - Date.UTC(a.year, a.month - 1, a.day)) / 86_400_000);
 }
 
-/** The 21-day period containing `day`: [start, end), repeating from `cycleStart`. */
-export function restPeriod(cycleStart: DayKey, day: DayKey): { start: DayKey; end: DayKey } {
-  const start = addDays(cycleStart, Math.floor(daysBetween(cycleStart, day) / REST_PERIOD_DAYS) * REST_PERIOD_DAYS);
-  return { start, end: addDays(start, REST_PERIOD_DAYS) };
+/** The calendar week (Monday to Sunday) containing `day`: [start, end). */
+export function restWeek(day: DayKey): { start: DayKey; end: DayKey } {
+  const { year, month, day: d } = parseDayKey(day);
+  // getUTCDay: 0 = Sunday; shift so Monday = 0 (same as monthGrid).
+  const fromMonday = (new Date(Date.UTC(year, month - 1, d)).getUTCDay() + 6) % 7;
+  const start = addDays(day, -fromMonday);
+  return { start, end: addDays(start, 7) };
 }
 
-export type RestBudget = { restsPerPeriod: number; cycleStart: DayKey };
+/** Rest days per week, set on `cycleStart`. */
+export type RestBudget = { restsPerWeek: number; cycleStart: DayKey };
 
 export type RestStatus = {
   total: number;
@@ -265,27 +269,27 @@ export type RestStatus = {
   periodStart: DayKey;
   /** Exclusive. */
   periodEnd: DayKey;
-  /** First day the budget can be changed again (21 days after it was set). */
+  /** First day the number can be changed again (21 days after it was set). */
   changeableFrom: DayKey;
 };
 
-/** Same rules as the database: rest days used in the current 21-day period, and what's left. */
+/** Same rules as the database: rest days used in the week of `today`, and what's left. */
 export function restStatus(budget: RestBudget, uses: readonly DayKey[], today: DayKey): RestStatus {
-  const { start, end } = restPeriod(budget.cycleStart, today);
+  const { start, end } = restWeek(today);
   const used = new Set(uses.filter((day) => day >= start && day < end)).size;
   return {
-    total: budget.restsPerPeriod,
+    total: budget.restsPerWeek,
     used,
-    remaining: Math.max(0, budget.restsPerPeriod - used),
+    remaining: Math.max(0, budget.restsPerWeek - used),
     periodStart: start,
     periodEnd: end,
-    changeableFrom: addDays(budget.cycleStart, REST_PERIOD_DAYS),
+    changeableFrom: addDays(budget.cycleStart, REST_BUDGET_LOCK_DAYS),
   };
 }
 
 /**
  * Whether a rest day may be used for `day` (mirrors use_rest_day): today or yesterday, no
- * training that day, not already a rest day, and budget left in that day's period.
+ * training that day, not already a rest day, and budget left in that day's week.
  */
 export function canUseRestDay(
   day: DayKey,
@@ -294,7 +298,7 @@ export function canUseRestDay(
   uses: readonly DayKey[],
   trainingDays: ReadonlySet<DayKey>,
 ): boolean {
-  if (budget === null || budget.restsPerPeriod === 0) return false;
+  if (budget === null || budget.restsPerWeek === 0) return false;
   if (day !== today && day !== addDays(today, -1)) return false;
   if (day < budget.cycleStart || trainingDays.has(day) || uses.includes(day)) return false;
   return restStatus(budget, uses, day).remaining > 0;

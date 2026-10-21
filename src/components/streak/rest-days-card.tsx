@@ -30,7 +30,7 @@ export function RestDaysCard({ rest, trainingDays, today, onChanged }: RestDaysC
   const { colors } = useTheme();
   const styles = useStyles();
   const [busy, setBusy] = useState(false);
-  if (rest.budget === null || rest.budget.restsPerPeriod === 0) return null;
+  if (rest.budget === null || rest.budget.restsPerWeek === 0) return null;
 
   const status = restStatus(rest.budget, rest.uses, today);
   const yesterday = addDays(today, -1);
@@ -66,7 +66,7 @@ export function RestDaysCard({ rest, trainingDays, today, onChanged }: RestDaysC
           <Text style={styles.title}>
             Ruhetage übrig: {status.remaining} von {status.total}
           </Text>
-          <Text style={styles.subtitle}>Zeitraum bis {shortDate(addDays(status.periodEnd, -1))}</Text>
+          <Text style={styles.subtitle}>Diese Woche, bis So {shortDate(addDays(status.periodEnd, -1))}</Text>
         </View>
       </View>
       {usable !== undefined && (

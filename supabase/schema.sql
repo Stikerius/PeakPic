@@ -49,7 +49,8 @@
 --                   changeable only while the workout day is today or yesterday); title,
 --                   position and plan length are copied onto the post so the label survives
 --                   plan changes.
---   * rest days     rest_budgets (X per 21-day period, changeable once a period is over) and
+--   * rest days     rest_budgets (X per calendar week Mon-Sun, the number changeable every
+--                   21 days) and
 --                   rest_day_uses: only the owner reads them, nobody writes them directly; all
 --                   rules live in set_rest_budget / use_rest_day / undo_rest_day. Others see
 --                   rest days with the calendar (rest_days()), never the budget.
@@ -493,14 +494,20 @@ alter table public.posts add column if not exists plan_day_position integer;
 alter table public.posts add column if not exists plan_length integer;
 create index if not exists posts_plan_day_idx on public.posts (plan_day_id) where plan_day_id is not null;
 
--- Rest days: "X rest days per 21 days". A period runs 21 days from cycle_start and repeats;
--- the budget can only change once the period it was set in is over (set_rest_budget).
+-- Rest days: "X rest days per week" (calendar week Mon-Sun, Europe/Zurich, nothing carries
+-- over). cycle_start is the day the number was set; it can change again 21 days later
+-- (set_rest_budget).
 create table if not exists public.rest_budgets (
   user_id         uuid primary key references public.profiles (id) on delete cascade,
-  rests_per_cycle integer not null check (rests_per_cycle between 0 and 9),
+  rests_per_cycle integer not null,
   cycle_start     date not null,
   updated_at      timestamptz not null default now()
 );
+-- Per week: at most 6 (first version allowed 0-9 per 21 days).
+update public.rest_budgets set rests_per_cycle = least(rests_per_cycle, 6) where rests_per_cycle > 6;
+alter table public.rest_budgets drop constraint if exists rest_budgets_rests_per_cycle_check;
+alter table public.rest_budgets
+  add constraint rest_budgets_rests_per_cycle_check check (rests_per_cycle between 0 and 6);
 
 -- A rest day keeps the streak alive on a day without training. Only use_rest_day /
 -- undo_rest_day write here.
@@ -1595,16 +1602,19 @@ as $$
     );
 $$;
 
--- First day of the 21-day period that contains `d` (periods repeat from cycle_start).
-create or replace function public.rest_period_start(cycle_start date, d date)
+-- Replaced by rest_week_start (rest days are budgeted per week now).
+drop function if exists public.rest_period_start(date, date);
+
+-- Monday of the calendar week that contains `d`.
+create or replace function public.rest_week_start(d date)
 returns date
 language sql immutable set search_path = ''
 as $$
-  select cycle_start + 21 * floor((d - cycle_start) / 21.0)::integer;
+  select date_trunc('week', d)::date;
 $$;
 
--- Sets "n rest days per 21 days" (0-9). Allowed the first time, and again once the 21-day
--- period of the last change is over; the new setting starts a new period today.
+-- Sets "n rest days per week" (0-6). Allowed the first time, and again 21 days after the
+-- last change.
 create or replace function public.set_rest_budget(n integer)
 returns void
 language plpgsql security definer set search_path = ''
@@ -1616,8 +1626,8 @@ begin
   if me is null then
     raise exception 'not authenticated';
   end if;
-  if n is null or n not between 0 and 9 then
-    raise exception 'rest_budget_invalid' using hint = '0 to 9';
+  if n is null or n not between 0 and 6 then
+    raise exception 'rest_budget_invalid' using hint = '0 to 6';
   end if;
   select b.cycle_start into current_start from public.rest_budgets b where b.user_id = me for update;
   if found and public.app_today() < current_start + 21 then
@@ -1631,7 +1641,7 @@ end;
 $$;
 
 -- Uses a rest day for today or yesterday (Europe/Zurich): only on a day without training,
--- within the budget of that day's period (nothing carries over).
+-- within the budget of that day's calendar week (nothing carries over).
 create or replace function public.use_rest_day(d date)
 returns void
 language plpgsql security definer set search_path = ''
@@ -1659,9 +1669,9 @@ begin
   if exists (select 1 from public.rest_day_uses r where r.user_id = me and r.day = d) then
     return;
   end if;
-  period_start := public.rest_period_start(budget.cycle_start, d);
+  period_start := public.rest_week_start(d);
   select count(*) into used from public.rest_day_uses r
-  where r.user_id = me and r.day >= period_start and r.day < period_start + 21;
+  where r.user_id = me and r.day >= period_start and r.day < period_start + 7;
   if used >= budget.rests_per_cycle then
     raise exception 'rest_day_no_budget';
   end if;

@@ -8,7 +8,7 @@ import { SectionFooter } from "@/components/ui/section-header";
 import { spacing, typography } from "@/constants/theme";
 import { describeError } from "@/lib/errors";
 import { fetchMyRestDays, setRestBudget, type MyRestDays } from "@/lib/restRepo";
-import { MAX_RESTS_PER_PERIOD, REST_PERIOD_DAYS, parseDayKey, restStatus, toDayKey } from "@/lib/streak";
+import { MAX_RESTS_PER_WEEK, parseDayKey, restStatus, toDayKey } from "@/lib/streak";
 import { makeStyles, useTheme } from "@/lib/theme";
 
 function shortDate(day: string): string {
@@ -16,7 +16,7 @@ function shortDate(day: string): string {
   return `${d}.${month}.${year}`;
 }
 
-/** "X Ruhetage pro 3 Wochen" in Profil bearbeiten. Optional; locked for 21 days after a change. */
+/** "X Ruhetage pro Woche" in Profil bearbeiten. Optional; the number is locked for 21 days after a change. */
 export function RestBudgetEditor() {
   const { colors } = useTheme();
   const styles = useStyles();
@@ -39,15 +39,15 @@ export function RestBudgetEditor() {
 
   if (rest === null) return null;
   const today = toDayKey(new Date());
-  const current = rest.budget?.restsPerPeriod ?? 0;
+  const current = rest.budget?.restsPerWeek ?? 0;
   const value = draft ?? current;
   const status = rest.budget !== null ? restStatus(rest.budget, rest.uses, today) : null;
   const locked = status !== null && today < status.changeableFrom;
 
   function save() {
     Alert.alert(
-      `${value} ${value === 1 ? "Ruhetag" : "Ruhetage"} pro 3 Wochen festlegen?`,
-      `Die Einstellung gilt ab heute für ${REST_PERIOD_DAYS} Tage und lässt sich erst danach wieder ändern. Nicht genutzte Ruhetage verfallen am Ende jedes Zeitraums.`,
+      `${value} ${value === 1 ? "Ruhetag" : "Ruhetage"} pro Woche festlegen?`,
+      "Die Anzahl gilt ab sofort und lässt sich erst in 3 Wochen wieder ändern. Nicht genutzte Ruhetage verfallen am Ende jeder Woche (Sonntag).",
       [
         { text: "Abbrechen", style: "cancel" },
         {
@@ -68,14 +68,14 @@ export function RestBudgetEditor() {
   }
 
   function step(by: -1 | 1) {
-    setDraft(Math.min(MAX_RESTS_PER_PERIOD, Math.max(0, value + by)));
+    setDraft(Math.min(MAX_RESTS_PER_WEEK, Math.max(0, value + by)));
   }
 
   return (
     <View>
       <View style={styles.row}>
         <Ionicons name="moon-outline" size={22} color={colors.textSecondary} />
-        <Text style={styles.title}>Ruhetage pro 3 Wochen</Text>
+        <Text style={styles.title}>Ruhetage pro Woche</Text>
         <View style={styles.stepper}>
           <Pressable
             onPress={() => step(-1)}
@@ -91,13 +91,13 @@ export function RestBudgetEditor() {
           </Text>
           <Pressable
             onPress={() => step(1)}
-            disabled={locked || value === MAX_RESTS_PER_PERIOD}
+            disabled={locked || value === MAX_RESTS_PER_WEEK}
             accessibilityRole="button"
             accessibilityLabel="Mehr Ruhetage"
             style={({ pressed }) => [
               styles.stepButton,
               pressed && styles.pressed,
-              (locked || value === MAX_RESTS_PER_PERIOD) && styles.disabled,
+              (locked || value === MAX_RESTS_PER_WEEK) && styles.disabled,
             ]}
           >
             <Ionicons name="add" size={20} color={colors.text} />
@@ -111,8 +111,8 @@ export function RestBudgetEditor() {
       )}
       <SectionFooter>
         {locked && status !== null
-          ? `Diesen Zeitraum noch ${status.remaining} von ${status.total} übrig. Änderbar ab ${shortDate(status.changeableFrom)}.`
-          : `Freiwillig. Ein Ruhetag hält deinen Streak an einem Tag ohne Training am Leben, zählt aber nicht mit. Einsetzbar für heute oder gestern, höchstens ${MAX_RESTS_PER_PERIOD} pro ${REST_PERIOD_DAYS} Tage.`}
+          ? `Diese Woche noch ${status.remaining} von ${status.total} übrig. Anzahl änderbar ab ${shortDate(status.changeableFrom)}.`
+          : `Freiwillig. Ein Ruhetag hält deinen Streak an einem Tag ohne Training am Leben, zählt aber nicht mit. Einsetzbar für heute oder gestern, höchstens ${MAX_RESTS_PER_WEEK} pro Woche (Mo bis So). Die Anzahl lässt sich alle 3 Wochen ändern.`}
       </SectionFooter>
     </View>
   );

@@ -6,8 +6,8 @@ import {
   currentPlanStreak,
   currentStreak,
   nextPlanDayIndex,
-  restPeriod,
   restStatus,
+  restWeek,
   runLengthByDay,
   type PlanProof,
 } from "@/lib/streak";
@@ -133,21 +133,26 @@ describe("plan streak", () => {
 });
 
 describe("rest day budget", () => {
-  const budget = { restsPerPeriod: 2, cycleStart: "2026-10-01" };
+  // Set on Thursday 2026-10-01: 2 rest days per week.
+  const budget = { restsPerWeek: 2, cycleStart: "2026-10-01" };
 
-  it("runs in 21-day periods from the day it was set", () => {
-    expect(restPeriod("2026-10-01", "2026-10-21")).toEqual({ start: "2026-10-01", end: "2026-10-22" });
-    expect(restPeriod("2026-10-01", "2026-10-22")).toEqual({ start: "2026-10-22", end: "2026-11-12" });
+  it("runs per calendar week, Monday to Sunday", () => {
+    // 2026-10-21 is a Wednesday.
+    expect(restWeek("2026-10-21")).toEqual({ start: "2026-10-19", end: "2026-10-26" });
+    expect(restWeek("2026-10-19")).toEqual({ start: "2026-10-19", end: "2026-10-26" });
+    expect(restWeek("2026-10-25")).toEqual({ start: "2026-10-19", end: "2026-10-26" });
+    // Across a year boundary: Thursday 2027-01-01 belongs to the week of Monday 2026-12-28.
+    expect(restWeek("2027-01-01")).toEqual({ start: "2026-12-28", end: "2027-01-04" });
   });
 
-  it("counts only uses of the current period, nothing carries over", () => {
-    const uses = ["2026-10-05", "2026-10-21"];
-    expect(restStatus(budget, uses, "2026-10-21").remaining).toBe(0);
-    // Day 22 starts a new period: the full budget again, unused days are gone.
-    expect(restStatus(budget, uses, "2026-10-22").remaining).toBe(2);
+  it("counts only uses of the current week, nothing carries over", () => {
+    const uses = ["2026-10-20", "2026-10-25"];
+    expect(restStatus(budget, uses, "2026-10-25").remaining).toBe(0);
+    // Monday starts a new week: the full budget again, unused days are gone.
+    expect(restStatus(budget, uses, "2026-10-26").remaining).toBe(2);
   });
 
-  it("can be changed again only after 21 days", () => {
+  it("can change its number only 21 days after it was set (time limit after 3 weeks)", () => {
     expect(restStatus(budget, [], "2026-10-21").changeableFrom).toBe("2026-10-22");
   });
 
@@ -156,14 +161,16 @@ describe("rest day budget", () => {
     expect(canUseRestDay("2026-10-19", "2026-10-20", budget, [], training)).toBe(true);
     expect(canUseRestDay("2026-10-18", "2026-10-20", budget, [], training)).toBe(false);
     expect(canUseRestDay("2026-10-20", "2026-10-20", budget, [], training)).toBe(false);
-    expect(canUseRestDay("2026-10-19", "2026-10-20", budget, ["2026-10-02", "2026-10-03"], training)).toBe(false);
+    // One rest day per week, already used on Tuesday: nothing left for Monday.
+    expect(canUseRestDay("2026-10-19", "2026-10-20", { ...budget, restsPerWeek: 1 }, ["2026-10-20"], new Set())).toBe(false);
+    expect(canUseRestDay("2026-10-19", "2026-10-20", budget, ["2026-10-12", "2026-10-13"], training)).toBe(true);
     expect(canUseRestDay("2026-10-19", "2026-10-20", null, [], training)).toBe(false);
   });
 
-  it("uses the budget of the period the day belongs to", () => {
-    // Yesterday is the last day of a used-up period, today starts a fresh one.
-    const uses = ["2026-10-05", "2026-10-06"];
-    expect(canUseRestDay("2026-10-21", "2026-10-22", budget, uses, new Set())).toBe(false);
-    expect(canUseRestDay("2026-10-22", "2026-10-22", budget, uses, new Set())).toBe(true);
+  it("uses the budget of the week the day belongs to", () => {
+    // Yesterday (Sunday) is the last day of a used-up week, today (Monday) starts a fresh one.
+    const uses = ["2026-10-20", "2026-10-21"];
+    expect(canUseRestDay("2026-10-25", "2026-10-26", budget, uses, new Set())).toBe(false);
+    expect(canUseRestDay("2026-10-26", "2026-10-26", budget, uses, new Set())).toBe(true);
   });
 });

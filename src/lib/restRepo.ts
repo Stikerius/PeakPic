@@ -19,7 +19,7 @@ export async function fetchMyRestDays(): Promise<MyRestDays> {
   if (uses.error) throw uses.error;
   return {
     budget:
-      budget.data !== null ? { restsPerPeriod: budget.data.rests_per_cycle, cycleStart: budget.data.cycle_start } : null,
+      budget.data !== null ? { restsPerWeek: budget.data.rests_per_cycle, cycleStart: budget.data.cycle_start } : null,
     uses: uses.data.map((row) => row.day),
   };
 }
@@ -32,11 +32,11 @@ function restErrorMessage(error: RpcError): string {
     case "rest_budget_locked": {
       const until = typeof error.hint === "string" ? error.hint.split("-").reverse().join(".") : null;
       return until !== null
-        ? `Das Kontingent lässt sich erst ab ${until} wieder ändern.`
-        : "Das Kontingent lässt sich erst nach 21 Tagen wieder ändern.";
+        ? `Die Anzahl lässt sich erst ab ${until} wieder ändern.`
+        : "Die Anzahl lässt sich erst 3 Wochen nach der letzten Änderung wieder ändern.";
     }
     case "rest_day_no_budget":
-      return "In diesem Zeitraum sind keine Ruhetage mehr übrig.";
+      return "Diese Woche sind keine Ruhetage mehr übrig.";
     case "rest_day_is_training_day":
       return "An diesem Tag hast du schon trainiert.";
     case "rest_day_not_allowed":
@@ -51,7 +51,7 @@ async function call(result: PromiseLike<{ error: RpcError | null }>): Promise<vo
   if (error) throw new Error(restErrorMessage(error));
 }
 
-/** "n rest days per 21 days"; the database refuses changes before the period is over. */
+/** "n rest days per week"; the database refuses a new number within 21 days of the last one. */
 export function setRestBudget(n: number): Promise<void> {
   return call(supabase.rpc("set_rest_budget", { n }));
 }
