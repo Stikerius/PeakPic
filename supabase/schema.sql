@@ -40,6 +40,11 @@
 --   * hashtags      tags and use counts readable by every signed-in user; which content uses a
 --                   tag only as far as that content is readable. Maintained by triggers only.
 --   * chats         only members can read conversations, members and messages
+--   * training plan one per user: an ordered cycle of units (plan_days), not tied to weekdays.
+--                   Readable by the owner, and by people who may see the owner's posts while
+--                   "Plan im Profil anzeigen" is on (can_view_plan). Written only through
+--                   save_training_plan() / delete_training_plan(); sequence_changed_at marks
+--                   changes of order or units (the plan streak restarts there).
 --   * storage       bucket "photos" (private), objects live under {user_id}/{kind}/...;
 --                   a photo is readable exactly when its post/story is (avatars: everyone)
 -- =============================================================================
@@ -446,6 +451,29 @@ create table if not exists public.notifications (
   created_at       timestamptz not null default now()
 );
 create index if not exists notifications_user_created_idx on public.notifications (user_id, created_at desc);
+
+-- Training plan: an ordered cycle of units (e.g. Push, Pull, Beine), repeated, not tied to
+-- weekdays. One plan per user.
+create table if not exists public.training_plans (
+  id                  uuid primary key default gen_random_uuid(),
+  user_id             uuid not null unique references public.profiles (id) on delete cascade,
+  name                text not null check (char_length(name) between 1 and 40 and name = btrim(name)),
+  show_in_profile     boolean not null default true,
+  -- Set when units are added, removed or reordered (not for renames or notes).
+  sequence_changed_at timestamptz not null default now(),
+  created_at          timestamptz not null default now(),
+  updated_at          timestamptz not null default now()
+);
+
+create table if not exists public.plan_days (
+  id         uuid primary key default gen_random_uuid(),
+  plan_id    uuid not null references public.training_plans (id) on delete cascade,
+  position   integer not null check (position >= 0),
+  title      text not null check (char_length(title) between 1 and 30 and title = btrim(title)),
+  notes      text check (char_length(notes) <= 300),
+  created_at timestamptz not null default now(),
+  unique (plan_id, position)
+);
 
 
 -- -----------------------------------------------------------------------------
@@ -1416,6 +1444,94 @@ begin
 end;
 $$;
 
+-- ---------------------------------------------------------------- training plan
+-- Same audience as the owner's posts (followers, or everyone signed in if public; not hidden),
+-- and only while the owner shows the plan in the profile. The owner always.
+create or replace function public.can_view_plan(plan uuid)
+returns boolean
+language sql stable security definer set search_path = ''
+as $$
+  select exists (
+    select 1 from public.training_plans tp
+    where tp.id = plan
+      and (
+        tp.user_id = (select auth.uid())
+        or (
+          tp.show_in_profile
+          and (public.is_following(tp.user_id) or public.is_public_content(tp.user_id, 'posts'))
+          and not public.is_hidden_from_me(tp.user_id, 'posts')
+        )
+      )
+  );
+$$;
+
+-- Creates or replaces the caller's plan in one go. p_days is the full ordered list:
+-- [{"id": <existing unit id or null>, "title": "...", "notes": "..."}]. Existing units keep
+-- their id (posts stay assigned to them), units left out are removed. 1 to 21 units.
+create or replace function public.save_training_plan(p_name text, p_show_in_profile boolean, p_days jsonb)
+returns uuid
+language plpgsql security definer set search_path = ''
+as $$
+declare
+  me uuid := auth.uid();
+  plan uuid;
+  old_sequence uuid[];
+  new_sequence uuid[] := '{}';
+  item jsonb;
+  item_id uuid;
+  idx integer := 0;
+begin
+  if me is null then
+    raise exception 'not authenticated';
+  end if;
+  if jsonb_typeof(p_days) is distinct from 'array'
+    or jsonb_array_length(p_days) not between 1 and 21 then
+    raise exception 'plan_length' using hint = 'A plan has 1 to 21 units.';
+  end if;
+
+  insert into public.training_plans (user_id, name, show_in_profile)
+  values (me, btrim(p_name), coalesce(p_show_in_profile, true))
+  on conflict (user_id) do update
+    set name = excluded.name, show_in_profile = excluded.show_in_profile, updated_at = now()
+  returning id into plan;
+
+  select coalesce(array_agg(d.id order by d.position), '{}') into old_sequence
+  from public.plan_days d where d.plan_id = plan;
+  -- Out of the way of the new positions (unique per plan).
+  update public.plan_days set position = position + 1000 where plan_id = plan;
+
+  for item in select value from jsonb_array_elements(p_days) loop
+    item_id := nullif(item ->> 'id', '')::uuid;
+    if item_id is not null
+      and not (item_id = any (new_sequence))
+      and exists (select 1 from public.plan_days d where d.id = item_id and d.plan_id = plan) then
+      update public.plan_days
+      set position = idx, title = btrim(item ->> 'title'), notes = nullif(btrim(coalesce(item ->> 'notes', '')), '')
+      where id = item_id;
+    else
+      insert into public.plan_days (plan_id, position, title, notes)
+      values (plan, idx, btrim(item ->> 'title'), nullif(btrim(coalesce(item ->> 'notes', '')), ''))
+      returning id into item_id;
+    end if;
+    new_sequence := new_sequence || item_id;
+    idx := idx + 1;
+  end loop;
+
+  delete from public.plan_days where plan_id = plan and not (id = any (new_sequence));
+  if old_sequence is distinct from new_sequence then
+    update public.training_plans set sequence_changed_at = now() where id = plan;
+  end if;
+  return plan;
+end;
+$$;
+
+create or replace function public.delete_training_plan()
+returns void
+language sql security definer set search_path = ''
+as $$
+  delete from public.training_plans where user_id = (select auth.uid());
+$$;
+
 -- Returns the 1:1 conversation with `other_user`, creating it if needed.
 -- Only allowed with people you follow. Conversations and members are created
 -- exclusively through this function.
@@ -1611,6 +1727,12 @@ revoke all on function public.can_request_workout_link(uuid, uuid) from public, 
 grant execute on function public.can_request_workout_link(uuid, uuid) to authenticated;
 revoke all on function public.can_repost(uuid) from public, anon;
 grant execute on function public.can_repost(uuid) to authenticated;
+revoke all on function public.can_view_plan(uuid) from public, anon;
+grant execute on function public.can_view_plan(uuid) to authenticated;
+revoke all on function public.save_training_plan(text, boolean, jsonb) from public, anon;
+grant execute on function public.save_training_plan(text, boolean, jsonb) to authenticated;
+revoke all on function public.delete_training_plan() from public, anon;
+grant execute on function public.delete_training_plan() to authenticated;
 
 
 -- -----------------------------------------------------------------------------
@@ -1627,6 +1749,9 @@ to authenticated;
 -- Hashtags: read only; rows and counters are maintained by triggers.
 revoke all on public.hashtags, public.content_hashtags from anon, authenticated;
 grant select on public.hashtags, public.content_hashtags to authenticated;
+-- Training plans: read only; written through save_training_plan / delete_training_plan.
+revoke all on public.training_plans, public.plan_days from anon, authenticated;
+grant select on public.training_plans, public.plan_days to authenticated;
 -- Former usernames: no direct access at all (resolve_usernames / username_available only).
 revoke all on public.username_history from anon, authenticated;
 -- Notifications: read and mark as read only; inserts come from security definer functions.
@@ -1660,6 +1785,8 @@ alter table public.workout_shares       enable row level security;
 alter table public.post_reposts         enable row level security;
 alter table public.notifications        enable row level security;
 alter table public.username_history     enable row level security;
+alter table public.training_plans       enable row level security;
+alter table public.plan_days            enable row level security;
 alter table public.hashtags             enable row level security;
 alter table public.content_hashtags     enable row level security;
 
@@ -2123,6 +2250,24 @@ create policy "content_hashtags: read with content" on public.content_hashtags
     or (source = 'comment' and public.can_view_comment(source_id))
     or (source = 'story' and public.can_view_story(source_id))
   );
+
+-- training_plans / plan_days: see can_view_plan. No write policies (functions only).
+-- The plan policy checks the row's own columns, like the posts policy.
+drop policy if exists "training_plans: read" on public.training_plans;
+create policy "training_plans: read" on public.training_plans
+  for select to authenticated
+  using (
+    user_id = (select auth.uid())
+    or (
+      show_in_profile
+      and (public.is_following(user_id) or public.is_public_content(user_id, 'posts'))
+      and not public.is_hidden_from_me(user_id, 'posts')
+    )
+  );
+
+drop policy if exists "plan_days: read with plan" on public.plan_days;
+create policy "plan_days: read with plan" on public.plan_days
+  for select to authenticated using (public.can_view_plan(plan_id));
 
 -- notifications: only the recipient, only reading and marking as read.
 drop policy if exists "notifications: recipient reads" on public.notifications;

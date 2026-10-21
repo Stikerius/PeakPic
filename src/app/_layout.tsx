@@ -94,6 +94,7 @@ function RootNavigator() {
         <Stack.Screen name="notifications" options={{ title: "Mitteilungen" }} />
         <Stack.Screen name="settings" options={{ title: "Einstellungen", headerBackTitle: "Profil" }} />
         <Stack.Screen name="profile-edit" options={{ title: "Profil bearbeiten", presentation: "modal" }} />
+        <Stack.Screen name="plan-edit" options={{ title: "Trainingsplan", presentation: "modal" }} />
         <Stack.Screen name="privacy/[scope]" options={{ title: "" }} />
         <Stack.Screen name="app-icon" options={{ title: "App-Icon" }} />
         <Stack.Screen

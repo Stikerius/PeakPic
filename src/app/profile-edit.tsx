@@ -1,9 +1,10 @@
-import { router } from "expo-router";
-import { useEffect, useState } from "react";
+import { router, useFocusEffect } from "expo-router";
+import { useCallback, useEffect, useState } from "react";
 import { ActivityIndicator, KeyboardAvoidingView, Platform, ScrollView, StyleSheet, Text, View } from "react-native";
 
 import { Button } from "@/components/ui/button";
 import { ErrorState } from "@/components/ui/empty-state";
+import { ListItem } from "@/components/ui/list-item";
 import { SectionHeader } from "@/components/ui/section-header";
 import { TextField } from "@/components/ui/text-field";
 import { spacing, typography } from "@/constants/theme";
@@ -16,6 +17,7 @@ import {
   usernameFormatError,
   usernameLockedMessage,
 } from "@/lib/names";
+import { fetchMyPlan, type TrainingPlan } from "@/lib/planRepo";
 import { NameChangeError, getMyProfile, isUsernameAvailable, updateMyNames, type Profile } from "@/lib/profileRepo";
 import { makeStyles, useTheme } from "@/lib/theme";
 
@@ -46,6 +48,22 @@ export default function ProfileEditScreen() {
   }
 
   useEffect(load, []);
+
+  // undefined while loading; refreshed when coming back from the plan editor.
+  const [plan, setPlan] = useState<TrainingPlan | null | undefined>(undefined);
+  useFocusEffect(
+    useCallback(() => {
+      let active = true;
+      fetchMyPlan()
+        .then((result) => {
+          if (active) setPlan(result);
+        })
+        .catch(() => undefined);
+      return () => {
+        active = false;
+      };
+    }, []),
+  );
 
   const normalized = normalizeUsername(username);
   const usernameChanged = profile !== null && normalized !== profile.username;
@@ -175,6 +193,23 @@ export default function ProfileEditScreen() {
         <View style={styles.actions}>
           <Button label="Speichern" onPress={() => void save()} loading={saving} />
         </View>
+
+        <SectionHeader title="Trainingsplan" />
+        <View style={styles.group}>
+          <ListItem
+            icon="list-outline"
+            title={plan ? plan.name : "Plan anlegen"}
+            subtitle={
+              plan === undefined
+                ? "…"
+                : plan === null
+                  ? "Freiwillig. Eine feste Abfolge von Einheiten, z.B. Push, Pull, Beine."
+                  : `${plan.days.length === 1 ? "1 Einheit" : `${plan.days.length} Einheiten`}${plan.showInProfile ? "" : " · nicht im Profil sichtbar"}`
+            }
+            chevron
+            onPress={() => router.push("/plan-edit")}
+          />
+        </View>
       </ScrollView>
     </KeyboardAvoidingView>
   );
@@ -212,6 +247,11 @@ const useStyles = makeStyles(({ colors }) =>
     actions: {
       paddingHorizontal: spacing.md,
       paddingTop: spacing.lg,
+    },
+    group: {
+      borderTopWidth: StyleSheet.hairlineWidth,
+      borderBottomWidth: StyleSheet.hairlineWidth,
+      borderColor: colors.divider,
     },
   }),
 );

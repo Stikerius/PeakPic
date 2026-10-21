@@ -7,6 +7,7 @@ import { Avatar } from "@/components/ui/avatar";
 import { FollowButton } from "@/components/follow-button";
 import { STORY_RING_INSET, StoryRing } from "@/components/stories/story-ring";
 import { HighlightsRow } from "@/components/profile/highlights-row";
+import { PlanSummary } from "@/components/profile/plan-summary";
 import { PostGrid } from "@/components/profile/post-grid";
 import { FlameIcon } from "@/components/streak/flame-icon";
 import { MonthCalendar } from "@/components/streak/month-calendar";
@@ -25,6 +26,7 @@ import {
   toDayKey,
   type DayKey,
 } from "@/lib/streak";
+import { fetchPlan, type TrainingPlan } from "@/lib/planRepo";
 import { makeStyles, useTheme } from "@/lib/theme";
 import {
   fetchProfileGrid,
@@ -37,6 +39,7 @@ import {
 const AVATAR_SIZE = 88;
 
 type Content = {
+  plan: TrainingPlan | null;
   days: DayKey[];
   sharedDays: ReadonlySet<DayKey>;
   posts: PostThumbnail[];
@@ -88,11 +91,13 @@ export default function UserProfileScreen() {
       setSummary(result);
       if (result !== null && (result.canSeePosts || result.canSeeStories)) {
         // Only ask for what the settings allow; RLS enforces the same rules anyway.
-        const [days, posts, highlights, stories] = await Promise.all([
+        const [days, posts, highlights, stories, plan] = await Promise.all([
           result.canSeePosts ? fetchUserWorkoutDays(userId) : Promise.resolve({ days: [], shared: [] }),
           result.canSeePosts ? fetchProfileGrid(userId) : Promise.resolve([]),
           result.canSeeStories ? listHighlights(userId) : Promise.resolve([]),
           result.canSeeStories ? fetchUserStoryGroup(userId) : Promise.resolve(null),
+          // Null when there is none or the owner doesn't show it to me (the database decides).
+          result.canSeePosts ? fetchPlan(userId).catch(() => null) : Promise.resolve(null),
         ]);
         setContent({
           days: days.days,
@@ -100,6 +105,7 @@ export default function UserProfileScreen() {
           posts,
           highlights,
           hasStories: stories !== null,
+          plan,
           storiesUnseen: stories?.hasUnseen ?? false,
         });
       } else {
@@ -249,6 +255,11 @@ export default function UserProfileScreen() {
       ) : (
         <>
           <HighlightsRow highlights={content.highlights} editable={false} />
+          {content.plan !== null && (
+            <View style={styles.plan}>
+              <PlanSummary plan={content.plan} />
+            </View>
+          )}
 
           {!summary.canSeePosts ? (
             <View style={styles.locked}>
@@ -415,6 +426,9 @@ const useStyles = makeStyles(({ colors }) =>
       color: colors.danger,
       fontSize: fontSize.sm,
       textAlign: "center",
+      paddingHorizontal: spacing.md,
+    },
+    plan: {
       paddingHorizontal: spacing.md,
     },
   }),

@@ -12,6 +12,7 @@ import {
 } from "react-native";
 
 import { HighlightsRow } from "@/components/profile/highlights-row";
+import { PlanSummary } from "@/components/profile/plan-summary";
 import { PostGrid } from "@/components/profile/post-grid";
 import { FlameIcon } from "@/components/streak/flame-icon";
 import { Avatar } from "@/components/ui/avatar";
@@ -22,6 +23,7 @@ import { useWorkoutDays } from "@/hooks/use-workout-days";
 import { describeError } from "@/lib/errors";
 import { onAppEvent } from "@/lib/events";
 import { listMyHighlights, type Highlight } from "@/lib/highlightRepo";
+import { fetchMyPlan, type TrainingPlan } from "@/lib/planRepo";
 import { getMyProfile, updateMyAvatar, type Profile } from "@/lib/profileRepo";
 import { useSession } from "@/lib/session";
 import { fetchFollowCounts } from "@/lib/socialRepo";
@@ -41,6 +43,7 @@ export default function ProfileScreen() {
   const [error, setError] = useState<string | null>(null);
   const [uploading, setUploading] = useState(false);
   const [highlights, setHighlights] = useState<Highlight[]>([]);
+  const [plan, setPlan] = useState<TrainingPlan | null>(null);
   const [posts, setPosts] = useState<PostThumbnail[] | null>(null);
   const [counts, setCounts] = useState<{ followers: number; following: number } | null>(null);
   const requestCount = useFollowRequestCount();
@@ -66,12 +69,14 @@ export default function ProfileScreen() {
           if (!active) return;
           setProfile(result);
           setError(null);
-          const [mine, grid, followCounts] = await Promise.all([
+          const [mine, grid, followCounts, myPlan] = await Promise.all([
             listMyHighlights(),
             fetchProfileGrid(result.id),
             fetchFollowCounts(result.id),
+            fetchMyPlan().catch(() => null),
           ]);
           if (!active) return;
+          setPlan(myPlan);
           setHighlights(mine);
           setPosts(grid);
           setCounts(followCounts);
@@ -186,6 +191,13 @@ export default function ProfileScreen() {
       </View>
 
       <HighlightsRow highlights={highlights} editable />
+
+      {plan !== null && (
+        <View style={styles.padded}>
+          {/* Nothing is assigned to the plan yet, so the cycle starts with its first unit. */}
+          <PlanSummary plan={plan} nextIndex={0} />
+        </View>
+      )}
 
       <View style={[styles.padded, styles.section]}>
         {error !== null && <Text style={styles.error}>{error}</Text>}

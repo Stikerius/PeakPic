@@ -215,6 +215,26 @@ export type Database = {
           Rel<"story_views_user_id_fkey", "user_id", "profiles">,
         ];
       };
+      training_plans: {
+        Row: {
+          id: Uuid;
+          user_id: Uuid;
+          name: string;
+          show_in_profile: boolean;
+          sequence_changed_at: Timestamp;
+          created_at: Timestamp;
+          updated_at: Timestamp;
+        };
+        Insert: Record<string, never>;
+        Update: Record<string, never>;
+        Relationships: [Rel<"training_plans_user_id_fkey", "user_id", "profiles">];
+      };
+      plan_days: {
+        Row: { id: Uuid; plan_id: Uuid; position: number; title: string; notes: string | null; created_at: Timestamp };
+        Insert: Record<string, never>;
+        Update: Record<string, never>;
+        Relationships: [Rel<"plan_days_plan_id_fkey", "plan_id", "training_plans">];
+      };
       highlights: {
         Row: { id: Uuid; user_id: Uuid; title: string; cover_story_id: Uuid | null; created_at: Timestamp };
         Insert: { id?: Uuid; user_id: Uuid; title: string; cover_story_id?: Uuid | null; created_at?: Timestamp };
@@ -400,6 +420,8 @@ export type Database = {
     Views: Record<string, never>;
     Functions: {
       username_available: { Args: { name: string }; Returns: boolean };
+      save_training_plan: { Args: { p_name: string; p_show_in_profile: boolean; p_days: Json }; Returns: Uuid };
+      delete_training_plan: { Args: Record<string, never>; Returns: undefined };
       resolve_usernames: { Args: { names: string[] }; Returns: { username: string; user_id: Uuid }[] };
       get_or_create_direct_conversation: { Args: { other_user: Uuid }; Returns: Uuid };
       set_message_pinned: { Args: { message: Uuid; pinned: boolean }; Returns: undefined };
