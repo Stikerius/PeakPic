@@ -23,6 +23,8 @@ export type Palette = {
   surface: string;
   /** Controls on a surface: inputs, segmented tracks, pressed rows. */
   surfaceRaised: string;
+  /** The selected segment on a `surfaceRaised` track. */
+  controlActive: string;
   text: string;
   textSecondary: string;
   textTertiary: string;
@@ -47,6 +49,7 @@ export const palettes: Record<ColorScheme, Palette> = {
     background: "#F2F2F4",
     surface: "#FBFBFC",
     surfaceRaised: "#E9E9EC",
+    controlActive: "#FDFDFD",
     text: "#17171A",
     textSecondary: "#5C5C64",
     textTertiary: "#8C8C94",
@@ -64,6 +67,7 @@ export const palettes: Record<ColorScheme, Palette> = {
     background: "#111113",
     surface: "#1A1A1D",
     surfaceRaised: "#252529",
+    controlActive: "#3A3A40",
     text: "#F2F2F3",
     textSecondary: "#A1A1A8",
     textTertiary: "#6E6E76",

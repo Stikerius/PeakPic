@@ -3,8 +3,8 @@ import { router, useLocalSearchParams } from "expo-router";
 import { useEffect, useState } from "react";
 import { ActivityIndicator, FlatList, StyleSheet, Text, TextInput, View } from "react-native";
 
-import { Button } from "@/components/button";
 import { ProfileRow } from "@/components/profile-row";
+import { Button } from "@/components/ui/button";
 import { fontSize, radius, spacing } from "@/constants/theme";
 import { MESSAGE_MAX_LENGTH, shareCommentWithUser, sharePostWithUser } from "@/lib/chatRepo";
 import { listFollowing } from "@/lib/socialRepo";

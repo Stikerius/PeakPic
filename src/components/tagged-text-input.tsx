@@ -14,7 +14,7 @@ import {
   type ViewStyle,
 } from "react-native";
 
-import { Avatar } from "@/components/avatar";
+import { Avatar } from "@/components/ui/avatar";
 import { fontSize, onPhoto, radius, spacing } from "@/constants/theme";
 import { suggestHashtags, suggestPeople, type HashtagSuggestion } from "@/lib/tagSuggestRepo";
 import { activeToken, applySuggestion, normalizeHashtag, type ActiveToken } from "@/lib/taggedText";

@@ -3,8 +3,8 @@ import { Image } from "expo-image";
 import { useEffect, useState } from "react";
 import { ActivityIndicator, FlatList, Pressable, StyleSheet, Text, TextInput, View } from "react-native";
 
-import { BottomSheet } from "@/components/bottom-sheet";
-import { Button } from "@/components/button";
+import { Button } from "@/components/ui/button";
+import { Sheet } from "@/components/ui/sheet";
 import { fontSize, radius, spacing } from "@/constants/theme";
 import {
   HIGHLIGHT_TITLE_MAX_LENGTH,
@@ -39,7 +39,7 @@ export function HighlightPicker({ visible, onPick, onClose }: HighlightPickerPro
   const title = newTitle?.trim() ?? "";
 
   return (
-    <BottomSheet visible={visible} title="Zu Highlight hinzufügen" onClose={onClose}>
+    <Sheet visible={visible} title="Zu Highlight hinzufügen" onClose={onClose}>
       {newTitle !== null ? (
         <View style={styles.form}>
           <TextInput
@@ -103,7 +103,7 @@ export function HighlightPicker({ visible, onPick, onClose }: HighlightPickerPro
           }
         />
       )}
-    </BottomSheet>
+    </Sheet>
   );
 }
 

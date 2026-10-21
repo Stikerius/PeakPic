@@ -14,11 +14,11 @@ import { GestureDetector, GestureHandlerRootView } from "react-native-gesture-ha
 import Animated, { interpolate, useAnimatedStyle } from "react-native-reanimated";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
-import { fontSize, radius, spacing } from "@/constants/theme";
+import { radius, spacing, typography } from "@/constants/theme";
 import { useSwipeToDismiss } from "@/hooks/use-swipe-to-dismiss";
 import { makeStyles, useTheme } from "@/lib/theme";
 
-type BottomSheetProps = {
+type SheetProps = {
   visible: boolean;
   title: string;
   onClose: () => void;
@@ -31,7 +31,7 @@ type BottomSheetProps = {
  * Sheet from the bottom over a dimmed backdrop. Closes by dragging the header down
  * (useSwipeToDismiss), tapping the backdrop or the close button.
  */
-export function BottomSheet({ visible, title, onClose, heightFraction = 0.6, children }: BottomSheetProps) {
+export function Sheet({ visible, title, onClose, heightFraction = 0.6, children }: SheetProps) {
   const { colors } = useTheme();
   const styles = useStyles();
   const { height } = useWindowDimensions();
@@ -66,9 +66,16 @@ export function BottomSheet({ visible, title, onClose, heightFraction = 0.6, chi
               <View style={styles.header} collapsable={false}>
                 <View style={styles.grabber} />
                 <View style={styles.titleRow}>
-                  <Text style={styles.title}>{title}</Text>
-                  <Pressable onPress={onClose} accessibilityRole="button" accessibilityLabel="Schliessen" hitSlop={spacing.sm}>
-                    <Ionicons name="close" size={24} color={colors.text} />
+                  <Text style={styles.title} accessibilityRole="header" numberOfLines={1}>
+                    {title}
+                  </Text>
+                  <Pressable
+                    onPress={onClose}
+                    accessibilityRole="button"
+                    accessibilityLabel="Schliessen"
+                    style={({ pressed }) => [styles.close, pressed && styles.closePressed]}
+                  >
+                    <Ionicons name="close" size={18} color={colors.textSecondary} />
                   </Pressable>
                 </View>
               </View>
@@ -98,19 +105,19 @@ const useStyles = makeStyles(({ colors }) =>
       overflow: "hidden",
       borderTopLeftRadius: radius.lg,
       borderTopRightRadius: radius.lg,
-      backgroundColor: colors.background,
+      backgroundColor: colors.surface,
     },
     header: {
       alignItems: "center",
-      gap: spacing.sm,
+      gap: spacing.xs,
       paddingTop: spacing.sm,
-      paddingBottom: spacing.md,
+      paddingBottom: spacing.sm,
       paddingHorizontal: spacing.md,
       borderBottomWidth: StyleSheet.hairlineWidth,
-      borderBottomColor: colors.border,
+      borderBottomColor: colors.divider,
     },
     grabber: {
-      width: 40,
+      width: 36,
       height: 5,
       borderRadius: radius.full,
       backgroundColor: colors.border,
@@ -120,11 +127,22 @@ const useStyles = makeStyles(({ colors }) =>
       flexDirection: "row",
       alignItems: "center",
       justifyContent: "space-between",
+      gap: spacing.md,
     },
     title: {
+      ...typography.bodyStrong,
+      flex: 1,
       color: colors.text,
-      fontSize: fontSize.md,
-      fontWeight: "700",
+    },
+    close: {
+      width: 44,
+      height: 44,
+      marginRight: -spacing.sm,
+      alignItems: "center",
+      justifyContent: "center",
+    },
+    closePressed: {
+      opacity: 0.6,
     },
     body: {
       flex: 1,

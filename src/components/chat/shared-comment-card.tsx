@@ -3,7 +3,7 @@ import { Image } from "expo-image";
 import { router } from "expo-router";
 import { Pressable, StyleSheet, Text, View } from "react-native";
 
-import { Avatar } from "@/components/avatar";
+import { Avatar } from "@/components/ui/avatar";
 import { fontSize, radius, spacing } from "@/constants/theme";
 import { makeStyles, useTheme } from "@/lib/theme";
 import type { SharedComment, SharedPost } from "@/types/chat";

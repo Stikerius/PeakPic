@@ -1,7 +1,7 @@
 import type { ReactNode } from "react";
 import { Pressable, StyleSheet, Text, View } from "react-native";
 
-import { Avatar } from "@/components/avatar";
+import { Avatar } from "@/components/ui/avatar";
 import { fontSize, spacing } from "@/constants/theme";
 import { makeStyles } from "@/lib/theme";
 import type { PublicProfile } from "@/types/social";

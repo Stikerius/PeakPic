@@ -1,9 +1,9 @@
 import Ionicons from "@expo/vector-icons/Ionicons";
 import { Pressable, StyleSheet, Text, View } from "react-native";
 
-import { Avatar } from "@/components/avatar";
 import { PhotoCarousel } from "@/components/feed/photo-carousel";
 import { TaggedText } from "@/components/tagged-text";
+import { Avatar } from "@/components/ui/avatar";
 import { fontSize, spacing } from "@/constants/theme";
 import { formatRelativeTime } from "@/lib/format";
 import { makeStyles, useTheme } from "@/lib/theme";

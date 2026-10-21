@@ -3,8 +3,8 @@ import { router, useFocusEffect } from "expo-router";
 import { useCallback, useEffect, useState } from "react";
 import { ActivityIndicator, FlatList, Pressable, RefreshControl, StyleSheet, Text, View } from "react-native";
 
-import { Avatar } from "@/components/avatar";
-import { Button } from "@/components/button";
+import { Avatar } from "@/components/ui/avatar";
+import { Button } from "@/components/ui/button";
 import { fontSize, radius, spacing } from "@/constants/theme";
 import { listConversations, subscribeToMessages } from "@/lib/chatRepo";
 import { formatRelativeTime } from "@/lib/format";

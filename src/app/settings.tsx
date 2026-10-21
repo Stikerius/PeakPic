@@ -4,7 +4,8 @@ import type { ComponentProps } from "react";
 import { useCallback, useState } from "react";
 import { Alert, Pressable, ScrollView, StyleSheet, Switch, Text, View } from "react-native";
 
-import { Button } from "@/components/button";
+import { Button } from "@/components/ui/button";
+import { SegmentedControl } from "@/components/ui/segmented-control";
 import { appIconForNativeName } from "@/constants/appIcons";
 import { fontSize, radius, spacing, type ThemePreference } from "@/constants/theme";
 import { useFollowRequestCount } from "@/hooks/use-follow-requests";
@@ -59,29 +60,19 @@ type ChoiceProps<T extends string> = {
   onChange: (value: T) => void;
 };
 
-/** Segmented choice ("Alle" / "Nur Follower", "Wer darf mich markieren", …). */
+/** Titled segmented choice ("Alle" / "Nur Follower", "Wer darf mich markieren", …). */
 function Choice<T extends string>({ title, value, options, disabled = false, onChange }: ChoiceProps<T>) {
   const styles = useStyles();
-  const shown = value;
   return (
-    <View style={[styles.choiceRow, disabled && styles.disabled]}>
-      <Text style={styles.rowTitle}>{title}</Text>
-      <View style={styles.segments} accessibilityRole="radiogroup" accessibilityLabel={title}>
-        {options.map((option) => (
-          <Pressable
-            key={option.value}
-            onPress={() => onChange(option.value)}
-            disabled={disabled}
-            accessibilityRole="radio"
-            accessibilityState={{ checked: shown === option.value, disabled }}
-            style={[styles.segment, shown === option.value && styles.segmentActive]}
-          >
-            <Text style={[styles.segmentLabel, shown === option.value && styles.segmentLabelActive]}>
-              {option.label}
-            </Text>
-          </Pressable>
-        ))}
-      </View>
+    <View style={styles.choiceRow}>
+      <Text style={[styles.rowTitle, disabled && styles.disabled]}>{title}</Text>
+      <SegmentedControl
+        value={value}
+        options={options}
+        disabled={disabled}
+        onChange={onChange}
+        accessibilityLabel={title}
+      />
     </View>
   );
 }
@@ -389,29 +380,6 @@ const useStyles = makeStyles(({ colors }) =>
     },
     disabled: {
       opacity: 0.45,
-    },
-    segments: {
-      flexDirection: "row",
-      padding: 3,
-      borderRadius: radius.md,
-      backgroundColor: colors.surfaceRaised,
-    },
-    segment: {
-      flex: 1,
-      alignItems: "center",
-      paddingVertical: spacing.sm,
-      borderRadius: radius.sm,
-    },
-    segmentActive: {
-      backgroundColor: colors.accent,
-    },
-    segmentLabel: {
-      color: colors.textSecondary,
-      fontSize: fontSize.sm,
-      fontWeight: "600",
-    },
-    segmentLabelActive: {
-      color: colors.onAccent,
     },
     signOut: {
       marginTop: spacing.lg,

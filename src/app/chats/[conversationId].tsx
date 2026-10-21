@@ -16,11 +16,11 @@ import {
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
-import { Avatar } from "@/components/avatar";
 import { MessageBubble } from "@/components/chat/message-bubble";
 import { ReactionPicker } from "@/components/chat/reaction-picker";
 import { SwipeableMessage } from "@/components/chat/swipeable-message";
 import { TaggedTextInput } from "@/components/tagged-text-input";
+import { Avatar } from "@/components/ui/avatar";
 import { fontSize, radius, spacing } from "@/constants/theme";
 import {
   MESSAGE_MAX_LENGTH,

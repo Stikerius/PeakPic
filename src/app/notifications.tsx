@@ -4,8 +4,8 @@ import type { ComponentProps } from "react";
 import { useEffect, useState } from "react";
 import { ActivityIndicator, FlatList, Pressable, RefreshControl, StyleSheet, Text, View } from "react-native";
 
-import { Avatar } from "@/components/avatar";
 import { InboxRow } from "@/components/notifications/inbox-row";
+import { Avatar } from "@/components/ui/avatar";
 import { fontSize, radius, spacing, type ColorName } from "@/constants/theme";
 import { useOpenProfile } from "@/hooks/use-open-profile";
 import { formatRelativeTime } from "@/lib/format";

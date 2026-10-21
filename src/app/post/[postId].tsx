@@ -3,8 +3,8 @@ import { router, useLocalSearchParams } from "expo-router";
 import { useEffect, useState } from "react";
 import { ActivityIndicator, Alert, ScrollView, StyleSheet, Text, View } from "react-native";
 
-import { Button } from "@/components/button";
 import { PostCard } from "@/components/feed/post-card";
+import { Button } from "@/components/ui/button";
 import { fontSize, spacing } from "@/constants/theme";
 import { useOpenProfile } from "@/hooks/use-open-profile";
 import { usePostActions } from "@/hooks/use-post-actions";

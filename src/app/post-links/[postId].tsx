@@ -2,8 +2,8 @@ import { useLocalSearchParams } from "expo-router";
 import { useEffect, useState } from "react";
 import { ActivityIndicator, Alert, ScrollView, StyleSheet, Text, View } from "react-native";
 
-import { Button } from "@/components/button";
 import { ProfileRow } from "@/components/profile-row";
+import { Button } from "@/components/ui/button";
 import { fontSize, spacing } from "@/constants/theme";
 import { useOpenProfile } from "@/hooks/use-open-profile";
 import { describeError } from "@/lib/errors";

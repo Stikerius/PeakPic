@@ -11,8 +11,8 @@ import {
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
-import { Button } from "@/components/button";
-import { TextField } from "@/components/text-field";
+import { Button } from "@/components/ui/button";
+import { TextField } from "@/components/ui/text-field";
 import { fontSize, radius, spacing } from "@/constants/theme";
 import {
   MIN_PASSWORD_LENGTH,

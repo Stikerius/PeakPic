@@ -14,7 +14,7 @@ import {
   useWindowDimensions,
 } from "react-native";
 
-import { Button } from "@/components/button";
+import { Button } from "@/components/ui/button";
 import { fontSize, onPhoto, radius, spacing } from "@/constants/theme";
 import { describeError } from "@/lib/errors";
 import { emitAppEvent } from "@/lib/events";

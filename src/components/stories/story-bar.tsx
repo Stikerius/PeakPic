@@ -3,8 +3,8 @@ import { router } from "expo-router";
 import { useEffect, useState } from "react";
 import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 
-import { Avatar } from "@/components/avatar";
 import { STORY_RING_INSET, StoryRing } from "@/components/stories/story-ring";
+import { Avatar } from "@/components/ui/avatar";
 import { fontSize, radius, spacing } from "@/constants/theme";
 import { getMyProfile, type Profile } from "@/lib/profileRepo";
 import { refreshStories, useStories } from "@/lib/storyStore";

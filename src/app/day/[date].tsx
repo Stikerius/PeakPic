@@ -11,9 +11,9 @@ import {
   View,
 } from "react-native";
 
-import { Avatar } from "@/components/avatar";
 import { PhotoCarousel } from "@/components/feed/photo-carousel";
 import { PhotoViewer } from "@/components/photo-viewer";
+import { Avatar } from "@/components/ui/avatar";
 import { fontSize, radius, spacing } from "@/constants/theme";
 import { describeError } from "@/lib/errors";
 import { emitAppEvent, onAppEvent } from "@/lib/events";

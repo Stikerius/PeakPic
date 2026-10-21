@@ -10,10 +10,10 @@ import {
   View,
 } from "react-native";
 
-import { Avatar } from "@/components/avatar";
-import { Button } from "@/components/button";
+import { Avatar } from "@/components/ui/avatar";
 import { PhotoCarousel } from "@/components/feed/photo-carousel";
 import { TaggedTextInput } from "@/components/tagged-text-input";
+import { Button } from "@/components/ui/button";
 import { fontSize, radius, spacing } from "@/constants/theme";
 import { describeError } from "@/lib/errors";
 import { emitAppEvent } from "@/lib/events";

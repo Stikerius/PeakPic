@@ -1,7 +1,7 @@
 import Ionicons from "@expo/vector-icons/Ionicons";
 import { Linking, StyleSheet, Text, View } from "react-native";
 
-import { Button } from "@/components/button";
+import { Button } from "@/components/ui/button";
 import { fontSize, spacing } from "@/constants/theme";
 import { makeStyles, useTheme } from "@/lib/theme";
 

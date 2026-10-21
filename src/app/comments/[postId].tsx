@@ -19,9 +19,9 @@ import { GestureDetector } from "react-native-gesture-handler";
 import Animated, { SlideInDown, interpolate, useAnimatedStyle } from "react-native-reanimated";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
-import { Avatar } from "@/components/avatar";
 import { TaggedText } from "@/components/tagged-text";
 import { TaggedTextInput } from "@/components/tagged-text-input";
+import { Avatar } from "@/components/ui/avatar";
 import { useOpenProfile } from "@/hooks/use-open-profile";
 import { useSwipeToDismiss } from "@/hooks/use-swipe-to-dismiss";
 import { fontSize, radius, spacing } from "@/constants/theme";

@@ -9,6 +9,7 @@ type AvatarProps = {
   size: number;
 };
 
+/** Round profile picture; falls back to the first letter on a neutral circle. */
 export function Avatar({ uri, username, size }: AvatarProps) {
   const styles = useStyles();
   const dimensions = { width: size, height: size, borderRadius: size / 2 };
@@ -25,7 +26,7 @@ export function Avatar({ uri, username, size }: AvatarProps) {
   }
   return (
     <View style={[styles.placeholder, dimensions]} accessibilityLabel={`Profilbild von ${username}`}>
-      <Text style={[styles.initial, { fontSize: size * 0.42 }]}>
+      <Text style={[styles.initial, { fontSize: Math.round(size * 0.4) }]} allowFontScaling={false}>
         {username.charAt(0).toUpperCase() || "?"}
       </Text>
     </View>
@@ -40,11 +41,13 @@ const useStyles = makeStyles(({ colors }) =>
     placeholder: {
       alignItems: "center",
       justifyContent: "center",
-      backgroundColor: colors.accentSoft,
+      backgroundColor: colors.surfaceRaised,
+      borderWidth: StyleSheet.hairlineWidth,
+      borderColor: colors.border,
     },
     initial: {
-      color: colors.text,
-      fontWeight: "700",
+      color: colors.textSecondary,
+      fontWeight: "600",
     },
   }),
 );

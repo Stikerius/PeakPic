@@ -17,10 +17,10 @@ import Animated, {
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { scheduleOnRN } from "react-native-worklets";
 
-import { Avatar } from "@/components/avatar";
 import { MentionSpots } from "@/components/mention-spots";
 import { HighlightPicker } from "@/components/stories/highlight-picker";
 import { StoryActivitySheet } from "@/components/stories/story-activity-sheet";
+import { Avatar } from "@/components/ui/avatar";
 import { useOpenProfile } from "@/hooks/use-open-profile";
 import { useSwipeToDismiss } from "@/hooks/use-swipe-to-dismiss";
 import { fontSize, onPhoto, radius, spacing } from "@/constants/theme";

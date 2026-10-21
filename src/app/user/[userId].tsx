@@ -3,14 +3,14 @@ import { router, Stack, useLocalSearchParams } from "expo-router";
 import { useEffect, useState, type ReactNode } from "react";
 import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 
-import { Avatar } from "@/components/avatar";
-import { Button } from "@/components/button";
+import { Avatar } from "@/components/ui/avatar";
 import { FollowButton } from "@/components/follow-button";
 import { STORY_RING_INSET, StoryRing } from "@/components/stories/story-ring";
 import { HighlightsRow } from "@/components/profile/highlights-row";
 import { PostGrid } from "@/components/profile/post-grid";
 import { FlameIcon } from "@/components/streak/flame-icon";
 import { MonthCalendar } from "@/components/streak/month-calendar";
+import { Button } from "@/components/ui/button";
 import { fontSize, radius, spacing } from "@/constants/theme";
 import { getOrCreateDirectConversation } from "@/lib/chatRepo";
 import { describeError } from "@/lib/errors";

@@ -74,14 +74,19 @@ export default function TabLayout() {
   return (
     <Tabs
       screenOptions={{
-        headerStyle: { backgroundColor: colors.surface },
+        headerStyle: { backgroundColor: colors.background },
         headerTintColor: colors.text,
+        headerTitleStyle: { fontSize: 17, fontWeight: "600" },
         tabBarStyle: {
-          backgroundColor: colors.surface,
+          backgroundColor: colors.background,
           borderTopColor: colors.border,
+          borderTopWidth: StyleSheet.hairlineWidth,
         },
+        tabBarLabelStyle: { fontSize: 11, fontWeight: "500" },
         tabBarActiveTintColor: colors.accent,
-        tabBarInactiveTintColor: colors.textSecondary,
+        tabBarInactiveTintColor: colors.textTertiary,
+        // Short cross-fade between tabs instead of a hard cut.
+        animation: "fade",
       }}
     >
       <Tabs.Screen
@@ -114,7 +119,7 @@ export default function TabLayout() {
           title: "Chats",
           tabBarIcon: tabIcon("chatbubbles", "chatbubbles-outline"),
           tabBarBadge: unreadChats > 0 ? unreadChats : undefined,
-          tabBarBadgeStyle: { backgroundColor: colors.accent, color: colors.onAccent },
+          tabBarBadgeStyle: { backgroundColor: colors.accent, color: colors.onAccent, fontSize: 11, fontWeight: "600" },
           headerRight: () => <NewChatButton />,
         }}
       />
@@ -124,7 +129,7 @@ export default function TabLayout() {
           title: "Profil",
           tabBarIcon: tabIcon("person", "person-outline"),
           tabBarBadge: followRequests > 0 ? followRequests : undefined,
-          tabBarBadgeStyle: { backgroundColor: colors.accent, color: colors.onAccent },
+          tabBarBadgeStyle: { backgroundColor: colors.accent, color: colors.onAccent, fontSize: 11, fontWeight: "600" },
           headerRight: () => <SettingsButton />,
         }}
       />

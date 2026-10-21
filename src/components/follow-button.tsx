@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { Alert } from "react-native";
 
-import { Button } from "@/components/button";
+import { Button } from "@/components/ui/button";
 import { describeError } from "@/lib/errors";
 import { emitAppEvent } from "@/lib/events";
 import { followUser, unfollowUser, type FollowStatus } from "@/lib/socialRepo";

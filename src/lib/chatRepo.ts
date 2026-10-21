@@ -84,17 +84,17 @@ export async function shareCommentWithUser(
 
 /** Short text for quotes, banners and previews of an already loaded message. */
 export function messagePreview(message: ChatMessage): string {
-  if (message.tag !== null) return "🏷️ Markierung";
+  if (message.tag !== null) return "Markierung";
   if (message.body !== null) return message.body;
-  if (message.comment !== null) return "💬 Kommentar geteilt";
-  return message.post !== null && message.post !== "deleted" ? "📷 Post geteilt" : "Post nicht mehr verfügbar";
+  if (message.comment !== null) return "Kommentar geteilt";
+  return message.post !== null && message.post !== "deleted" ? "Post geteilt" : "Post nicht mehr verfügbar";
 }
 
 function previewText(row: MessageRow): string {
-  if (row.kind === "tag") return "🏷️ Markierung";
+  if (row.kind === "tag") return "Markierung";
   if (row.body !== null) return row.body;
-  if (row.comment_id !== null) return "💬 Kommentar geteilt";
-  return row.post_id !== null ? "📷 Post geteilt" : "Post nicht mehr verfügbar";
+  if (row.comment_id !== null) return "Kommentar geteilt";
+  return row.post_id !== null ? "Post geteilt" : "Post nicht mehr verfügbar";
 }
 
 /** My conversations with partner, last message and unread count, most recent first. */

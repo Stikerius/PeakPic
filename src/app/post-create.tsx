@@ -3,8 +3,8 @@ import { StatusBar } from "expo-status-bar";
 import { useEffect, useState } from "react";
 import { ActivityIndicator, Alert, StyleSheet, Text, View } from "react-native";
 
-import { Button } from "@/components/button";
 import { MediaEditor, type MediaEditorResult } from "@/components/media-editor/media-editor";
+import { Button } from "@/components/ui/button";
 import { fontSize, onPhoto, spacing } from "@/constants/theme";
 import { describeError } from "@/lib/errors";
 import { emitAppEvent } from "@/lib/events";

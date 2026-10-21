@@ -11,9 +11,9 @@ import {
   View,
 } from "react-native";
 
-import { Button } from "@/components/button";
 import { PostCard } from "@/components/feed/post-card";
 import { StoryBar } from "@/components/stories/story-bar";
+import { Button } from "@/components/ui/button";
 import { fontSize, radius, spacing } from "@/constants/theme";
 import { useOpenProfile } from "@/hooks/use-open-profile";
 import { usePostActions, useRepostActions } from "@/hooks/use-post-actions";

@@ -11,10 +11,10 @@ import {
   View,
 } from "react-native";
 
-import { Avatar } from "@/components/avatar";
 import { HighlightsRow } from "@/components/profile/highlights-row";
 import { PostGrid } from "@/components/profile/post-grid";
 import { FlameIcon } from "@/components/streak/flame-icon";
+import { Avatar } from "@/components/ui/avatar";
 import { fontSize, radius, spacing } from "@/constants/theme";
 import { useFollowRequestCount } from "@/hooks/use-follow-requests";
 import { useWorkoutDays } from "@/hooks/use-workout-days";
