@@ -33,6 +33,8 @@ export type NewPost = {
   /** Shown in the profile grid (if it is also in the feed). */
   showInProfile: boolean;
   tagIds: string[];
+  /** Unit of my plan this proof belongs to (checked by the database). */
+  planDayId?: string | null;
 };
 
 /** Postgres unique_violation: a second day post for the same day. */
@@ -139,6 +141,7 @@ export async function createPost(input: NewPost): Promise<string> {
       in_feed: input.inFeed,
       is_day_post: input.isDayPost,
       show_in_profile: input.showInProfile,
+      plan_day_id: input.planDayId ?? null,
     })
     .select("id")
     .single();

@@ -41,6 +41,8 @@ export type FeedPost = {
   showInProfile: boolean;
   caption: string | null;
   workoutDate: DayKey;
+  /** "Pull · Einheit 2 von 6" if the post belongs to a plan unit. */
+  planLabel: string | null;
   createdAt: string;
   likeCount: number;
   likedByMe: boolean;

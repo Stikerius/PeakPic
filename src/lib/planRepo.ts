@@ -1,4 +1,5 @@
 import { requireUserId } from "@/lib/session";
+import type { PlanProof } from "@/lib/streak";
 import { supabase } from "@/lib/supabase";
 
 /** Same limits as the database (training_plans, plan_days, save_training_plan). */
@@ -77,6 +78,28 @@ export async function saveMyPlan(name: string, showInProfile: boolean, days: Pla
   const plan = await fetchMyPlan();
   if (plan === null) throw new Error("Plan wurde nicht gespeichert.");
   return plan;
+}
+
+/** My training proofs since my plan's order last changed (empty without a plan). */
+export async function fetchPlanProofs(): Promise<PlanProof[]> {
+  const { data, error } = await supabase.rpc("plan_proofs", {});
+  if (error) throw error;
+  return data.map((row) => ({ day: row.day, createdAt: row.created_at, planDayId: row.plan_day_id }));
+}
+
+/**
+ * Assigns a unit to a post that has none yet (e.g. today's slideshow when more photos are
+ * added). The database checks that it is my unit and the day is today or yesterday.
+ */
+export async function assignPlanDayIfEmpty(postId: string, planDayId: string): Promise<void> {
+  const { error } = await supabase.from("posts").update({ plan_day_id: planDayId }).eq("id", postId).is("plan_day_id", null);
+  if (error) throw error;
+}
+
+/** "Pull · Einheit 2 von 6" from the label columns copied onto a post. */
+export function formatPlanLabel(title: string | null, position: number | null, length: number | null): string | null {
+  if (title === null) return null;
+  return position !== null && length !== null ? `${title} · Einheit ${position + 1} von ${length}` : title;
 }
 
 export async function deleteMyPlan(): Promise<void> {

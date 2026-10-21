@@ -9,6 +9,8 @@ export type WorkoutDays = {
   /** All training days (own and shared), each once. */
   days: DayKey[];
   shared: SharedWorkoutDay[];
+  /** Rest days that keep the streak alive (empty for people without a rest day budget). */
+  restDays: DayKey[];
 };
 
 /**
@@ -18,13 +20,21 @@ export type WorkoutDays = {
  */
 export async function fetchWorkoutDays(userId?: string): Promise<WorkoutDays> {
   const target = userId ?? (await requireUserId());
-  const { data, error } = await supabase.rpc("workout_days", { target });
+  const [{ data, error }, rest] = await Promise.all([
+    supabase.rpc("workout_days", { target }),
+    supabase.rpc("rest_days", { target }),
+  ]);
   if (error) throw error;
+  if (rest.error) throw rest.error;
   const own: DayKey[] = [];
   const shared: SharedWorkoutDay[] = [];
   for (const row of data) {
     if (row.shared_by === null) own.push(row.day);
     else shared.push({ day: row.day, postId: row.post_id, ownerId: row.shared_by });
   }
-  return { days: combineTrainingDays(own, shared.map((s) => s.day)), shared };
+  return {
+    days: combineTrainingDays(own, shared.map((s) => s.day)),
+    shared,
+    restDays: rest.data.map((r) => r.day),
+  };
 }

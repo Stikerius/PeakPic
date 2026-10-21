@@ -23,11 +23,17 @@ import { useWorkoutDays } from "@/hooks/use-workout-days";
 import { describeError } from "@/lib/errors";
 import { onAppEvent } from "@/lib/events";
 import { listMyHighlights, type Highlight } from "@/lib/highlightRepo";
-import { fetchMyPlan, type TrainingPlan } from "@/lib/planRepo";
+import { fetchMyPlan, fetchPlanProofs, type TrainingPlan } from "@/lib/planRepo";
 import { getMyProfile, updateMyAvatar, type Profile } from "@/lib/profileRepo";
 import { useSession } from "@/lib/session";
 import { fetchFollowCounts } from "@/lib/socialRepo";
-import { computeStreakStatsFromDays, flameTier, toDayKey } from "@/lib/streak";
+import {
+  computeStreakStatsFromDays,
+  flameTier,
+  nextPlanDayIndex,
+  toDayKey,
+  type PlanProof,
+} from "@/lib/streak";
 import { makeStyles, useTheme } from "@/lib/theme";
 import { fetchProfileGrid, type PostThumbnail } from "@/lib/userProfileRepo";
 
@@ -38,7 +44,8 @@ export default function ProfileScreen() {
   const styles = useStyles();
   // Session can briefly be null while signing out, before the route guard unmounts us.
   const email = useSession().session?.user.email;
-  const { days } = useWorkoutDays();
+  const { days, restDays } = useWorkoutDays();
+  const [planProofs, setPlanProofs] = useState<PlanProof[]>([]);
   const [profile, setProfile] = useState<Profile | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [uploading, setUploading] = useState(false);
@@ -77,6 +84,7 @@ export default function ProfileScreen() {
           ]);
           if (!active) return;
           setPlan(myPlan);
+          setPlanProofs(await fetchPlanProofs().catch(() => []));
           setHighlights(mine);
           setPosts(grid);
           setCounts(followCounts);
@@ -90,7 +98,7 @@ export default function ProfileScreen() {
     }, [version]),
   );
 
-  const stats = computeStreakStatsFromDays(days, toDayKey(new Date()));
+  const stats = computeStreakStatsFromDays(days, toDayKey(new Date()), restDays);
 
   async function changeAvatar() {
     if (profile === null || uploading) return;
@@ -194,8 +202,13 @@ export default function ProfileScreen() {
 
       {plan !== null && (
         <View style={styles.padded}>
-          {/* Nothing is assigned to the plan yet, so the cycle starts with its first unit. */}
-          <PlanSummary plan={plan} nextIndex={0} />
+          <PlanSummary
+            plan={plan}
+            nextIndex={nextPlanDayIndex(
+              plan.days.map((d) => d.id),
+              planProofs,
+            )}
+          />
         </View>
       )}
 

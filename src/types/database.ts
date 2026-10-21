@@ -66,6 +66,10 @@ export type Database = {
           in_feed: boolean;
           is_day_post: boolean;
           show_in_profile: boolean;
+          plan_day_id: Uuid | null;
+          plan_day_title: string | null;
+          plan_day_position: number | null;
+          plan_length: number | null;
         };
         Insert: {
           id?: Uuid;
@@ -77,8 +81,15 @@ export type Database = {
           in_feed?: boolean;
           is_day_post?: boolean;
           show_in_profile?: boolean;
+          plan_day_id?: Uuid | null;
         };
-        Update: { caption?: string | null; in_feed?: boolean; photo_path?: string; show_in_profile?: boolean };
+        Update: {
+          caption?: string | null;
+          in_feed?: boolean;
+          photo_path?: string;
+          show_in_profile?: boolean;
+          plan_day_id?: Uuid | null;
+        };
         Relationships: [Rel<"posts_user_id_fkey", "user_id", "profiles">];
       };
       post_media: {
@@ -214,6 +225,18 @@ export type Database = {
           Rel<"story_views_story_id_fkey", "story_id", "stories">,
           Rel<"story_views_user_id_fkey", "user_id", "profiles">,
         ];
+      };
+      rest_budgets: {
+        Row: { user_id: Uuid; rests_per_cycle: number; cycle_start: string; updated_at: Timestamp };
+        Insert: Record<string, never>;
+        Update: Record<string, never>;
+        Relationships: [Rel<"rest_budgets_user_id_fkey", "user_id", "profiles">];
+      };
+      rest_day_uses: {
+        Row: { user_id: Uuid; day: string; created_at: Timestamp };
+        Insert: Record<string, never>;
+        Update: Record<string, never>;
+        Relationships: [Rel<"rest_day_uses_user_id_fkey", "user_id", "profiles">];
       };
       training_plans: {
         Row: {
@@ -420,6 +443,14 @@ export type Database = {
     Views: Record<string, never>;
     Functions: {
       username_available: { Args: { name: string }; Returns: boolean };
+      set_rest_budget: { Args: { n: number }; Returns: undefined };
+      use_rest_day: { Args: { d: string }; Returns: undefined };
+      undo_rest_day: { Args: { d: string }; Returns: undefined };
+      rest_days: { Args: { target: Uuid }; Returns: { day: string }[] };
+      plan_proofs: {
+        Args: Record<string, never>;
+        Returns: { post_id: Uuid; day: string; created_at: Timestamp; plan_day_id: Uuid | null }[];
+      };
       save_training_plan: { Args: { p_name: string; p_show_in_profile: boolean; p_days: Json }; Returns: Uuid };
       delete_training_plan: { Args: Record<string, never>; Returns: undefined };
       resolve_usernames: { Args: { names: string[] }; Returns: { username: string; user_id: Uuid }[] };

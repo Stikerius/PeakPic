@@ -1,6 +1,6 @@
-import { router, useIsFocused, useNavigation } from "expo-router";
+import { router, useFocusEffect, useIsFocused, useNavigation } from "expo-router";
 import { StatusBar } from "expo-status-bar";
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { Alert, StyleSheet, Text, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
@@ -9,7 +9,9 @@ import { PhotoReview } from "@/components/camera/photo-review";
 import { fontSize, radius, spacing } from "@/constants/theme";
 import { describeError } from "@/lib/errors";
 import { emitAppEvent } from "@/lib/events";
+import { fetchMyPlan, fetchPlanProofs, type TrainingPlan } from "@/lib/planRepo";
 import { createPost, getTodaysDayPostId } from "@/lib/postRepo";
+import { nextPlanDayIndex } from "@/lib/streak";
 import { DarkScheme, makeStyles } from "@/lib/theme";
 import type { CapturedPhoto } from "@/types/photo";
 
@@ -42,6 +44,27 @@ function CameraScreenContent() {
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+  // My plan and the unit due next; null without a plan (then nothing about plans is shown).
+  const [plan, setPlan] = useState<{ plan: TrainingPlan; nextIndex: number } | null>(null);
+
+  useFocusEffect(
+    useCallback(() => {
+      let active = true;
+      Promise.all([fetchMyPlan(), fetchPlanProofs()])
+        .then(([myPlan, proofs]) => {
+          if (!active) return;
+          setPlan(
+            myPlan !== null
+              ? { plan: myPlan, nextIndex: nextPlanDayIndex(myPlan.days.map((d) => d.id), proofs) }
+              : null,
+          );
+        })
+        .catch(() => undefined);
+      return () => {
+        active = false;
+      };
+    }, []),
+  );
 
   // Tapping the camera tab while it is already open discards the photo under review.
   useEffect(() => {
@@ -61,13 +84,21 @@ function CameraScreenContent() {
     setSaveError(null);
   }
 
-  function openEditor(photoUri: string, mode: "day" | "single" | "append", postId?: string) {
-    router.push({ pathname: "/post-create", params: { photoUri, mode, ...(postId !== undefined ? { postId } : {}) } });
+  function openEditor(photoUri: string, mode: "day" | "single" | "append", planDayId: string | null, postId?: string) {
+    router.push({
+      pathname: "/post-create",
+      params: {
+        photoUri,
+        mode,
+        ...(postId !== undefined ? { postId } : {}),
+        ...(planDayId !== null ? { planDayId } : {}),
+      },
+    });
     discardCapture();
   }
 
   /** "Nein" to the feed: store the photo as today's proof for streak and calendar only. */
-  async function saveProofOnly(photoUri: string) {
+  async function saveProofOnly(photoUri: string, planDayId: string | null) {
     setSaving(true);
     setSaveError(null);
     try {
@@ -78,6 +109,7 @@ function CameraScreenContent() {
         isDayPost: true,
         showInProfile: true,
         tagIds: [],
+        planDayId,
       });
       emitAppEvent("postCreated", undefined);
       setCaptured(null);
@@ -95,7 +127,7 @@ function CameraScreenContent() {
    * The first proof of the day counts for the streak and asks whether it also goes to the
    * feed. Later photos of the day go into today's slideshow or become a single post.
    */
-  async function confirmPhoto() {
+  async function confirmPhoto(planDayId: string | null) {
     if (captured === null) return;
     const photoUri = captured.uri;
     setSaving(true);
@@ -112,16 +144,16 @@ function CameraScreenContent() {
 
     if (dayPostId === null) {
       Alert.alert("Auch im Feed veröffentlichen?", "Dein erster Trainingsnachweis heute zählt für deinen Streak.", [
-        { text: "Nein, nur für den Streak", onPress: () => void saveProofOnly(photoUri) },
-        { text: "Ja, bearbeiten und posten", onPress: () => openEditor(photoUri, "day") },
+        { text: "Nein, nur für den Streak", onPress: () => void saveProofOnly(photoUri, planDayId) },
+        { text: "Ja, bearbeiten und posten", onPress: () => openEditor(photoUri, "day", planDayId) },
         { text: "Abbrechen", style: "cancel" },
       ]);
       return;
     }
     const todaysPost = dayPostId;
     Alert.alert("Du hast heute schon gepostet", "Dein Streak zählt heute schon. Wohin soll das Foto?", [
-      { text: "Zur Slideshow von heute hinzufügen", onPress: () => openEditor(photoUri, "append", todaysPost) },
-      { text: "Nur als einzelner Post", onPress: () => openEditor(photoUri, "single") },
+      { text: "Zur Slideshow von heute hinzufügen", onPress: () => openEditor(photoUri, "append", planDayId, todaysPost) },
+      { text: "Nur als einzelner Post", onPress: () => openEditor(photoUri, "single", planDayId) },
       { text: "Abbrechen", style: "cancel" },
     ]);
   }
@@ -134,7 +166,8 @@ function CameraScreenContent() {
         saving={saving}
         error={saveError}
         onRetake={discardCapture}
-        onUse={() => void confirmPhoto()}
+        onUse={(planDayId) => void confirmPhoto(planDayId)}
+        plan={plan}
       />
     );
   }

@@ -151,6 +151,7 @@ export default function DayScreen() {
                   <Text style={styles.time}>
                     {formatTime(workout.createdAt)} Uhr{isMine && !workout.inFeed ? " · Nur für den Streak" : ""}
                   </Text>
+                  {workout.planLabel !== null && <Text style={styles.planLabel}>{workout.planLabel}</Text>}
                   {workout.caption !== null && (
                     <Text style={styles.caption}>{workout.caption}</Text>
                   )}
@@ -297,6 +298,11 @@ const useStyles = makeStyles(({ colors }) =>
       color: colors.danger,
       fontSize: fontSize.md,
       textAlign: "center",
+    },
+    planLabel: {
+      color: colors.textSecondary,
+      fontSize: fontSize.sm,
+      fontWeight: "500",
     },
   }),
 );

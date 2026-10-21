@@ -3,7 +3,7 @@ import { Image } from "expo-image";
 import { router } from "expo-router";
 import { Pressable, StyleSheet, Text, View, useWindowDimensions } from "react-native";
 
-import { fontSize, onPhoto, spacing } from "@/constants/theme";
+import { fontSize, onPhoto, radius, spacing, typography } from "@/constants/theme";
 import { makeStyles } from "@/lib/theme";
 import type { PostThumbnail } from "@/lib/userProfileRepo";
 
@@ -47,6 +47,13 @@ export function PostGrid({ posts, emptyText }: PostGridProps) {
           ) : (
             <View style={[styles.tile, styles.missing]} />
           )}
+          {post.planTitle !== null && (
+            <View style={styles.planLabel} pointerEvents="none">
+              <Text style={styles.planLabelText} numberOfLines={1}>
+                {post.planTitle}
+              </Text>
+            </View>
+          )}
           {(post.isRepost || post.photoCount > 1) && (
             <View style={styles.badge} pointerEvents="none">
               <Ionicons name={post.isRepost ? "repeat" : "copy"} size={16} color={onPhoto.text} />
@@ -87,6 +94,20 @@ const useStyles = makeStyles(({ colors }) =>
       fontSize: fontSize.md,
       textAlign: "center",
       paddingHorizontal: spacing.md,
+    },
+    planLabel: {
+      position: "absolute",
+      left: spacing.xs,
+      bottom: spacing.xs,
+      maxWidth: "85%",
+      paddingHorizontal: 6,
+      paddingVertical: 2,
+      borderRadius: radius.sm,
+      backgroundColor: onPhoto.scrim,
+    },
+    planLabelText: {
+      ...typography.label,
+      color: onPhoto.text,
     },
   }),
 );

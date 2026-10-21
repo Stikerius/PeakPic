@@ -3,12 +3,17 @@ import { useState } from "react";
 import { ActivityIndicator, ScrollView, StyleSheet, Text, View } from "react-native";
 
 import { MonthCalendar } from "@/components/streak/month-calendar";
+import { PlanStreakCard } from "@/components/streak/plan-streak-card";
+import { RestDaysCard } from "@/components/streak/rest-days-card";
 import { StreakSummary } from "@/components/streak/streak-summary";
 import { fontSize, spacing } from "@/constants/theme";
+import { usePlanAndRest } from "@/hooks/use-plan-and-rest";
 import { useWorkoutDays } from "@/hooks/use-workout-days";
 import {
   addMonths,
   computeStreakStatsFromDays,
+  currentPlanStreak,
+  nextPlanDayIndex,
   parseDayKey,
   runLengthByDay,
   toDayKey,
@@ -18,7 +23,8 @@ import { makeStyles, useTheme } from "@/lib/theme";
 export default function HomeScreen() {
   const { colors } = useTheme();
   const styles = useStyles();
-  const { days, sharedDays, loading, error } = useWorkoutDays();
+  const { days, sharedDays, restDays, loading, error, reload } = useWorkoutDays();
+  const { plan, proofs, rest, reload: reloadPlanAndRest } = usePlanAndRest();
 
   const today = toDayKey(new Date());
   const { year: currentYear, month: currentMonth } = parseDayKey(today);
@@ -27,8 +33,14 @@ export default function HomeScreen() {
     month: currentMonth,
   });
 
-  const stats = computeStreakStatsFromDays(days, today);
-  const runLengths = runLengthByDay(stats.trainingDays);
+  const stats = computeStreakStatsFromDays(days, today, restDays);
+  const restDaySet = new Set(restDays);
+  const runLengths = runLengthByDay(stats.trainingDays, restDaySet);
+  const planDayIds = plan?.days.map((d) => d.id) ?? [];
+  const planStreak =
+    plan !== null
+      ? currentPlanStreak({ planDayIds, proofs, trainingDays: stats.trainingDays, restDays: restDaySet, today })
+      : 0;
   const canGoNext =
     visibleMonth.year * 12 + visibleMonth.month < currentYear * 12 + currentMonth;
 
@@ -48,12 +60,25 @@ export default function HomeScreen() {
         longest={stats.longest}
         trainedToday={stats.trainingDays.has(today)}
       />
+      {plan !== null && (
+        <PlanStreakCard plan={plan} streak={planStreak} nextIndex={nextPlanDayIndex(planDayIds, proofs)} />
+      )}
+      <RestDaysCard
+        rest={rest}
+        trainingDays={stats.trainingDays}
+        today={today}
+        onChanged={() => {
+          reload();
+          reloadPlanAndRest();
+        }}
+      />
       <MonthCalendar
         year={visibleMonth.year}
         month={visibleMonth.month}
         today={today}
         runLengths={runLengths}
         sharedDays={sharedDays}
+        restDays={restDaySet}
         canGoNext={canGoNext}
         onPrev={() => setVisibleMonth((m) => addMonths(m.year, m.month, -1))}
         onNext={() => setVisibleMonth((m) => addMonths(m.year, m.month, 1))}

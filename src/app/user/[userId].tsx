@@ -42,6 +42,7 @@ type Content = {
   plan: TrainingPlan | null;
   days: DayKey[];
   sharedDays: ReadonlySet<DayKey>;
+  restDays: DayKey[];
   posts: PostThumbnail[];
   highlights: Highlight[];
   /** Active stories I may see (followed, or public with "everyone"). */
@@ -92,7 +93,7 @@ export default function UserProfileScreen() {
       if (result !== null && (result.canSeePosts || result.canSeeStories)) {
         // Only ask for what the settings allow; RLS enforces the same rules anyway.
         const [days, posts, highlights, stories, plan] = await Promise.all([
-          result.canSeePosts ? fetchUserWorkoutDays(userId) : Promise.resolve({ days: [], shared: [] }),
+          result.canSeePosts ? fetchUserWorkoutDays(userId) : Promise.resolve({ days: [], shared: [], restDays: [] }),
           result.canSeePosts ? fetchProfileGrid(userId) : Promise.resolve([]),
           result.canSeeStories ? listHighlights(userId) : Promise.resolve([]),
           result.canSeeStories ? fetchUserStoryGroup(userId) : Promise.resolve(null),
@@ -102,6 +103,7 @@ export default function UserProfileScreen() {
         setContent({
           days: days.days,
           sharedDays: new Set(days.shared.map((s) => s.day)),
+          restDays: days.restDays,
           posts,
           highlights,
           hasStories: stories !== null,
@@ -149,8 +151,8 @@ export default function UserProfileScreen() {
   }
 
   const { profile } = summary;
-  const stats = computeStreakStatsFromDays(content?.days ?? [], today);
-  const runLengths = runLengthByDay(stats.trainingDays);
+  const stats = computeStreakStatsFromDays(content?.days ?? [], today, content?.restDays ?? []);
+  const runLengths = runLengthByDay(stats.trainingDays, new Set(content?.restDays ?? []));
   const canGoNext = visibleMonth.year * 12 + visibleMonth.month < currentYear * 12 + currentMonth;
 
   return (
@@ -275,6 +277,7 @@ export default function UserProfileScreen() {
                   today={today}
                   runLengths={runLengths}
                   sharedDays={content.sharedDays}
+                  restDays={new Set(content.restDays)}
                   canGoNext={canGoNext}
                   onPrev={() => setVisibleMonth((m) => addMonths(m.year, m.month, -1))}
                   onNext={() => setVisibleMonth((m) => addMonths(m.year, m.month, 1))}

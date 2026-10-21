@@ -56,6 +56,7 @@ export function PostCard({ post, onToggleLike, onOpenComments, onShare, onOpenPr
             <Text style={styles.meta}>
               {repost !== null ? "Original · " : ""}
               {formatRelativeTime(post.createdAt)}
+              {post.planLabel !== null && ` · ${post.planLabel}`}
             </Text>
           </View>
         </Pressable>

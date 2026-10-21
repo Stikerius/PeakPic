@@ -8,6 +8,7 @@ import { Button } from "@/components/ui/button";
 import { fontSize, onPhoto, spacing } from "@/constants/theme";
 import { describeError } from "@/lib/errors";
 import { emitAppEvent } from "@/lib/events";
+import { assignPlanDayIfEmpty } from "@/lib/planRepo";
 import {
   addToDayPost,
   createPost,
@@ -31,7 +32,7 @@ const MAX_PHOTOS = 10;
  */
 type Mode = "day" | "single" | "append" | "edit";
 
-type Params = { mode: Mode; photoUri?: string; postId?: string; publish?: string };
+type Params = { mode: Mode; photoUri?: string; postId?: string; publish?: string; planDayId?: string };
 
 /**
  * Asks the chosen people to count the workout. The post is saved already, so a failure here
@@ -57,7 +58,7 @@ export default function PostCreateScreen() {
 function PostCreateScreenContent() {
   const { colors } = useTheme();
   const styles = useStyles();
-  const { mode, photoUri, postId, publish } = useLocalSearchParams<Params>();
+  const { mode, photoUri, postId, publish, planDayId } = useLocalSearchParams<Params>();
   const publishing = publish === "1";
   const [existing, setExisting] = useState<EditablePost | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -92,6 +93,12 @@ function PostCreateScreenContent() {
         if (postId === undefined) return "Der Post wurde nicht gefunden.";
         if (mode === "append") {
           await addToDayPost(postId, photos, mentionIds);
+          if (planDayId !== undefined) {
+            // Today's slideshow takes the unit if it has none yet; it is saved either way.
+            await assignPlanDayIfEmpty(postId, planDayId).catch((error: unknown) =>
+              console.warn("[post] Plan-Zuordnung fehlgeschlagen:", error),
+            );
+          }
           await linkWorkouts(postId, workoutLinkIds);
         } else {
           await updatePost(postId, {
@@ -111,6 +118,7 @@ function PostCreateScreenContent() {
           isDayPost: mode === "day",
           showInProfile,
           tagIds: mentionIds,
+          planDayId: planDayId ?? null,
         });
         await linkWorkouts(newPostId, workoutLinkIds);
       }

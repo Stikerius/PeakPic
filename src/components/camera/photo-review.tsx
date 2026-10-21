@@ -6,9 +6,11 @@ import { Gesture, GestureDetector } from "react-native-gesture-handler";
 import Animated from "react-native-reanimated";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
+import { PlanChoice } from "@/components/camera/plan-choice";
 import { Button } from "@/components/ui/button";
 import { fontSize, onPhoto, radius, spacing } from "@/constants/theme";
 import { useSwipeToDismiss } from "@/hooks/use-swipe-to-dismiss";
+import type { TrainingPlan } from "@/lib/planRepo";
 import { makeStyles } from "@/lib/theme";
 import type { CapturedPhoto } from "@/types/photo";
 
@@ -18,8 +20,10 @@ type PhotoReviewProps = {
   error: string | null;
   /** Discards the photo and returns to the live camera (button or swipe down). */
   onRetake: () => void;
-  /** Continue with this photo (the next step asks where it goes and opens the editor). */
-  onUse: () => void;
+  /** Continue with this photo and the chosen plan unit (null: not part of the plan). */
+  onUse: (planDayId: string | null) => void;
+  /** Only for people with a plan: shows "Gehört zu deinem Plan?". */
+  plan?: { plan: TrainingPlan; nextIndex: number } | null;
 };
 
 export function PhotoReview({
@@ -28,8 +32,13 @@ export function PhotoReview({
   error,
   onRetake,
   onUse,
+  plan = null,
 }: PhotoReviewProps) {
   const styles = useStyles();
+  // Pre-selected: the unit due next (people training to their plan just tap "Verwenden").
+  const [planDayId, setPlanDayId] = useState<string | null>(
+    plan !== null ? (plan.plan.days[plan.nextIndex]?.id ?? null) : null,
+  );
   const [fullscreen, setFullscreen] = useState(false);
   const insets = useSafeAreaInsets();
   const swipeDown = useSwipeToDismiss({ onDismiss: onRetake, enabled: !saving, fadeTo: 0.4 });
@@ -63,6 +72,15 @@ export function PhotoReview({
           </GestureDetector>
 
           <View style={[styles.controls, { paddingBottom: insets.bottom + spacing.md }]}>
+            {plan !== null && (
+              <PlanChoice
+                plan={plan.plan}
+                nextIndex={plan.nextIndex}
+                value={planDayId}
+                onChange={setPlanDayId}
+                disabled={saving}
+              />
+            )}
             {error !== null && <Text style={styles.error}>{error}</Text>}
             <View style={styles.actions}>
               <Button
@@ -74,7 +92,7 @@ export function PhotoReview({
               />
               <Button
                 label="Verwenden"
-                onPress={onUse}
+                onPress={() => onUse(plan !== null ? planDayId : null)}
                 loading={saving}
                 style={styles.action}
               />

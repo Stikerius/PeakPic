@@ -1,3 +1,4 @@
+import { formatPlanLabel } from "@/lib/planRepo";
 import { fetchPostPhotos, fetchPostTags } from "@/lib/postRepo";
 import { fetchRepostsBy } from "@/lib/repostRepo";
 import { toPublicProfiles } from "@/lib/profiles";
@@ -15,7 +16,7 @@ export type FeedPage = {
 };
 
 const POST_SELECT =
-  "id, photo_path, caption, workout_date, created_at, is_day_post, show_in_profile, author:profiles!posts_user_id_fkey(id, username, display_name, avatar_path)";
+  "id, photo_path, caption, workout_date, created_at, is_day_post, show_in_profile, plan_day_title, plan_day_position, plan_length, author:profiles!posts_user_id_fkey(id, username, display_name, avatar_path)";
 
 type PostRow = {
   id: string;
@@ -25,6 +26,9 @@ type PostRow = {
   created_at: string;
   is_day_post: boolean;
   show_in_profile: boolean;
+  plan_day_title: string | null;
+  plan_day_position: number | null;
+  plan_length: number | null;
   author: { id: string; username: string; display_name: string; avatar_path: string | null };
 };
 
@@ -66,6 +70,7 @@ async function hydratePosts(rows: PostRow[], userId: string): Promise<FeedPost[]
     showInProfile: r.show_in_profile,
     caption: r.caption,
     workoutDate: r.workout_date,
+    planLabel: formatPlanLabel(r.plan_day_title, r.plan_day_position, r.plan_length),
     createdAt: r.created_at,
     likeCount: likeCounts.get(r.id) ?? 0,
     likedByMe: likedByMe.has(r.id),

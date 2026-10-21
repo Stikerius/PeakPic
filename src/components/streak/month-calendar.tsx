@@ -22,6 +22,8 @@ type MonthCalendarProps = {
   runLengths: ReadonlyMap<DayKey, number>;
   /** Days that count through a workout link to someone else's post (small link mark). */
   sharedDays?: ReadonlySet<DayKey>;
+  /** Rest days (quiet moon symbol, no flame); they keep the streak alive. */
+  restDays?: ReadonlySet<DayKey>;
   canGoNext: boolean;
   onPrev: () => void;
   onNext: () => void;
@@ -35,6 +37,7 @@ export function MonthCalendar({
   today,
   runLengths,
   sharedDays,
+  restDays,
   canGoNext,
   onPrev,
   onNext,
@@ -97,13 +100,15 @@ export function MonthCalendar({
             const isToday = day === today;
             const isFuture = day > today;
             const shared = sharedDays?.has(day) === true;
-            const label = `${parseDayKey(day).day}. ${monthName}${run !== undefined ? ", trainiert" : ""}${shared ? ", verlinktes Workout" : ""}${isToday ? ", heute" : ""}`;
+            const rested = run === undefined && restDays?.has(day) === true;
+            const label = `${parseDayKey(day).day}. ${monthName}${run !== undefined ? ", trainiert" : ""}${rested ? ", Ruhetag" : ""}${shared ? ", verlinktes Workout" : ""}${isToday ? ", heute" : ""}`;
             const content = (
               <>
                 <Text style={[styles.dayNumber, isFuture && styles.future]}>
                   {parseDayKey(day).day}
                 </Text>
                 {run !== undefined && <FlameIcon tier={flameTier(run)} baseSize={16} />}
+                {rested && <Ionicons name="moon-outline" size={13} color={colors.textTertiary} />}
                 {shared && (
                   <View style={styles.sharedMark}>
                     <Ionicons name="link" size={9} color={colors.onAccent} />

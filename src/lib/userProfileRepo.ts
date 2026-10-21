@@ -1,4 +1,5 @@
 import { getSignedPhotoUrls } from "@/lib/photoUpload";
+import { formatPlanLabel } from "@/lib/planRepo";
 import { fetchPostPhotoUrls } from "@/lib/postRepo";
 import { PROFILE_COLUMNS, toPublicProfiles } from "@/lib/profiles";
 import { requireUserId } from "@/lib/session";
@@ -33,6 +34,8 @@ export type PostThumbnail = {
   photoCount: number;
   /** A repost of someone else's post (shown with a repost icon). */
   isRepost: boolean;
+  /** Plan unit of the post (quiet label on the tile). */
+  planTitle: string | null;
 };
 
 const GRID_POSTS_LIMIT = 60;
@@ -91,7 +94,7 @@ export async function fetchProfileGrid(userId: string): Promise<PostThumbnail[]>
   const [own, reposts] = await Promise.all([
     supabase
       .from("posts")
-      .select("id, photo_path, created_at")
+      .select("id, photo_path, created_at, plan_day_title")
       .eq("user_id", userId)
       .eq("in_feed", true)
       .eq("show_in_profile", true)
@@ -113,13 +116,20 @@ export async function fetchProfileGrid(userId: string): Promise<PostThumbnail[]>
   if (originals?.error) throw originals.error;
   const originalById = new Map((originals?.data ?? []).map((p) => [p.id, p]));
 
-  type Tile = { key: string; id: string; photoPath: string; at: string; isRepost: boolean };
+  type Tile = { key: string; id: string; photoPath: string; at: string; isRepost: boolean; planTitle: string | null };
   const tiles: Tile[] = [
-    ...own.data.map((p) => ({ key: p.id, id: p.id, photoPath: p.photo_path, at: p.created_at, isRepost: false })),
+    ...own.data.map((p) => ({
+      key: p.id,
+      id: p.id,
+      photoPath: p.photo_path,
+      at: p.created_at,
+      isRepost: false,
+      planTitle: p.plan_day_title,
+    })),
     ...reposts.data.flatMap((r): Tile[] => {
       const original = originalById.get(r.original_post_id);
       return original !== undefined
-        ? [{ key: `repost:${r.id}`, id: original.id, photoPath: original.photo_path, at: r.created_at, isRepost: true }]
+        ? [{ key: `repost:${r.id}`, id: original.id, photoPath: original.photo_path, at: r.created_at, isRepost: true, planTitle: null }]
         : [];
     }),
   ]
@@ -146,6 +156,7 @@ export async function fetchProfileGrid(userId: string): Promise<PostThumbnail[]>
     photoUrl: urls.get(t.photoPath) ?? null,
     photoCount: counts.get(t.id) ?? 1,
     isRepost: t.isRepost,
+    planTitle: t.planTitle,
   }));
 }
 
@@ -153,7 +164,7 @@ export async function fetchProfileGrid(userId: string): Promise<PostThumbnail[]>
 export async function fetchUserPostsOnDay(userId: string, day: DayKey): Promise<WorkoutWithPhoto[]> {
   const { data, error } = await supabase
     .from("posts")
-    .select("id, photo_path, caption, workout_date, created_at, in_feed")
+    .select("id, photo_path, caption, workout_date, created_at, in_feed, plan_day_title, plan_day_position, plan_length")
     .eq("user_id", userId)
     .eq("workout_date", day)
     .eq("in_feed", true)
@@ -168,6 +179,7 @@ export async function fetchUserPostsOnDay(userId: string, day: DayKey): Promise<
     photoUrl: urls.get(row.id)?.[0] ?? null,
     photoUrls: urls.get(row.id) ?? [],
     inFeed: row.in_feed,
+    planLabel: formatPlanLabel(row.plan_day_title, row.plan_day_position, row.plan_length),
   }));
 }
 

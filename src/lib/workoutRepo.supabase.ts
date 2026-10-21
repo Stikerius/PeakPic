@@ -1,5 +1,6 @@
 import { StepError } from "@/lib/errors";
 import { removePhotos, uploadPhoto } from "@/lib/photoUpload";
+import { formatPlanLabel } from "@/lib/planRepo";
 import { fetchPostPhotoUrls } from "@/lib/postRepo";
 import { fetchWorkoutDays } from "@/lib/workoutDaysRepo";
 import { requireUserId } from "@/lib/session";
@@ -17,7 +18,7 @@ export const supabaseWorkoutRepo: WorkoutRepo = {
     const userId = await requireUserId();
     const { data, error } = await supabase
       .from("posts")
-      .select("id, photo_path, caption, workout_date, created_at, in_feed")
+      .select("id, photo_path, caption, workout_date, created_at, in_feed, plan_day_title, plan_day_position, plan_length")
       .eq("user_id", userId)
       .eq("workout_date", day)
       .order("created_at", { ascending: true });
@@ -31,6 +32,7 @@ export const supabaseWorkoutRepo: WorkoutRepo = {
       photoUrl: urls.get(row.id)?.[0] ?? null,
       photoUrls: urls.get(row.id) ?? [],
       inFeed: row.in_feed,
+      planLabel: formatPlanLabel(row.plan_day_title, row.plan_day_position, row.plan_length),
     }));
   },
 

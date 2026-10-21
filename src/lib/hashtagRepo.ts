@@ -51,6 +51,7 @@ export async function fetchHashtagPage(rawTag: string): Promise<HashtagPage> {
       photoUrl: urls.get(p.photo_path) ?? null,
       photoCount: counts.get(p.id) ?? 1,
       isRepost: false,
+      planTitle: null,
     })),
   };
 }

@@ -2,6 +2,7 @@ import { router, useFocusEffect } from "expo-router";
 import { useCallback, useEffect, useState } from "react";
 import { ActivityIndicator, KeyboardAvoidingView, Platform, ScrollView, StyleSheet, Text, View } from "react-native";
 
+import { RestBudgetEditor } from "@/components/profile/rest-budget-editor";
 import { Button } from "@/components/ui/button";
 import { ErrorState } from "@/components/ui/empty-state";
 import { ListItem } from "@/components/ui/list-item";
@@ -210,6 +211,9 @@ export default function ProfileEditScreen() {
             onPress={() => router.push("/plan-edit")}
           />
         </View>
+
+        <SectionHeader title="Ruhetage" />
+        <RestBudgetEditor />
       </ScrollView>
     </KeyboardAvoidingView>
   );
