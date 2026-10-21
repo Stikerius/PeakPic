@@ -56,6 +56,20 @@
 --                   rest_day_uses: only the owner reads them, nobody writes them directly; all
 --                   rules live in set_rest_budget / use_rest_day / undo_rest_day. Others see
 --                   rest days with the calendar (rest_days()), never the budget.
+--   * blocks        user_blocks: only the blocker sees, adds and removes their blocks. A block
+--                   works both ways (is_blocked_between): profiles, posts, stories, highlights,
+--                   comments, follow lists, plans and calendars disappear for each other; no
+--                   follows, tags, mentions, likes, comments or new messages between the two.
+--                   Blocking removes follows and requests in both directions.
+--   * accounts      profiles.account_status ('active' | 'suspended' | 'banned' | 'deleting') is
+--                   never written by clients (profiles_moderation_guard). Only active accounts
+--                   (an expired suspension counts as active) may write anything, and accounts
+--                   that are not active are invisible to others (can_see_account). The owner
+--                   reads the reason through get_my_account_status().
+--   * reports       written only through report_content() / report_message() (visibility,
+--                   20 per day, one per target); reporters read their own status through
+--                   get_my_reports(). Reported messages are copied with up to 5 messages of
+--                   context before and after into report_snapshots (no client access).
 --   * storage       bucket "photos" (private), objects live under {user_id}/{kind}/...;
 --                   a photo is readable exactly when its post/story is (avatars: everyone)
 -- =============================================================================
@@ -526,6 +540,81 @@ create table if not exists public.rest_day_uses (
 );
 
 
+-- Moderation status of an account. Written only by moderation functions (never by clients,
+-- see profiles_moderation_guard). A suspension ends by itself once suspended_until is past.
+alter table public.profiles add column if not exists account_status text not null default 'active';
+alter table public.profiles add column if not exists suspended_until timestamptz;
+alter table public.profiles add column if not exists suspension_reason_code text;
+-- Text the user may read on the "Konto gesperrt" screen.
+alter table public.profiles add column if not exists moderation_message text;
+alter table public.profiles add column if not exists moderation_updated_at timestamptz;
+do $$
+begin
+  if not exists (select 1 from pg_constraint where conname = 'profiles_account_status_check') then
+    alter table public.profiles
+      add constraint profiles_account_status_check
+      check (account_status in ('active', 'suspended', 'banned', 'deleting'));
+  end if;
+  if not exists (select 1 from pg_constraint where conname = 'profiles_moderation_message_length') then
+    alter table public.profiles
+      add constraint profiles_moderation_message_length check (char_length(moderation_message) <= 1000);
+  end if;
+end;
+$$;
+
+-- Blocks. Only the blocker can see their own rows; the blocked person never finds out.
+create table if not exists public.user_blocks (
+  blocker_id uuid not null references public.profiles (id) on delete cascade,
+  blocked_id uuid not null references public.profiles (id) on delete cascade,
+  created_at timestamptz not null default now(),
+  primary key (blocker_id, blocked_id),
+  check (blocker_id <> blocked_id)
+);
+create index if not exists user_blocks_blocked_idx on public.user_blocks (blocked_id);
+
+-- Reports. Written only through report_content() / report_message(). The reporter becomes
+-- null when their account is deleted; target_user_id and handled_by are plain uuids (no
+-- foreign key), so reports never block deleting an account.
+create table if not exists public.reports (
+  id              uuid primary key default gen_random_uuid(),
+  reporter_id     uuid references public.profiles (id) on delete set null,
+  target_type     text not null check (target_type in ('post', 'story', 'comment', 'message', 'profile', 'sound')),
+  target_id       uuid not null,
+  target_user_id  uuid,
+  reason          text not null check (reason in (
+                    'spam', 'harassment', 'nudity', 'violence', 'hate', 'copyright',
+                    'self_harm', 'non_consensual', 'other')),
+  details         text check (char_length(details) <= 500),
+  status          text not null default 'open' check (status in ('open', 'in_review', 'resolved', 'dismissed')),
+  resolution_note text,
+  handled_by      uuid,
+  handled_at      timestamptz,
+  created_at      timestamptz not null default now()
+);
+create unique index if not exists reports_one_per_target_idx on public.reports (reporter_id, target_type, target_id);
+create index if not exists reports_status_created_idx on public.reports (status, created_at);
+create index if not exists reports_target_user_idx on public.reports (target_user_id);
+
+-- Copies of a reported message and its context (up to 5 messages before and after), taken
+-- when it is reported. Moderators see chats only through these rows. No client access.
+create table if not exists public.report_snapshots (
+  id              uuid primary key default gen_random_uuid(),
+  report_id       uuid not null references public.reports (id) on delete cascade,
+  message_id      uuid not null,
+  conversation_id uuid not null,
+  sender_id       uuid,
+  body            text,
+  post_id         uuid,
+  comment_id      uuid,
+  story_id        uuid,
+  kind            text,
+  sent_at         timestamptz not null,
+  is_reported     boolean not null default false,
+  created_at      timestamptz not null default now()
+);
+create index if not exists report_snapshots_report_idx on public.report_snapshots (report_id, sent_at);
+
+
 -- -----------------------------------------------------------------------------
 -- Helper functions
 -- security definer + empty search_path: they bypass RLS on purpose (to avoid
@@ -540,6 +629,51 @@ as $$
     select 1 from public.follows
     where follower_id = (select auth.uid()) and following_id = target and status = 'accepted'
   );
+$$;
+
+-- ---------------------------------------------------------------- blocks and account status
+-- Has either of the two blocked the other? Internal; policies use can_see_account().
+create or replace function public.is_blocked_between(a uuid, b uuid)
+returns boolean
+language sql stable security definer set search_path = ''
+as $$
+  select exists (
+    select 1 from public.user_blocks ub
+    where (ub.blocker_id = a and ub.blocked_id = b) or (ub.blocker_id = b and ub.blocked_id = a)
+  );
+$$;
+
+-- Active, or a suspension whose end has passed (checked at query time, no cron).
+create or replace function public.account_is_active(target uuid)
+returns boolean
+language sql stable security definer set search_path = ''
+as $$
+  select exists (
+    select 1 from public.profiles p
+    where p.id = target
+      and (
+        p.account_status = 'active'
+        or (p.account_status = 'suspended' and p.suspended_until is not null and p.suspended_until <= now())
+      )
+  );
+$$;
+
+-- May the caller write anything? Every write policy and write function asks this.
+create or replace function public.is_account_active()
+returns boolean
+language sql stable security definer set search_path = ''
+as $$
+  select public.account_is_active((select auth.uid()));
+$$;
+
+-- Does `target` exist for the caller at all? Not for accounts that aren't active and not
+-- across a block in either direction. The caller always sees themself.
+create or replace function public.can_see_account(target uuid)
+returns boolean
+language sql stable security definer set search_path = ''
+as $$
+  select target = (select auth.uid())
+    or (public.account_is_active(target) and not public.is_blocked_between((select auth.uid()), target));
 $$;
 
 -- True if `owner`'s posts or active stories ('posts' / 'stories') are open to every
@@ -563,8 +697,10 @@ returns boolean
 language sql stable security definer set search_path = ''
 as $$
   select target = (select auth.uid())
-    or public.is_following(target)
-    or exists (select 1 from public.profiles p where p.id = target and not p.is_private);
+    or (
+      public.can_see_account(target)
+      and (public.is_following(target) or exists (select 1 from public.profiles p where p.id = target and not p.is_private))
+    );
 $$;
 
 -- Follower and following counts (accepted only); visible for every profile, also private ones.
@@ -704,6 +840,7 @@ as $$
         or (
           -- Streak-only proofs: photos, likes, comments only for the owner.
           p.in_feed
+          and public.can_see_account(p.user_id)
           and (
             public.is_following(p.user_id)
             or public.is_post_shared_with_me(p.id)
@@ -723,7 +860,7 @@ language sql stable security definer set search_path = ''
 as $$
   select exists (
     select 1 from public.comments c
-    where c.id = comment and public.can_view_post(c.post_id)
+    where c.id = comment and public.can_view_post(c.post_id) and public.can_see_account(c.user_id)
   );
 $$;
 
@@ -771,7 +908,8 @@ as $$
       and (
         h.user_id = (select auth.uid())
         or (
-          (public.is_following(h.user_id) or public.is_public_content(h.user_id, 'stories'))
+          public.can_see_account(h.user_id)
+          and (public.is_following(h.user_id) or public.is_public_content(h.user_id, 'stories'))
           and not public.is_hidden_from_me(h.user_id, 'stories')
         )
       )
@@ -801,6 +939,7 @@ as $$
         s.user_id = (select auth.uid())
         or (
           s.expires_at > now()
+          and public.can_see_account(s.user_id)
           and (
             public.is_following(s.user_id)
             or (select auth.uid()) = any (s.mentioned_user_ids)
@@ -855,6 +994,9 @@ as $$
 declare
   conversation uuid;
 begin
+  if not public.is_account_active() then
+    raise exception 'account_inactive';
+  end if;
   select m.conversation_id into conversation from public.messages m where m.id = message;
   if conversation is null or not public.is_conversation_member(conversation) then
     raise exception 'message not found';
@@ -886,6 +1028,8 @@ returns boolean
 language sql stable security definer set search_path = ''
 as $$
   select actor is not null and target is not null and actor <> target
+    and not public.is_blocked_between(actor, target)
+    and public.account_is_active(target)
     and exists (
       select 1 from public.profiles p
       where p.id = target
@@ -935,6 +1079,8 @@ as $$
         p.user_id = viewer
         or (
           p.in_feed
+          and not public.is_blocked_between(viewer, p.user_id)
+          and public.account_is_active(p.user_id)
           and (
             exists (
               select 1 from public.follows f
@@ -977,7 +1123,8 @@ language sql stable security definer set search_path = ''
 as $$
   select target = (select auth.uid())
     or (
-      (public.is_following(target) or public.is_public_content(target, 'posts'))
+      public.can_see_account(target)
+      and (public.is_following(target) or public.is_public_content(target, 'posts'))
       and not public.is_hidden_from_me(target, 'posts')
     );
 $$;
@@ -1011,6 +1158,8 @@ as $$
     join public.post_tags t on t.post_id = p.id and t.user_id = target
     where p.id = post
       and p.user_id = (select auth.uid())
+      and public.is_account_active()
+      and public.can_see_account(target)
       and public.post_counts_as_workout(p.id)
       and now() < public.workout_share_deadline(p.workout_date)
   );
@@ -1516,6 +1665,7 @@ as $$
         tp.user_id = (select auth.uid())
         or (
           tp.show_in_profile
+          and public.can_see_account(tp.user_id)
           and (public.is_following(tp.user_id) or public.is_public_content(tp.user_id, 'posts'))
           and not public.is_hidden_from_me(tp.user_id, 'posts')
         )
@@ -1541,6 +1691,9 @@ declare
 begin
   if me is null then
     raise exception 'not authenticated';
+  end if;
+  if not public.is_account_active() then
+    raise exception 'account_inactive';
   end if;
   if jsonb_typeof(p_days) is distinct from 'array'
     or jsonb_array_length(p_days) not between 1 and 21 then
@@ -1587,7 +1740,7 @@ create or replace function public.delete_training_plan()
 returns void
 language sql security definer set search_path = ''
 as $$
-  delete from public.training_plans where user_id = (select auth.uid());
+  delete from public.training_plans where user_id = (select auth.uid()) and public.is_account_active();
 $$;
 
 -- ---------------------------------------------------------------- streak inputs
@@ -1641,6 +1794,9 @@ begin
   if me is null then
     raise exception 'not authenticated';
   end if;
+  if not public.is_account_active() then
+    raise exception 'account_inactive';
+  end if;
   if n is null or n not between 0 and 6 then
     raise exception 'rest_budget_invalid' using hint = '0 to 6';
   end if;
@@ -1669,6 +1825,9 @@ declare
 begin
   if me is null then
     raise exception 'not authenticated';
+  end if;
+  if not public.is_account_active() then
+    raise exception 'account_inactive';
   end if;
   if d is null or d not in (public.app_today(), public.app_today() - 1) then
     raise exception 'rest_day_not_allowed' using hint = 'only today or yesterday';
@@ -1702,6 +1861,9 @@ as $$
 begin
   if auth.uid() is null then
     raise exception 'not authenticated';
+  end if;
+  if not public.is_account_active() then
+    raise exception 'account_inactive';
   end if;
   if d is null or d not in (public.app_today(), public.app_today() - 1) then
     raise exception 'rest_day_not_allowed' using hint = 'only today or yesterday';
@@ -1801,6 +1963,215 @@ begin
 end;
 $$;
 
+-- ---------------------------------------------------------------- blocks, reports, status
+-- Is there a block between the caller and another member of the chat? Then nobody writes in it.
+create or replace function public.conversation_has_block(conversation uuid)
+returns boolean
+language sql stable security definer set search_path = ''
+as $$
+  select exists (
+    select 1 from public.conversation_members cm
+    where cm.conversation_id = conversation
+      and cm.user_id <> (select auth.uid())
+      and public.is_blocked_between((select auth.uid()), cm.user_id)
+  );
+$$;
+
+-- A block ends follows and follow requests in both directions (unblocking doesn't restore them).
+create or replace function public.on_user_blocked()
+returns trigger
+language plpgsql security definer set search_path = ''
+as $$
+begin
+  delete from public.follows
+  where (follower_id = new.blocker_id and following_id = new.blocked_id)
+     or (follower_id = new.blocked_id and following_id = new.blocker_id);
+  return null;
+end;
+$$;
+
+-- Protects the moderation columns of profiles from clients: a direct update by a signed-in
+-- user keeps the old values, a new profile always starts active. Not security definer on
+-- purpose: current_user is then the caller's role ('authenticated' for app requests) and
+-- the function owner when a moderation function (security definer) does the update.
+create or replace function public.guard_profile_moderation()
+returns trigger
+language plpgsql set search_path = ''
+as $$
+begin
+  if tg_op = 'INSERT' then
+    new.account_status := 'active';
+    new.suspended_until := null;
+    new.suspension_reason_code := null;
+    new.moderation_message := null;
+    new.moderation_updated_at := null;
+  elsif current_user in ('authenticated', 'anon') then
+    new.account_status := old.account_status;
+    new.suspended_until := old.suspended_until;
+    new.suspension_reason_code := old.suspension_reason_code;
+    new.moderation_message := old.moderation_message;
+    new.moderation_updated_at := old.moderation_updated_at;
+  end if;
+  return new;
+end;
+$$;
+
+-- What the "Konto gesperrt" screen shows. Callable by every signed-in account, also when it
+-- is suspended, banned or being deleted; returns only the caller's own status.
+create or replace function public.get_my_account_status()
+returns table (status text, suspended_until timestamptz, reason_code text, message text)
+language sql stable security definer set search_path = ''
+as $$
+  select
+    case
+      when p.account_status = 'suspended' and p.suspended_until is not null and p.suspended_until <= now()
+        then 'active'
+      else p.account_status
+    end,
+    p.suspended_until,
+    p.suspension_reason_code,
+    p.moderation_message
+  from public.profiles p
+  where p.id = (select auth.uid());
+$$;
+
+-- Internal: checks shared by both report functions (active account, daily limit).
+create or replace function public.check_report_allowed()
+returns void
+language plpgsql security definer set search_path = ''
+as $$
+begin
+  if auth.uid() is null then
+    raise exception 'not authenticated';
+  end if;
+  if not public.is_account_active() then
+    raise exception 'account_inactive';
+  end if;
+  if (
+    select count(*) from public.reports r
+    where r.reporter_id = auth.uid() and r.created_at > now() - interval '24 hours'
+  ) >= 20 then
+    raise exception 'report_limit';
+  end if;
+end;
+$$;
+
+-- Reports a post, story, comment or profile. Only what the caller may see, never their own,
+-- one report per target. The owner of the target is looked up here, not taken from the app.
+create or replace function public.report_content(p_target_type text, p_target_id uuid, p_reason text, p_details text)
+returns uuid
+language plpgsql security definer set search_path = ''
+as $$
+declare
+  target_owner uuid;
+  report uuid;
+begin
+  perform public.check_report_allowed();
+  case p_target_type
+    when 'post' then
+      if not public.can_view_post(p_target_id) then raise exception 'report_target_not_found'; end if;
+      select p.user_id into target_owner from public.posts p where p.id = p_target_id;
+    when 'story' then
+      if not public.can_view_story(p_target_id) then raise exception 'report_target_not_found'; end if;
+      select s.user_id into target_owner from public.stories s where s.id = p_target_id;
+    when 'comment' then
+      if not public.can_view_comment(p_target_id) then raise exception 'report_target_not_found'; end if;
+      select c.user_id into target_owner from public.comments c where c.id = p_target_id;
+    when 'profile' then
+      if not public.can_see_account(p_target_id) or not exists (select 1 from public.profiles p where p.id = p_target_id) then
+        raise exception 'report_target_not_found';
+      end if;
+      target_owner := p_target_id;
+    else
+      -- Messages go through report_message(); there are no sounds yet.
+      raise exception 'report_type_not_supported';
+  end case;
+  if target_owner = auth.uid() then
+    raise exception 'report_own_content';
+  end if;
+  insert into public.reports (reporter_id, target_type, target_id, target_user_id, reason, details)
+  values (auth.uid(), p_target_type, p_target_id, target_owner, p_reason, nullif(btrim(coalesce(p_details, '')), ''))
+  on conflict (reporter_id, target_type, target_id) do nothing
+  returning id into report;
+  if report is null then
+    raise exception 'report_exists';
+  end if;
+  return report;
+end;
+$$;
+
+-- Reports a chat message (members only, not your own). Copies it and up to 5 messages before
+-- and after into report_snapshots: moderators see chats only through these copies.
+create or replace function public.report_message(message_id uuid, reason text, details text)
+returns uuid
+language plpgsql security definer set search_path = ''
+as $$
+declare
+  reported public.messages%rowtype;
+  report uuid;
+begin
+  perform public.check_report_allowed();
+  select * into reported from public.messages m where m.id = report_message.message_id;
+  if not found or not public.is_conversation_member(reported.conversation_id) then
+    raise exception 'report_target_not_found';
+  end if;
+  if reported.sender_id = auth.uid() then
+    raise exception 'report_own_content';
+  end if;
+  insert into public.reports (reporter_id, target_type, target_id, target_user_id, reason, details)
+  values (auth.uid(), 'message', reported.id, reported.sender_id, report_message.reason,
+          nullif(btrim(coalesce(report_message.details, '')), ''))
+  on conflict (reporter_id, target_type, target_id) do nothing
+  returning id into report;
+  if report is null then
+    raise exception 'report_exists';
+  end if;
+  insert into public.report_snapshots
+    (report_id, message_id, conversation_id, sender_id, body, post_id, comment_id, story_id, kind, sent_at, is_reported)
+  select report, m.id, m.conversation_id, m.sender_id, m.body, m.post_id, m.comment_id, m.story_id, m.kind,
+         m.created_at, m.id = reported.id
+  from (
+    (select * from public.messages b
+     where b.conversation_id = reported.conversation_id
+       and (b.created_at, b.id) < (reported.created_at, reported.id)
+     order by b.created_at desc, b.id desc limit 5)
+    union all
+    (select * from public.messages r where r.id = reported.id)
+    union all
+    (select * from public.messages a
+     where a.conversation_id = reported.conversation_id
+       and (a.created_at, a.id) > (reported.created_at, reported.id)
+     order by a.created_at, a.id limit 5)
+  ) m;
+  return report;
+end;
+$$;
+
+-- "Blockierte Konten": the people I blocked, with name and avatar (their profiles are
+-- otherwise hidden from me by the block). Only my own blocks.
+create or replace function public.get_my_blocked_accounts()
+returns table (id uuid, username text, display_name text, avatar_path text, blocked_at timestamptz)
+language sql stable security definer set search_path = ''
+as $$
+  select p.id, p.username, p.display_name, p.avatar_path, ub.created_at
+  from public.user_blocks ub
+  join public.profiles p on p.id = ub.blocked_id
+  where ub.blocker_id = (select auth.uid())
+  order by ub.created_at desc;
+$$;
+
+-- "Meine Meldungen": status of my own reports, without the decision notes.
+create or replace function public.get_my_reports()
+returns table (id uuid, target_type text, reason text, status text, created_at timestamptz, handled_at timestamptz)
+language sql stable security definer set search_path = ''
+as $$
+  select r.id, r.target_type, r.reason, r.status, r.created_at, r.handled_at
+  from public.reports r
+  where r.reporter_id = (select auth.uid())
+  order by r.created_at desc
+  limit 200;
+$$;
+
 -- Returns the 1:1 conversation with `other_user`, creating it if needed.
 -- Only allowed with people you follow. Conversations and members are created
 -- exclusively through this function.
@@ -1817,6 +2188,12 @@ begin
   end if;
   if other_user = me then
     raise exception 'cannot start a chat with yourself';
+  end if;
+  if not public.is_account_active() then
+    raise exception 'account_inactive';
+  end if;
+  if not public.can_see_account(other_user) then
+    raise exception 'chat_not_possible';
   end if;
   if not public.is_following(other_user) then
     raise exception 'you can only start chats with people you follow';
@@ -1960,6 +2337,16 @@ create trigger workout_shares_training_added
   after update of status on public.workout_shares
   for each row execute function public.on_training_added();
 
+drop trigger if exists profiles_moderation_guard on public.profiles;
+create trigger profiles_moderation_guard
+  before insert or update on public.profiles
+  for each row execute function public.guard_profile_moderation();
+
+drop trigger if exists user_blocks_created on public.user_blocks;
+create trigger user_blocks_created
+  after insert on public.user_blocks
+  for each row execute function public.on_user_blocked();
+
 drop trigger if exists profiles_guard on public.profiles;
 create trigger profiles_guard
   before insert or update on public.profiles
@@ -2030,6 +2417,27 @@ revoke all on function public.rest_days(uuid) from public, anon;
 grant execute on function public.rest_days(uuid) to authenticated;
 revoke all on function public.plan_proofs() from public, anon;
 grant execute on function public.plan_proofs() to authenticated;
+revoke all on function public.is_blocked_between(uuid, uuid) from public, anon, authenticated;
+revoke all on function public.account_is_active(uuid) from public, anon, authenticated;
+revoke all on function public.on_user_blocked() from public, anon, authenticated;
+revoke all on function public.guard_profile_moderation() from public, anon, authenticated;
+revoke all on function public.check_report_allowed() from public, anon, authenticated;
+revoke all on function public.is_account_active() from public, anon;
+grant execute on function public.is_account_active() to authenticated;
+revoke all on function public.can_see_account(uuid) from public, anon;
+grant execute on function public.can_see_account(uuid) to authenticated;
+revoke all on function public.conversation_has_block(uuid) from public, anon;
+grant execute on function public.conversation_has_block(uuid) to authenticated;
+revoke all on function public.get_my_account_status() from public, anon;
+grant execute on function public.get_my_account_status() to authenticated;
+revoke all on function public.report_content(text, uuid, text, text) from public, anon;
+grant execute on function public.report_content(text, uuid, text, text) to authenticated;
+revoke all on function public.report_message(uuid, text, text) from public, anon;
+grant execute on function public.report_message(uuid, text, text) to authenticated;
+revoke all on function public.get_my_blocked_accounts() from public, anon;
+grant execute on function public.get_my_blocked_accounts() to authenticated;
+revoke all on function public.get_my_reports() from public, anon;
+grant execute on function public.get_my_reports() to authenticated;
 
 
 -- -----------------------------------------------------------------------------
@@ -2052,6 +2460,11 @@ grant select on public.training_plans, public.plan_days to authenticated;
 -- Rest days: owners read their own; all writes go through the rest-day functions.
 revoke all on public.rest_budgets, public.rest_day_uses from anon, authenticated;
 grant select on public.rest_budgets, public.rest_day_uses to authenticated;
+-- Blocks: the blocker reads, adds and removes their own (RLS below). No updates.
+revoke all on public.user_blocks from anon, authenticated;
+grant select, insert, delete on public.user_blocks to authenticated;
+-- Reports and snapshots: no direct access (report_content / report_message / get_my_reports).
+revoke all on public.reports, public.report_snapshots from anon, authenticated;
 -- Former usernames: no direct access at all (resolve_usernames / username_available only).
 revoke all on public.username_history from anon, authenticated;
 -- Notifications: read and mark as read only; inserts come from security definer functions.
@@ -2089,6 +2502,9 @@ alter table public.training_plans       enable row level security;
 alter table public.plan_days            enable row level security;
 alter table public.rest_budgets         enable row level security;
 alter table public.rest_day_uses        enable row level security;
+alter table public.user_blocks          enable row level security;
+alter table public.reports              enable row level security;
+alter table public.report_snapshots     enable row level security;
 alter table public.hashtags             enable row level security;
 alter table public.content_hashtags     enable row level security;
 
@@ -2096,12 +2512,12 @@ alter table public.content_hashtags     enable row level security;
 -- Rows are created by the handle_new_user trigger.
 drop policy if exists "profiles: read" on public.profiles;
 create policy "profiles: read" on public.profiles
-  for select to authenticated using (true);
+  for select to authenticated using (public.can_see_account(id));
 
 drop policy if exists "profiles: update own" on public.profiles;
 create policy "profiles: update own" on public.profiles
   for update to authenticated
-  using (id = (select auth.uid()))
+  using (id = (select auth.uid()) and public.is_account_active())
   with check (id = (select auth.uid()));
 
 -- posts
@@ -2116,7 +2532,8 @@ create policy "posts: read own, followed or shared" on public.posts
   using (
     user_id = (select auth.uid())
     or (
-      (
+      public.can_see_account(user_id)
+      and (
         public.is_following(user_id)
         or public.is_post_shared_with_me(id)
         or public.is_tagged_in_post(id)
@@ -2131,18 +2548,19 @@ create policy "posts: insert own" on public.posts
   for insert to authenticated
   with check (
     user_id = (select auth.uid())
+    and public.is_account_active()
     and (storage.foldername(photo_path))[1] = (select auth.uid())::text
   );
 
 drop policy if exists "posts: update own" on public.posts;
 create policy "posts: update own" on public.posts
   for update to authenticated
-  using (user_id = (select auth.uid()))
+  using (user_id = (select auth.uid()) and public.is_account_active())
   with check (user_id = (select auth.uid()));
 
 drop policy if exists "posts: delete own" on public.posts;
 create policy "posts: delete own" on public.posts
-  for delete to authenticated using (user_id = (select auth.uid()));
+  for delete to authenticated using (user_id = (select auth.uid()) and public.is_account_active());
 
 -- post_media: visible with its post; only the post owner adds, reorders or removes photos.
 drop policy if exists "post_media: read on visible posts" on public.post_media;
@@ -2154,6 +2572,7 @@ create policy "post_media: add to own post" on public.post_media
   for insert to authenticated
   with check (
     user_id = (select auth.uid())
+    and public.is_account_active()
     and public.is_my_post(post_id)
     and (storage.foldername(photo_path))[1] = (select auth.uid())::text
     and (original_path is null or (storage.foldername(original_path))[1] = (select auth.uid())::text)
@@ -2162,12 +2581,12 @@ create policy "post_media: add to own post" on public.post_media
 drop policy if exists "post_media: reorder own" on public.post_media;
 create policy "post_media: reorder own" on public.post_media
   for update to authenticated
-  using (user_id = (select auth.uid()))
+  using (user_id = (select auth.uid()) and public.is_account_active())
   with check (user_id = (select auth.uid()) and public.is_my_post(post_id));
 
 drop policy if exists "post_media: delete own" on public.post_media;
 create policy "post_media: delete own" on public.post_media
-  for delete to authenticated using (user_id = (select auth.uid()));
+  for delete to authenticated using (user_id = (select auth.uid()) and public.is_account_active());
 
 -- post_tags: the owner tags people they follow; a tagged person can remove themselves.
 drop policy if exists "post_tags: read on visible posts" on public.post_tags;
@@ -2180,37 +2599,38 @@ drop policy if exists "post_tags: owner tags people they follow" on public.post_
 drop policy if exists "post_tags: owner tags taggable people" on public.post_tags;
 create policy "post_tags: owner tags taggable people" on public.post_tags
   for insert to authenticated
-  with check (public.is_my_post(post_id) and public.can_tag(user_id, 'posts'));
+  with check (public.is_account_active() and public.is_my_post(post_id) and public.can_tag(user_id, 'posts'));
 
 drop policy if exists "post_tags: owner or tagged person removes" on public.post_tags;
 create policy "post_tags: owner or tagged person removes" on public.post_tags
   for delete to authenticated
-  using (user_id = (select auth.uid()) or public.is_my_post(post_id));
+  using (public.is_account_active() and (user_id = (select auth.uid()) or public.is_my_post(post_id)));
 
 -- post_likes
 drop policy if exists "post_likes: read on visible posts" on public.post_likes;
 create policy "post_likes: read on visible posts" on public.post_likes
-  for select to authenticated using (public.can_view_post(post_id));
+  for select to authenticated using (public.can_view_post(post_id) and public.can_see_account(user_id));
 
 drop policy if exists "post_likes: like visible posts" on public.post_likes;
 create policy "post_likes: like visible posts" on public.post_likes
   for insert to authenticated
-  with check (user_id = (select auth.uid()) and public.can_view_post(post_id));
+  with check (user_id = (select auth.uid()) and public.is_account_active() and public.can_view_post(post_id));
 
 drop policy if exists "post_likes: unlike own" on public.post_likes;
 create policy "post_likes: unlike own" on public.post_likes
-  for delete to authenticated using (user_id = (select auth.uid()));
+  for delete to authenticated using (user_id = (select auth.uid()) and public.is_account_active());
 
 -- comments
 drop policy if exists "comments: read on visible posts" on public.comments;
 create policy "comments: read on visible posts" on public.comments
-  for select to authenticated using (public.can_view_post(post_id));
+  for select to authenticated using (public.can_view_post(post_id) and public.can_see_account(user_id));
 
 drop policy if exists "comments: write on visible posts" on public.comments;
 create policy "comments: write on visible posts" on public.comments
   for insert to authenticated
   with check (
     user_id = (select auth.uid())
+    and public.is_account_active()
     and public.can_view_post(post_id)
     and (parent_comment_id is null or public.is_top_level_comment_on(parent_comment_id, post_id))
   );
@@ -2219,10 +2639,13 @@ drop policy if exists "comments: delete own or on own post" on public.comments;
 create policy "comments: delete own or on own post" on public.comments
   for delete to authenticated
   using (
-    user_id = (select auth.uid())
-    or exists (
-      select 1 from public.posts p
-      where p.id = post_id and p.user_id = (select auth.uid())
+    public.is_account_active()
+    and (
+      user_id = (select auth.uid())
+      or exists (
+        select 1 from public.posts p
+        where p.id = post_id and p.user_id = (select auth.uid())
+      )
     )
   );
 
@@ -2234,11 +2657,11 @@ create policy "comment_likes: read on visible comments" on public.comment_likes
 drop policy if exists "comment_likes: like visible comments" on public.comment_likes;
 create policy "comment_likes: like visible comments" on public.comment_likes
   for insert to authenticated
-  with check (user_id = (select auth.uid()) and public.can_view_comment(comment_id));
+  with check (user_id = (select auth.uid()) and public.is_account_active() and public.can_view_comment(comment_id));
 
 drop policy if exists "comment_likes: unlike own" on public.comment_likes;
 create policy "comment_likes: unlike own" on public.comment_likes
-  for delete to authenticated using (user_id = (select auth.uid()));
+  for delete to authenticated using (user_id = (select auth.uid()) and public.is_account_active());
 
 -- follows
 -- Your own follows and requests (both directions) are always readable; other people's
@@ -2251,6 +2674,8 @@ create policy "follows: read" on public.follows
     or following_id = (select auth.uid())
     or (
       status = 'accepted'
+      and public.can_see_account(follower_id)
+      and public.can_see_account(following_id)
       and (public.can_view_follow_lists(follower_id) or public.can_view_follow_lists(following_id))
     )
   );
@@ -2258,21 +2683,22 @@ create policy "follows: read" on public.follows
 -- The status is set by follows_set_status, whatever the client sends.
 drop policy if exists "follows: follow as yourself" on public.follows;
 create policy "follows: follow as yourself" on public.follows
-  for insert to authenticated with check (follower_id = (select auth.uid()));
+  for insert to authenticated
+  with check (follower_id = (select auth.uid()) and public.is_account_active() and public.can_see_account(following_id));
 
 -- Only the followed person accepts a request (pending -> accepted, see follows_guard_update).
 drop policy if exists "follows: accept requests to me" on public.follows;
 create policy "follows: accept requests to me" on public.follows
   for update to authenticated
-  using (following_id = (select auth.uid()) and status = 'pending')
-  with check (following_id = (select auth.uid()) and status = 'accepted');
+  using (following_id = (select auth.uid()) and status = 'pending' and public.is_account_active())
+  with check (following_id = (select auth.uid()) and status = 'accepted' and public.can_see_account(follower_id));
 
 -- Unfollow / withdraw a request yourself, or remove a follower / decline a request to you.
 drop policy if exists "follows: unfollow as yourself" on public.follows;
 drop policy if exists "follows: unfollow, remove follower or decline" on public.follows;
 create policy "follows: unfollow, remove follower or decline" on public.follows
   for delete to authenticated
-  using (follower_id = (select auth.uid()) or following_id = (select auth.uid()));
+  using (public.is_account_active() and (follower_id = (select auth.uid()) or following_id = (select auth.uid())));
 
 -- stories: expired stories are invisible to everyone but their owner, except stories in a
 -- highlight the caller may see (owner and followers, see can_view_highlight).
@@ -2283,6 +2709,7 @@ create policy "stories: read active from followed, own always" on public.stories
     user_id = (select auth.uid())
     or (
       expires_at > now()
+      and public.can_see_account(user_id)
       and (
         public.is_following(user_id)
         or (select auth.uid()) = any (mentioned_user_ids)
@@ -2299,13 +2726,14 @@ create policy "stories: insert own" on public.stories
   for insert to authenticated
   with check (
     user_id = (select auth.uid())
+    and public.is_account_active()
     and (storage.foldername(photo_path))[1] = (select auth.uid())::text
     and public.mentions_allowed(mentioned_user_ids)
   );
 
 drop policy if exists "stories: delete own" on public.stories;
 create policy "stories: delete own" on public.stories
-  for delete to authenticated using (user_id = (select auth.uid()));
+  for delete to authenticated using (user_id = (select auth.uid()) and public.is_account_active());
 
 -- story_likes: the liker and the story owner can see a like.
 drop policy if exists "story_likes: read own or on own story" on public.story_likes;
@@ -2322,11 +2750,11 @@ create policy "story_likes: read own or on own story" on public.story_likes
 drop policy if exists "story_likes: like visible stories" on public.story_likes;
 create policy "story_likes: like visible stories" on public.story_likes
   for insert to authenticated
-  with check (user_id = (select auth.uid()) and public.can_view_story(story_id));
+  with check (user_id = (select auth.uid()) and public.is_account_active() and public.can_view_story(story_id));
 
 drop policy if exists "story_likes: unlike own" on public.story_likes;
 create policy "story_likes: unlike own" on public.story_likes
-  for delete to authenticated using (user_id = (select auth.uid()));
+  for delete to authenticated using (user_id = (select auth.uid()) and public.is_account_active());
 
 -- story_views: you record your own views; you and the story owner can read them.
 drop policy if exists "story_views: read own or on own story" on public.story_views;
@@ -2343,7 +2771,7 @@ create policy "story_views: read own or on own story" on public.story_views
 drop policy if exists "story_views: record own view" on public.story_views;
 create policy "story_views: record own view" on public.story_views
   for insert to authenticated
-  with check (user_id = (select auth.uid()) and public.can_view_story(story_id));
+  with check (user_id = (select auth.uid()) and public.is_account_active() and public.can_view_story(story_id));
 
 -- highlights: owner manages them; owner and followers read them.
 -- Same rule as can_view_highlight, but on the row's own columns: inside
@@ -2354,7 +2782,8 @@ create policy "highlights: read" on public.highlights
   using (
     user_id = (select auth.uid())
     or (
-      (public.is_following(user_id) or public.is_public_content(user_id, 'stories'))
+      public.can_see_account(user_id)
+      and (public.is_following(user_id) or public.is_public_content(user_id, 'stories'))
       and not public.is_hidden_from_me(user_id, 'stories')
     )
   );
@@ -2364,13 +2793,14 @@ create policy "highlights: create own" on public.highlights
   for insert to authenticated
   with check (
     user_id = (select auth.uid())
+    and public.is_account_active()
     and (cover_story_id is null or public.is_my_story(cover_story_id))
   );
 
 drop policy if exists "highlights: update own" on public.highlights;
 create policy "highlights: update own" on public.highlights
   for update to authenticated
-  using (user_id = (select auth.uid()))
+  using (user_id = (select auth.uid()) and public.is_account_active())
   with check (
     user_id = (select auth.uid())
     and (cover_story_id is null or public.is_my_story(cover_story_id))
@@ -2378,7 +2808,7 @@ create policy "highlights: update own" on public.highlights
 
 drop policy if exists "highlights: delete own" on public.highlights;
 create policy "highlights: delete own" on public.highlights
-  for delete to authenticated using (user_id = (select auth.uid()));
+  for delete to authenticated using (user_id = (select auth.uid()) and public.is_account_active());
 
 -- highlight_items: only own stories into own highlights.
 drop policy if exists "highlight_items: read" on public.highlight_items;
@@ -2388,11 +2818,11 @@ create policy "highlight_items: read" on public.highlight_items
 drop policy if exists "highlight_items: add own story" on public.highlight_items;
 create policy "highlight_items: add own story" on public.highlight_items
   for insert to authenticated
-  with check (public.is_my_highlight(highlight_id) and public.is_my_story(story_id));
+  with check (public.is_account_active() and public.is_my_highlight(highlight_id) and public.is_my_story(story_id));
 
 drop policy if exists "highlight_items: remove own" on public.highlight_items;
 create policy "highlight_items: remove own" on public.highlight_items
-  for delete to authenticated using (public.is_my_highlight(highlight_id));
+  for delete to authenticated using (public.is_account_active() and public.is_my_highlight(highlight_id));
 
 -- audience_restrictions: private to the owner (the hidden person must not find out).
 drop policy if exists "audience_restrictions: owner reads" on public.audience_restrictions;
@@ -2401,11 +2831,11 @@ create policy "audience_restrictions: owner reads" on public.audience_restrictio
 
 drop policy if exists "audience_restrictions: owner adds" on public.audience_restrictions;
 create policy "audience_restrictions: owner adds" on public.audience_restrictions
-  for insert to authenticated with check (owner_id = (select auth.uid()));
+  for insert to authenticated with check (owner_id = (select auth.uid()) and public.is_account_active());
 
 drop policy if exists "audience_restrictions: owner removes" on public.audience_restrictions;
 create policy "audience_restrictions: owner removes" on public.audience_restrictions
-  for delete to authenticated using (owner_id = (select auth.uid()));
+  for delete to authenticated using (owner_id = (select auth.uid()) and public.is_account_active());
 
 -- conversations / members: read for members only. Inserts happen through
 -- get_or_create_direct_conversation(), so there are no insert policies.
@@ -2437,7 +2867,10 @@ create policy "messages: members send" on public.messages
   for insert to authenticated
   with check (
     sender_id = (select auth.uid())
+    and public.is_account_active()
     and public.is_conversation_member(conversation_id)
+    -- No new messages in either direction across a block (the old ones stay readable).
+    and not public.conversation_has_block(conversation_id)
     and (body is not null or post_id is not null)
     and (post_id is null or public.can_view_post(post_id))
     and (comment_id is null or (post_id is not null and public.comment_belongs_to_post(comment_id, post_id)))
@@ -2451,7 +2884,7 @@ create policy "messages: members send" on public.messages
 
 drop policy if exists "messages: delete own" on public.messages;
 create policy "messages: delete own" on public.messages
-  for delete to authenticated using (sender_id = (select auth.uid()));
+  for delete to authenticated using (sender_id = (select auth.uid()) and public.is_account_active());
 -- No update policy: pins change only through set_message_pinned().
 
 -- message_reactions: members of the chat read them; you only set or remove your own.
@@ -2464,6 +2897,8 @@ create policy "message_reactions: react as yourself" on public.message_reactions
   for insert to authenticated
   with check (
     user_id = (select auth.uid())
+    and public.is_account_active()
+    and not public.conversation_has_block(conversation_id)
     and public.is_conversation_member(conversation_id)
     and public.message_in_conversation(message_id, conversation_id)
   );
@@ -2471,16 +2906,17 @@ create policy "message_reactions: react as yourself" on public.message_reactions
 drop policy if exists "message_reactions: change own" on public.message_reactions;
 create policy "message_reactions: change own" on public.message_reactions
   for update to authenticated
-  using (user_id = (select auth.uid()))
+  using (user_id = (select auth.uid()) and public.is_account_active())
   with check (
     user_id = (select auth.uid())
+    and not public.conversation_has_block(conversation_id)
     and public.is_conversation_member(conversation_id)
     and public.message_in_conversation(message_id, conversation_id)
   );
 
 drop policy if exists "message_reactions: delete own" on public.message_reactions;
 create policy "message_reactions: delete own" on public.message_reactions
-  for delete to authenticated using (user_id = (select auth.uid()));
+  for delete to authenticated using (user_id = (select auth.uid()) and public.is_account_active());
 
 -- workout_shares: the post owner and the tagged person see it.
 drop policy if exists "workout_shares: owner and tagged read" on public.workout_shares;
@@ -2498,14 +2934,14 @@ create policy "workout_shares: owner requests" on public.workout_shares
 drop policy if exists "workout_shares: tagged person answers" on public.workout_shares;
 create policy "workout_shares: tagged person answers" on public.workout_shares
   for update to authenticated
-  using (tagged_user_id = (select auth.uid()) and status = 'pending')
+  using (tagged_user_id = (select auth.uid()) and status = 'pending' and public.is_account_active())
   with check (tagged_user_id = (select auth.uid()) and status in ('accepted', 'declined'));
 
 -- The owner may withdraw a request while it is still open.
 drop policy if exists "workout_shares: owner withdraws pending" on public.workout_shares;
 create policy "workout_shares: owner withdraws pending" on public.workout_shares
   for delete to authenticated
-  using (public.is_my_post(post_id) and status = 'pending');
+  using (public.is_account_active() and public.is_my_post(post_id) and status = 'pending');
 
 -- post_reposts: readable when the viewer may read the original post AND the reposter's posts
 -- (so a repost never shows the original to anyone else); the reposter and the original's
@@ -2518,6 +2954,7 @@ create policy "post_reposts: read" on public.post_reposts
     or public.is_my_post(original_post_id)
     or (
       public.can_view_post(original_post_id)
+      and public.can_see_account(reposter_id)
       and (public.is_following(reposter_id) or public.is_public_content(reposter_id, 'posts'))
       and not public.is_hidden_from_me(reposter_id, 'posts')
     )
@@ -2526,17 +2963,17 @@ create policy "post_reposts: read" on public.post_reposts
 drop policy if exists "post_reposts: linked person reposts" on public.post_reposts;
 create policy "post_reposts: linked person reposts" on public.post_reposts
   for insert to authenticated
-  with check (reposter_id = (select auth.uid()) and public.can_repost(original_post_id));
+  with check (reposter_id = (select auth.uid()) and public.is_account_active() and public.can_repost(original_post_id));
 
 drop policy if exists "post_reposts: reposter edits caption" on public.post_reposts;
 create policy "post_reposts: reposter edits caption" on public.post_reposts
   for update to authenticated
-  using (reposter_id = (select auth.uid()))
+  using (reposter_id = (select auth.uid()) and public.is_account_active())
   with check (reposter_id = (select auth.uid()) and public.can_repost(original_post_id));
 
 drop policy if exists "post_reposts: reposter deletes" on public.post_reposts;
 create policy "post_reposts: reposter deletes" on public.post_reposts
-  for delete to authenticated using (reposter_id = (select auth.uid()));
+  for delete to authenticated using (reposter_id = (select auth.uid()) and public.is_account_active());
 
 -- hashtags: names and counts for every signed-in user.
 drop policy if exists "hashtags: read" on public.hashtags;
@@ -2562,6 +2999,7 @@ create policy "training_plans: read" on public.training_plans
     user_id = (select auth.uid())
     or (
       show_in_profile
+      and public.can_see_account(user_id)
       and (public.is_following(user_id) or public.is_public_content(user_id, 'posts'))
       and not public.is_hidden_from_me(user_id, 'posts')
     )
@@ -2580,10 +3018,31 @@ drop policy if exists "rest_day_uses: owner reads" on public.rest_day_uses;
 create policy "rest_day_uses: owner reads" on public.rest_day_uses
   for select to authenticated using (user_id = (select auth.uid()));
 
+-- user_blocks: only the blocker; the blocked person can't see that a block exists.
+drop policy if exists "user_blocks: blocker reads" on public.user_blocks;
+create policy "user_blocks: blocker reads" on public.user_blocks
+  for select to authenticated using (blocker_id = (select auth.uid()));
+
+drop policy if exists "user_blocks: blocker adds" on public.user_blocks;
+create policy "user_blocks: blocker adds" on public.user_blocks
+  for insert to authenticated
+  with check (blocker_id = (select auth.uid()) and blocked_id <> (select auth.uid()));
+
+drop policy if exists "user_blocks: blocker removes" on public.user_blocks;
+create policy "user_blocks: blocker removes" on public.user_blocks
+  for delete to authenticated using (blocker_id = (select auth.uid()));
+
+-- reports: reporters read their own rows (the app uses get_my_reports, which leaves out the
+-- decision notes; table access is revoked anyway). Inserts only through the report functions.
+drop policy if exists "reports: reporter reads own" on public.reports;
+create policy "reports: reporter reads own" on public.reports
+  for select to authenticated using (reporter_id = (select auth.uid()));
+-- report_snapshots: no policies, no client access.
+
 -- notifications: only the recipient, only reading and marking as read.
 drop policy if exists "notifications: recipient reads" on public.notifications;
 create policy "notifications: recipient reads" on public.notifications
-  for select to authenticated using (user_id = (select auth.uid()));
+  for select to authenticated using (user_id = (select auth.uid()) and public.can_see_account(actor_id));
 
 drop policy if exists "notifications: recipient marks read" on public.notifications;
 create policy "notifications: recipient marks read" on public.notifications
@@ -2642,15 +3101,16 @@ create policy "photos: upload to own folder" on storage.objects
   with check (
     bucket_id = 'photos'
     and (storage.foldername(name))[1] = (select auth.uid())::text
+    and public.is_account_active()
   );
 
 drop policy if exists "photos: update own" on storage.objects;
 create policy "photos: update own" on storage.objects
   for update to authenticated
-  using (bucket_id = 'photos' and (storage.foldername(name))[1] = (select auth.uid())::text)
+  using (bucket_id = 'photos' and (storage.foldername(name))[1] = (select auth.uid())::text and public.is_account_active())
   with check (bucket_id = 'photos' and (storage.foldername(name))[1] = (select auth.uid())::text);
 
 drop policy if exists "photos: delete own" on storage.objects;
 create policy "photos: delete own" on storage.objects
   for delete to authenticated
-  using (bucket_id = 'photos' and (storage.foldername(name))[1] = (select auth.uid())::text);
+  using (bucket_id = 'photos' and (storage.foldername(name))[1] = (select auth.uid())::text and public.is_account_active());

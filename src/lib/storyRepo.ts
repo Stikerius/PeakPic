@@ -12,7 +12,7 @@ import type { PublicProfile, Story, StoryGroup } from "@/types/social";
  * grouped by author, in story bar order (see sortStoryGroups).
  */
 export const STORY_SELECT =
-  "id, user_id, photo_path, created_at, expires_at, mentioned_user_ids, mention_positions, canvas_aspect, author:profiles!stories_user_id_fkey(id, username, display_name, avatar_path)";
+  "id, user_id, photo_path, created_at, expires_at, mentioned_user_ids, mention_positions, canvas_aspect, author:profiles!stories_user_id_fkey!inner(id, username, display_name, avatar_path)";
 
 export type StoryRow = {
   id: string;
@@ -180,11 +180,11 @@ export async function fetchStoryActivity(storyId: string): Promise<StoryActivity
   const [views, likes] = await Promise.all([
     supabase
       .from("story_views")
-      .select(`viewed_at, profile:profiles!story_views_user_id_fkey(${PROFILE_COLUMNS})`)
+      .select(`viewed_at, profile:profiles!story_views_user_id_fkey!inner(${PROFILE_COLUMNS})`)
       .eq("story_id", storyId),
     supabase
       .from("story_likes")
-      .select(`created_at, profile:profiles!story_likes_user_id_fkey(${PROFILE_COLUMNS})`)
+      .select(`created_at, profile:profiles!story_likes_user_id_fkey!inner(${PROFILE_COLUMNS})`)
       .eq("story_id", storyId),
   ]);
   if (views.error) throw views.error;

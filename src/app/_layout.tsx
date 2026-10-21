@@ -5,7 +5,9 @@ import { useEffect, type ReactNode } from "react";
 import { ActivityIndicator, StyleSheet, View } from "react-native";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
 
+import { ReportProvider } from "@/components/moderation/report-provider";
 import { navigationThemeFor } from "@/constants/theme";
+import { AccountStatusProvider, useAccountStatus } from "@/lib/accountStatus";
 import { OnboardingProvider, useOnboarding } from "@/lib/onboarding";
 import { SessionProvider, useSession } from "@/lib/session";
 import { ThemeProvider, makeStyles, useTheme } from "@/lib/theme";
@@ -18,9 +20,13 @@ export default function RootLayout() {
     <ThemeProvider>
       <ThemedRoot>
         <SessionProvider>
-          <OnboardingProvider>
-            <RootNavigator />
-          </OnboardingProvider>
+          <AccountStatusProvider>
+            <OnboardingProvider>
+              <ReportProvider>
+                <RootNavigator />
+              </ReportProvider>
+            </OnboardingProvider>
+          </AccountStatusProvider>
         </SessionProvider>
       </ThemedRoot>
     </ThemeProvider>
@@ -52,9 +58,13 @@ function RootNavigator() {
   const styles = useStyles();
   const { session, loading } = useSession();
   const { needed: onboardingNeeded } = useOnboarding();
+  const { account } = useAccountStatus();
   const signedIn = session !== null;
-  // Splash stays up until we know whether the intro comes first (never longer than its timeout).
-  const ready = !loading && !(signedIn && onboardingNeeded === null);
+  // A suspended, banned or deleting account only gets the "Konto gesperrt" screen.
+  const locked = signedIn && account !== null && account.status !== "active";
+  // Splash stays up until we know the account status and whether the intro comes first
+  // (each check gives up after a few seconds).
+  const ready = !loading && !(signedIn && (account === null || (!locked && onboardingNeeded === null)));
 
   useEffect(() => {
     if (ready) void SplashScreen.hideAsync();
@@ -78,8 +88,8 @@ function RootNavigator() {
         contentStyle: { backgroundColor: colors.background },
       }}
     >
-      {/* Login first, then the intro (if not done yet), then the app. */}
-      <Stack.Protected guard={signedIn && onboardingNeeded !== true}>
+      {/* Login first, then the account status, then the intro (if not done yet), then the app. */}
+      <Stack.Protected guard={signedIn && !locked && onboardingNeeded !== true}>
         <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
         <Stack.Screen name="search" options={{ title: "Leute finden", presentation: "modal" }} />
         <Stack.Screen
@@ -112,6 +122,8 @@ function RootNavigator() {
         <Stack.Screen name="plan-edit" options={{ title: "Trainingsplan", presentation: "modal" }} />
         <Stack.Screen name="privacy/[scope]" options={{ title: "" }} />
         <Stack.Screen name="app-icon" options={{ title: "App-Icon" }} />
+        <Stack.Screen name="blocked-accounts" options={{ title: "Blockierte Konten" }} />
+        <Stack.Screen name="my-reports" options={{ title: "Meine Meldungen" }} />
         <Stack.Screen
           name="post-create"
           options={{ headerShown: false, presentation: "fullScreenModal", gestureEnabled: false }}
@@ -125,7 +137,10 @@ function RootNavigator() {
           options={{ headerShown: false, presentation: "fullScreenModal", animation: "fade" }}
         />
       </Stack.Protected>
-      <Stack.Protected guard={signedIn}>
+      <Stack.Protected guard={signedIn && locked}>
+        <Stack.Screen name="account-locked" options={{ headerShown: false, gestureEnabled: false }} />
+      </Stack.Protected>
+      <Stack.Protected guard={signedIn && !locked}>
         {/* Also reachable later from the settings ("Einführung nochmal ansehen"). */}
         <Stack.Screen name="onboarding" options={{ headerShown: false, gestureEnabled: false, animation: "fade" }} />
       </Stack.Protected>

@@ -75,7 +75,8 @@ export default function ChatListScreen() {
                 <Avatar uri={item.partner.avatarUrl} username={item.partner.username} size={52} />
                 <View style={styles.rowText}>
                   <Text style={[styles.username, unread && styles.bold]} numberOfLines={1}>
-                    {item.partner.displayName} <Text style={styles.handle}>@{item.partner.username}</Text>
+                    {item.partner.displayName}
+                    {item.partner.username !== "" && <Text style={styles.handle}> @{item.partner.username}</Text>}
                   </Text>
                   <Text style={[styles.preview, unread && styles.previewUnread]} numberOfLines={1}>
                     {item.lastMessage === null

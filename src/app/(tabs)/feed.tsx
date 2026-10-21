@@ -16,6 +16,7 @@ import { StoryBar } from "@/components/stories/story-bar";
 import { Button } from "@/components/ui/button";
 import { fontSize, radius, spacing } from "@/constants/theme";
 import { useOpenProfile } from "@/hooks/use-open-profile";
+import { useOtherPostActions } from "@/hooks/use-other-post-actions";
 import { usePostActions, useRepostActions } from "@/hooks/use-post-actions";
 import { useSession } from "@/lib/session";
 import { useFeed } from "@/hooks/use-feed";
@@ -39,6 +40,7 @@ export default function FeedScreen() {
   const showPostActions = usePostActions();
   const showRepostActions = useRepostActions();
   const myId = useSession().session?.user.id;
+  const showOtherPostActions = useOtherPostActions();
 
   // Tapping the feed tab while it's open scrolls to the top and refreshes, like Instagram.
   useEffect(() => {
@@ -83,10 +85,10 @@ export default function FeedScreen() {
               item.repost !== null
                 ? item.repost.reposter.id === myId
                   ? (post) => post.repost !== null && showRepostActions(post.repost.id)
-                  : undefined
+                  : showOtherPostActions
                 : item.author.id === myId
                   ? showPostActions
-                  : undefined
+                  : showOtherPostActions
             }
           />
         )}

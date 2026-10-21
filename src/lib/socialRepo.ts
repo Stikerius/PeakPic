@@ -83,7 +83,7 @@ function sortByName(profiles: Map<string, PublicProfile>): PublicProfile[] {
 export async function listFollowersOf(userId: string): Promise<PublicProfile[]> {
   const { data, error } = await supabase
     .from("follows")
-    .select(`profile:profiles!follows_follower_id_fkey(${PROFILE_COLUMNS})`)
+    .select(`profile:profiles!follows_follower_id_fkey!inner(${PROFILE_COLUMNS})`)
     .eq("following_id", userId)
     .eq("status", "accepted");
   if (error) throw error;
@@ -94,7 +94,7 @@ export async function listFollowersOf(userId: string): Promise<PublicProfile[]> 
 export async function listFollowingOf(userId: string): Promise<PublicProfile[]> {
   const { data, error } = await supabase
     .from("follows")
-    .select(`profile:profiles!follows_following_id_fkey(${PROFILE_COLUMNS})`)
+    .select(`profile:profiles!follows_following_id_fkey!inner(${PROFILE_COLUMNS})`)
     .eq("follower_id", userId)
     .eq("status", "accepted");
   if (error) throw error;
@@ -108,7 +108,7 @@ export async function listFollowRequests(): Promise<FollowRequest[]> {
   const userId = await requireUserId();
   const { data, error } = await supabase
     .from("follows")
-    .select(`created_at, profile:profiles!follows_follower_id_fkey(${PROFILE_COLUMNS})`)
+    .select(`created_at, profile:profiles!follows_follower_id_fkey!inner(${PROFILE_COLUMNS})`)
     .eq("following_id", userId)
     .eq("status", "pending")
     .order("created_at", { ascending: false });

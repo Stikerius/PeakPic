@@ -7,6 +7,7 @@ import { PostCard } from "@/components/feed/post-card";
 import { Button } from "@/components/ui/button";
 import { fontSize, spacing } from "@/constants/theme";
 import { useOpenProfile } from "@/hooks/use-open-profile";
+import { useOtherPostActions } from "@/hooks/use-other-post-actions";
 import { usePostActions } from "@/hooks/use-post-actions";
 import { useSession } from "@/lib/session";
 import { onAppEvent } from "@/lib/events";
@@ -31,6 +32,7 @@ export default function PostScreen() {
   const [liking, setLiking] = useState(false);
   const openProfile = useOpenProfile();
   const myId = useSession().session?.user.id;
+  const showOtherPostActions = useOtherPostActions();
   const showPostActions = usePostActions({ onDeleted: () => router.back() });
   // Bumped after the post was edited, to reload it.
   const [version, setVersion] = useState(0);
@@ -159,7 +161,7 @@ export default function PostScreen() {
         onOpenComments={(id) => router.push({ pathname: "/comments/[postId]", params: { postId: id } })}
         onOpenProfile={openProfile}
         onShare={(id) => router.push({ pathname: "/share/[postId]", params: { postId: id } })}
-        onMore={state.post.author.id === myId ? showPostActions : undefined}
+        onMore={state.post.author.id === myId ? showPostActions : showOtherPostActions}
       />
     </ScrollView>
   );

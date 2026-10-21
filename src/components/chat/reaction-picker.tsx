@@ -17,6 +17,8 @@ type ReactionPickerProps = {
   current: string | null;
   onPick: (emoji: string) => void;
   onClose: () => void;
+  /** Someone else's message: offers "Nachricht melden" below the reactions. */
+  onReport?: () => void;
 };
 
 function EmojiButton({ emoji, selected, onPick }: { emoji: string; selected: boolean; onPick: (emoji: string) => void }) {
@@ -38,7 +40,7 @@ function EmojiButton({ emoji, selected, onPick }: { emoji: string; selected: boo
  * Bar with quick reactions above the pressed message; "…" opens a grid with more emojis.
  * Tapping any emoji reacts right away.
  */
-export function ReactionPicker({ anchorY, current, onPick, onClose }: ReactionPickerProps) {
+export function ReactionPicker({ anchorY, current, onPick, onClose, onReport }: ReactionPickerProps) {
   const { colors } = useTheme();
   const styles = useStyles();
   const insets = useSafeAreaInsets();
@@ -96,6 +98,17 @@ export function ReactionPicker({ anchorY, current, onPick, onClose }: ReactionPi
               <Ionicons name="ellipsis-horizontal" size={22} color={colors.text} />
             </Pressable>
           </View>
+          {onReport !== undefined && (
+            <Pressable
+              onPress={onReport}
+              accessibilityRole="button"
+              accessibilityLabel="Nachricht melden"
+              style={({ pressed }) => [styles.reportButton, pressed && styles.reportPressed]}
+            >
+              <Ionicons name="flag-outline" size={18} color={colors.danger} />
+              <Text style={styles.reportText}>Nachricht melden</Text>
+            </Pressable>
+          )}
         </View>
       )}
     </Modal>
@@ -181,6 +194,27 @@ const useStyles = makeStyles(({ colors }) =>
     grid: {
       flexDirection: "row",
       flexWrap: "wrap",
+    },
+    reportButton: {
+      alignSelf: "center",
+      flexDirection: "row",
+      alignItems: "center",
+      gap: spacing.sm,
+      minHeight: 44,
+      marginTop: spacing.sm,
+      paddingHorizontal: spacing.md,
+      borderRadius: radius.full,
+      backgroundColor: colors.surface,
+      borderWidth: StyleSheet.hairlineWidth,
+      borderColor: colors.border,
+    },
+    reportPressed: {
+      opacity: 0.7,
+    },
+    reportText: {
+      color: colors.danger,
+      fontSize: fontSize.sm,
+      fontWeight: "600",
     },
   }),
 );

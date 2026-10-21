@@ -42,7 +42,7 @@ export async function withdrawWorkoutLink(shareId: string): Promise<void> {
 export async function listWorkoutLinks(postId: string): Promise<WorkoutLink[]> {
   const { data, error } = await supabase
     .from("workout_shares")
-    .select(`id, status, person:profiles!workout_shares_tagged_user_id_fkey(${PROFILE_COLUMNS})`)
+    .select(`id, status, person:profiles!workout_shares_tagged_user_id_fkey!inner(${PROFILE_COLUMNS})`)
     .eq("post_id", postId)
     .order("created_at", { ascending: true });
   if (error) throw error;

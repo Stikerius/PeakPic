@@ -3,8 +3,9 @@ import { router, Stack, useLocalSearchParams } from "expo-router";
 import { useEffect, useState, type ReactNode } from "react";
 import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 
-import { Avatar } from "@/components/ui/avatar";
 import { FollowButton } from "@/components/follow-button";
+import { useReport } from "@/components/moderation/report-provider";
+import { Avatar } from "@/components/ui/avatar";
 import { STORY_RING_INSET, StoryRing } from "@/components/stories/story-ring";
 import { HighlightsRow } from "@/components/profile/highlights-row";
 import { PlanSummary } from "@/components/profile/plan-summary";
@@ -13,6 +14,8 @@ import { FlameIcon } from "@/components/streak/flame-icon";
 import { MonthCalendar } from "@/components/streak/month-calendar";
 import { Button } from "@/components/ui/button";
 import { fontSize, radius, spacing, typography } from "@/constants/theme";
+import { useBlockUser } from "@/hooks/use-block-user";
+import { showActionSheet } from "@/lib/actionSheet";
 import { getOrCreateDirectConversation } from "@/lib/chatRepo";
 import { describeError } from "@/lib/errors";
 import { listHighlights, type Highlight } from "@/lib/highlightRepo";
@@ -76,6 +79,8 @@ export default function UserProfileScreen() {
   const { colors } = useTheme();
   const styles = useStyles();
   const { userId } = useLocalSearchParams<{ userId: string }>();
+  const { openReport } = useReport();
+  const blockUser = useBlockUser();
 
   const [summary, setSummary] = useState<UserProfileSummary | null | undefined>(undefined);
   const [content, setContent] = useState<Content | null>(null);
@@ -157,7 +162,31 @@ export default function UserProfileScreen() {
 
   return (
     <ScrollView style={styles.screen} contentContainerStyle={styles.content}>
-      <Stack.Screen options={{ title: profile.username }} />
+      <Stack.Screen
+        options={{
+          title: profile.username,
+          headerRight: () => (
+            <Pressable
+              onPress={() =>
+                showActionSheet(profile.displayName, [
+                  {
+                    label: "Profil melden",
+                    destructive: true,
+                    onPress: () => openReport({ targetType: "profile", targetId: profile.id }),
+                  },
+                  { label: "Blockieren", destructive: true, onPress: () => blockUser(profile, () => router.back()) },
+                ])
+              }
+              accessibilityRole="button"
+              accessibilityLabel="Weitere Optionen"
+              hitSlop={spacing.sm}
+              style={styles.headerButton}
+            >
+              <Ionicons name="ellipsis-horizontal" size={22} color={colors.text} />
+            </Pressable>
+          ),
+        }}
+      />
 
       <View style={styles.header}>
         {content?.hasStories ? (
@@ -433,6 +462,12 @@ const useStyles = makeStyles(({ colors }) =>
     },
     plan: {
       paddingHorizontal: spacing.md,
+    },
+    headerButton: {
+      minWidth: 44,
+      minHeight: 44,
+      alignItems: "center",
+      justifyContent: "center",
     },
   }),
 );

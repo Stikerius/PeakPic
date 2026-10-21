@@ -390,7 +390,7 @@ export async function fetchPostTags(postIds: string[]): Promise<Map<string, Publ
   if (postIds.length === 0) return result;
   const { data, error } = await supabase
     .from("post_tags")
-    .select(`post_id, profile:profiles!post_tags_user_id_fkey(${PROFILE_COLUMNS})`)
+    .select(`post_id, profile:profiles!post_tags_user_id_fkey!inner(${PROFILE_COLUMNS})`)
     .in("post_id", postIds);
   if (error) throw error;
   const profiles = await toPublicProfiles(data.map((row) => row.profile));

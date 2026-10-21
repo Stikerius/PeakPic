@@ -4,7 +4,7 @@ import type {
 } from "@supabase/supabase-js";
 
 import { getSignedPhotoUrls } from "@/lib/photoUpload";
-import { PROFILE_COLUMNS, toPublicProfiles } from "@/lib/profiles";
+import { PROFILE_COLUMNS, toPublicProfiles, unavailableProfile } from "@/lib/profiles";
 import { requireUserId } from "@/lib/session";
 import { supabase } from "@/lib/supabase";
 import type {
@@ -110,12 +110,15 @@ export async function listConversations(): Promise<ConversationSummary[]> {
   const conversationIds = memberships.map((m) => m.conversation_id);
   const { data: partners, error: partnersError } = await supabase
     .from("conversation_members")
-    .select(`conversation_id, profile:profiles!conversation_members_user_id_fkey(${PROFILE_COLUMNS})`)
+    .select(`conversation_id, user_id, profile:profiles!conversation_members_user_id_fkey(${PROFILE_COLUMNS})`)
     .in("conversation_id", conversationIds)
     .neq("user_id", userId);
   if (partnersError) throw partnersError;
-  const profiles = await toPublicProfiles(partners.map((p) => p.profile));
-  const partnerByConversation = new Map(partners.map((p) => [p.conversation_id, profiles.get(p.profile.id)]));
+  // A blocked or suspended partner's profile is hidden: the chat stays, with a stand-in name.
+  const profiles = await toPublicProfiles(partners.flatMap((p) => (p.profile !== null ? [p.profile] : [])));
+  const partnerByConversation = new Map(
+    partners.map((p) => [p.conversation_id, profiles.get(p.user_id) ?? unavailableProfile(p.user_id)]),
+  );
 
   // One small query per chat; fine for the number of chats a person has.
   const details = await Promise.all(
@@ -165,13 +168,14 @@ export async function getConversationPartner(conversationId: string): Promise<Pu
   const userId = await requireUserId();
   const { data, error } = await supabase
     .from("conversation_members")
-    .select(`profile:profiles!conversation_members_user_id_fkey(${PROFILE_COLUMNS})`)
+    .select(`user_id, profile:profiles!conversation_members_user_id_fkey(${PROFILE_COLUMNS})`)
     .eq("conversation_id", conversationId)
     .neq("user_id", userId)
     .maybeSingle();
   if (error) throw error;
   if (data === null) return null;
-  return (await toPublicProfiles([data.profile])).get(data.profile.id) ?? null;
+  if (data.profile === null) return unavailableProfile(data.user_id);
+  return (await toPublicProfiles([data.profile])).get(data.user_id) ?? unavailableProfile(data.user_id);
 }
 
 /** Resolves shared posts (author, signed photo) for a batch of message rows. */
@@ -181,7 +185,7 @@ async function hydrateMessages(rows: MessageRow[]): Promise<ChatMessage[]> {
   if (postIds.length > 0) {
     const { data, error } = await supabase
       .from("posts")
-      .select(`id, photo_path, caption, author:profiles!posts_user_id_fkey(${PROFILE_COLUMNS})`)
+      .select(`id, photo_path, caption, author:profiles!posts_user_id_fkey!inner(${PROFILE_COLUMNS})`)
       .in("id", postIds);
     if (error) throw error;
     const [photoUrls, authors] = await Promise.all([
@@ -202,7 +206,7 @@ async function hydrateMessages(rows: MessageRow[]): Promise<ChatMessage[]> {
   if (commentIds.length > 0) {
     const { data, error } = await supabase
       .from("comments")
-      .select(`id, post_id, body, author:profiles!comments_user_id_fkey(${PROFILE_COLUMNS})`)
+      .select(`id, post_id, body, author:profiles!comments_user_id_fkey!inner(${PROFILE_COLUMNS})`)
       .in("id", commentIds);
     if (error) throw error;
     const authors = await toPublicProfiles(data.map((c) => c.author));

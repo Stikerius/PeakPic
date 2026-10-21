@@ -317,6 +317,20 @@ export default function SettingsScreen() {
           subtitle={countLabel(counts.posts)}
           onPress={() => open("posts")}
         />
+        <View style={styles.separator} />
+        <SettingsRow
+          icon="hand-left-outline"
+          title="Blockierte Konten"
+          subtitle="Ansehen und entblocken"
+          onPress={() => router.push("/blocked-accounts")}
+        />
+        <View style={styles.separator} />
+        <SettingsRow
+          icon="flag-outline"
+          title="Meine Meldungen"
+          subtitle="Stand deiner Meldungen"
+          onPress={() => router.push("/my-reports")}
+        />
       </View>
       <Text style={styles.footnote}>
         Verborgene Personen sehen deine Storys bzw. Workout-Beiträge und deinen Kalender nicht mehr. Sie

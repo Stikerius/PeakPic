@@ -6,7 +6,7 @@ import type { PostComment, PublicProfile } from "@/types/social";
 export const COMMENT_MAX_LENGTH = 500;
 
 const COMMENT_SELECT =
-  "id, post_id, parent_comment_id, body, created_at, author:profiles!comments_user_id_fkey(id, username, display_name, avatar_path)";
+  "id, post_id, parent_comment_id, body, created_at, author:profiles!comments_user_id_fkey!inner(id, username, display_name, avatar_path)";
 
 type CommentRow = {
   id: string;

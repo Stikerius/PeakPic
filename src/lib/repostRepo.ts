@@ -13,7 +13,7 @@ export type Repost = {
   createdAt: string;
 };
 
-const REPOST_SELECT = `id, original_post_id, caption, created_at, reposter:profiles!post_reposts_reposter_id_fkey(${PROFILE_COLUMNS})`;
+const REPOST_SELECT = `id, original_post_id, caption, created_at, reposter:profiles!post_reposts_reposter_id_fkey!inner(${PROFILE_COLUMNS})`;
 
 type RepostRow = {
   id: string;

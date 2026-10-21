@@ -38,7 +38,7 @@ export async function fetchInbox(): Promise<InboxItem[]> {
   const { data, error } = await supabase
     .from("notifications")
     .select(
-      `id, type, created_at, read_at, post_id, story_id, comment_id, workout_share_id, actor:profiles!notifications_actor_id_fkey(${PROFILE_COLUMNS})`,
+      `id, type, created_at, read_at, post_id, story_id, comment_id, workout_share_id, actor:profiles!notifications_actor_id_fkey!inner(${PROFILE_COLUMNS})`,
     )
     .eq("user_id", userId)
     .order("created_at", { ascending: false })

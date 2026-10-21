@@ -11,6 +11,19 @@ export type WorkoutShareStatus = "pending" | "accepted" | "declined";
 export type NotificationType = "tag" | "workout_tag_request" | "workout_tag_accepted" | "follow_request";
 export type Json = string | number | boolean | null | Json[] | { [key: string]: Json };
 export type AudienceScope = "stories" | "posts";
+export type AccountStatus = "active" | "suspended" | "banned" | "deleting";
+export type ReportTargetType = "post" | "story" | "comment" | "message" | "profile";
+export type ReportReason =
+  | "spam"
+  | "harassment"
+  | "nudity"
+  | "violence"
+  | "hate"
+  | "copyright"
+  | "self_harm"
+  | "non_consensual"
+  | "other";
+export type ReportStatus = "open" | "in_review" | "resolved" | "dismissed";
 type Uuid = string;
 
 type Rel<Name extends string, Column extends string, Target extends string> = {
@@ -31,6 +44,11 @@ export type Database = {
           display_name: string;
           username_changed_at: Timestamp | null;
           onboarding_done_at: Timestamp | null;
+          account_status: AccountStatus;
+          suspended_until: Timestamp | null;
+          suspension_reason_code: string | null;
+          moderation_message: string | null;
+          moderation_updated_at: Timestamp | null;
           avatar_path: string | null;
           created_at: Timestamp;
           notifications_seen_at: Timestamp;
@@ -226,6 +244,15 @@ export type Database = {
         Relationships: [
           Rel<"story_views_story_id_fkey", "story_id", "stories">,
           Rel<"story_views_user_id_fkey", "user_id", "profiles">,
+        ];
+      };
+      user_blocks: {
+        Row: { blocker_id: Uuid; blocked_id: Uuid; created_at: Timestamp };
+        Insert: { blocker_id: Uuid; blocked_id: Uuid };
+        Update: Record<string, never>;
+        Relationships: [
+          Rel<"user_blocks_blocker_id_fkey", "blocker_id", "profiles">,
+          Rel<"user_blocks_blocked_id_fkey", "blocked_id", "profiles">,
         ];
       };
       rest_budgets: {
@@ -445,6 +472,31 @@ export type Database = {
     Views: Record<string, never>;
     Functions: {
       username_available: { Args: { name: string }; Returns: boolean };
+      conversation_has_block: { Args: { conversation: Uuid }; Returns: boolean };
+      get_my_account_status: {
+        Args: Record<string, never>;
+        Returns: { status: AccountStatus; suspended_until: Timestamp | null; reason_code: string | null; message: string | null }[];
+      };
+      get_my_blocked_accounts: {
+        Args: Record<string, never>;
+        Returns: { id: Uuid; username: string; display_name: string; avatar_path: string | null; blocked_at: Timestamp }[];
+      };
+      report_content: {
+        Args: { p_target_type: ReportTargetType; p_target_id: Uuid; p_reason: ReportReason; p_details: string };
+        Returns: Uuid;
+      };
+      report_message: { Args: { message_id: Uuid; reason: ReportReason; details: string }; Returns: Uuid };
+      get_my_reports: {
+        Args: Record<string, never>;
+        Returns: {
+          id: Uuid;
+          target_type: ReportTargetType;
+          reason: ReportReason;
+          status: ReportStatus;
+          created_at: Timestamp;
+          handled_at: Timestamp | null;
+        }[];
+      };
       set_rest_budget: { Args: { n: number }; Returns: undefined };
       use_rest_day: { Args: { d: string }; Returns: undefined };
       undo_rest_day: { Args: { d: string }; Returns: undefined };

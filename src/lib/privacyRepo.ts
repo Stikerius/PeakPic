@@ -9,7 +9,7 @@ export async function listFollowers(): Promise<PublicProfile[]> {
   const userId = await requireUserId();
   const { data, error } = await supabase
     .from("follows")
-    .select(`profile:profiles!follows_follower_id_fkey(${PROFILE_COLUMNS})`)
+    .select(`profile:profiles!follows_follower_id_fkey!inner(${PROFILE_COLUMNS})`)
     .eq("following_id", userId)
     .eq("status", "accepted");
   if (error) throw error;

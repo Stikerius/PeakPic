@@ -18,6 +18,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { scheduleOnRN } from "react-native-worklets";
 
 import { MentionSpots } from "@/components/mention-spots";
+import { useReport } from "@/components/moderation/report-provider";
 import { HighlightPicker } from "@/components/stories/highlight-picker";
 import { StoryActivitySheet } from "@/components/stories/story-activity-sheet";
 import { Avatar } from "@/components/ui/avatar";
@@ -171,6 +172,9 @@ function StoryViewerScreenContent() {
   const [storyIndex, setStoryIndex] = useState(() => entryIndex(groups[groupIndex]));
   const [loadedId, setLoadedId] = useState<string | null>(null);
   const [paused, setPaused] = useState(false);
+  const { openReport } = useReport();
+  // The report sheet is open: the story waits.
+  const [reportOpen, setReportOpen] = useState(false);
   // Finger is moving the viewer (swipe down or sideways), or a person switch is animating.
   const [moving, setMoving] = useState(false);
   const progress = useSharedValue(0);
@@ -293,7 +297,7 @@ function StoryViewerScreenContent() {
 
   // Run the timer once the image is shown; pausing keeps the current progress.
   useEffect(() => {
-    if (!loaded || paused || moving || activityOpen || highlightPickerOpen) return;
+    if (!loaded || paused || moving || activityOpen || highlightPickerOpen || reportOpen) return;
     progress.value = withTiming(
       1,
       { duration: (1 - progress.value) * STORY_DURATION_MS },
@@ -302,7 +306,7 @@ function StoryViewerScreenContent() {
       },
     );
     return () => cancelAnimation(progress);
-  }, [loaded, paused, moving, activityOpen, highlightPickerOpen, story?.id]);
+  }, [loaded, paused, moving, activityOpen, highlightPickerOpen, reportOpen, story?.id]);
 
   // Group disappeared (e.g. last own story deleted): leave the viewer.
   useEffect(() => {
@@ -606,20 +610,35 @@ function StoryViewerScreenContent() {
                   <Ionicons name="trash-outline" size={24} color={colors.text} />
                 </Pressable>
               </View>
-            ) : inHighlight ? null : (
-              <Pressable
-                onPress={() => void toggleLike(story)}
-                accessibilityRole="button"
-                accessibilityLabel={story.likedByMe ? "Like entfernen" : "Story liken"}
-                accessibilityState={{ selected: story.likedByMe }}
-                style={styles.roundButton}
-              >
-                <Ionicons
-                  name={story.likedByMe ? "heart" : "heart-outline"}
-                  size={28}
-                  color={story.likedByMe ? colors.danger : colors.text}
-                />
-              </Pressable>
+            ) : (
+              <View style={styles.ownActions}>
+                <Pressable
+                  onPress={() => {
+                    setReportOpen(true);
+                    openReport({ targetType: "story", targetId: story.id, onClose: () => setReportOpen(false) });
+                  }}
+                  accessibilityRole="button"
+                  accessibilityLabel="Story melden"
+                  style={styles.roundButton}
+                >
+                  <Ionicons name="flag-outline" size={24} color={colors.text} />
+                </Pressable>
+                {!inHighlight && (
+                  <Pressable
+                    onPress={() => void toggleLike(story)}
+                    accessibilityRole="button"
+                    accessibilityLabel={story.likedByMe ? "Like entfernen" : "Story liken"}
+                    accessibilityState={{ selected: story.likedByMe }}
+                    style={styles.roundButton}
+                  >
+                    <Ionicons
+                      name={story.likedByMe ? "heart" : "heart-outline"}
+                      size={28}
+                      color={story.likedByMe ? colors.danger : colors.text}
+                    />
+                  </Pressable>
+                )}
+              </View>
             )}
           </View>
         </PageSlot>

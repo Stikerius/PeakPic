@@ -16,7 +16,7 @@ export type FeedPage = {
 };
 
 const POST_SELECT =
-  "id, photo_path, caption, workout_date, created_at, is_day_post, show_in_profile, plan_day_title, plan_day_position, plan_length, author:profiles!posts_user_id_fkey(id, username, display_name, avatar_path)";
+  "id, photo_path, caption, workout_date, created_at, is_day_post, show_in_profile, plan_day_title, plan_day_position, plan_length, author:profiles!posts_user_id_fkey!inner(id, username, display_name, avatar_path)";
 
 type PostRow = {
   id: string;

@@ -2,9 +2,7 @@ import Ionicons from "@expo/vector-icons/Ionicons";
 import { router, useLocalSearchParams } from "expo-router";
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
-  ActionSheetIOS,
   ActivityIndicator,
-  Alert,
   FlatList,
   KeyboardAvoidingView,
   Platform,
@@ -19,15 +17,18 @@ import { GestureDetector } from "react-native-gesture-handler";
 import Animated, { SlideInDown, interpolate, useAnimatedStyle } from "react-native-reanimated";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
+import { useReport } from "@/components/moderation/report-provider";
 import { TaggedText } from "@/components/tagged-text";
 import { TaggedTextInput } from "@/components/tagged-text-input";
 import { Avatar } from "@/components/ui/avatar";
 import { useOpenProfile } from "@/hooks/use-open-profile";
 import { useSwipeToDismiss } from "@/hooks/use-swipe-to-dismiss";
 import { fontSize, radius, spacing, typography } from "@/constants/theme";
+import { showActionSheet } from "@/lib/actionSheet";
 import { COMMENT_MAX_LENGTH, addComment, listComments, setCommentLiked } from "@/lib/commentRepo";
 import { emitAppEvent } from "@/lib/events";
 import { formatRelativeTime } from "@/lib/format";
+import { useSession } from "@/lib/session";
 import { makeStyles, useTheme } from "@/lib/theme";
 import type { PostComment } from "@/types/social";
 
@@ -104,6 +105,8 @@ function CommentRow({ comment, isReply, highlighted, onOpenProfile, onToggleLike
 export default function CommentsScreen() {
   const { colors } = useTheme();
   const styles = useStyles();
+  const myId = useSession().session?.user.id;
+  const { openReport } = useReport();
   // commentId: opened from a shared comment in a chat; scroll to it and highlight it.
   const { postId, commentId } = useLocalSearchParams<{ postId: string; commentId?: string }>();
   const insets = useSafeAreaInsets();
@@ -205,22 +208,19 @@ export default function CommentsScreen() {
   }
 
   function showActions(comment: PostComment) {
-    const title = `@${comment.author.username}`;
-    if (Platform.OS === "ios") {
-      ActionSheetIOS.showActionSheetWithOptions(
-        { title, options: ["An Chat senden", "Antworten", "Abbrechen"], cancelButtonIndex: 2 },
-        (index) => {
-          if (index === 0) shareComment(comment);
-          else if (index === 1) startReply(comment);
-        },
-      );
-    } else {
-      Alert.alert(title, undefined, [
-        { text: "An Chat senden", onPress: () => shareComment(comment) },
-        { text: "Antworten", onPress: () => startReply(comment) },
-        { text: "Abbrechen", style: "cancel" },
-      ]);
-    }
+    showActionSheet(`@${comment.author.username}`, [
+      { label: "An Chat senden", onPress: () => shareComment(comment) },
+      { label: "Antworten", onPress: () => startReply(comment) },
+      ...(comment.author.id !== myId
+        ? [
+            {
+              label: "Kommentar melden",
+              destructive: true,
+              onPress: () => openReport({ targetType: "comment", targetId: comment.id }),
+            },
+          ]
+        : []),
+    ]);
   }
 
   function toggleReplies(parentId: string) {

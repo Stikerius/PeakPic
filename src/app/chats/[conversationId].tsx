@@ -18,10 +18,14 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { MessageBubble } from "@/components/chat/message-bubble";
 import { ReactionPicker } from "@/components/chat/reaction-picker";
+import { useReport } from "@/components/moderation/report-provider";
 import { SwipeableMessage } from "@/components/chat/swipeable-message";
 import { TaggedTextInput } from "@/components/tagged-text-input";
 import { Avatar } from "@/components/ui/avatar";
 import { fontSize, radius, spacing, typography } from "@/constants/theme";
+import { useBlockUser } from "@/hooks/use-block-user";
+import { showActionSheet } from "@/lib/actionSheet";
+import { isChatBlocked } from "@/lib/blockRepo";
 import {
   MESSAGE_MAX_LENGTH,
   MESSAGE_PAGE_SIZE,
@@ -77,7 +81,12 @@ export default function ChatScreen() {
   const listRef = useRef<FlatList<ChatMessage>>(null);
   const inputRef = useRef<TextInput>(null);
 
+  const { openReport } = useReport();
+  const blockUser = useBlockUser();
   const [partner, setPartner] = useState<PublicProfile | null>(null);
+  // A block between us: the chat stays readable, but nobody can write in it.
+  const [blocked, setBlocked] = useState(false);
+  const [blockCheck, setBlockCheck] = useState(0);
   const [myUsername, setMyUsername] = useState<string | null>(null);
   // Newest first, for the inverted list.
   const [messages, setMessages] = useState<ChatMessage[] | null>(null);
@@ -93,6 +102,28 @@ export default function ChatScreen() {
   const [highlightedId, setHighlightedId] = useState<string | null>(null);
 
   const partnerName = partner?.username ?? "";
+  // Hidden profile (blocked, suspended or deleted): no profile link, no handle.
+  const partnerAvailable = partner !== null && partner.username !== "";
+
+  useEffect(() => {
+    let active = true;
+    isChatBlocked(conversationId)
+      .then((result) => {
+        if (active) setBlocked(result);
+      })
+      .catch(() => undefined);
+    return () => {
+      active = false;
+    };
+  }, [conversationId, blockCheck]);
+
+  function showChatMenu() {
+    if (partner === null || !partnerAvailable) return;
+    showActionSheet(partner.displayName, [
+      { label: "Profil melden", destructive: true, onPress: () => openReport({ targetType: "profile", targetId: partner.id }) },
+      { label: "Blockieren", destructive: true, onPress: () => blockUser(partner, () => setBlockCheck((v) => v + 1)) },
+    ]);
+  }
 
   function updateMessage(id: string, change: (message: ChatMessage) => ChatMessage) {
     setMessages((current) => current?.map((m) => (m.id === id ? change(m) : m)) ?? current);
@@ -304,10 +335,23 @@ export default function ChatScreen() {
     <>
       <Stack.Screen
         options={{
+          headerRight: () =>
+            partnerAvailable ? (
+              <Pressable
+                onPress={showChatMenu}
+                accessibilityRole="button"
+                accessibilityLabel="Weitere Optionen"
+                hitSlop={spacing.sm}
+                style={styles.headerButton}
+              >
+                <Ionicons name="ellipsis-horizontal" size={22} color={colors.text} />
+              </Pressable>
+            ) : null,
           headerTitle: () =>
             partner !== null ? (
               <Pressable
                 onPress={() => router.push({ pathname: "/user/[userId]", params: { userId: partner.id } })}
+                disabled={!partnerAvailable}
                 accessibilityRole="button"
                 accessibilityLabel={`Profil von ${partner.username}`}
                 style={styles.headerTitle}
@@ -317,9 +361,11 @@ export default function ChatScreen() {
                   <Text style={styles.headerName} numberOfLines={1}>
                     {partner.displayName}
                   </Text>
-                  <Text style={styles.handle} numberOfLines={1}>
-                    @{partner.username}
-                  </Text>
+                  {partnerAvailable && (
+                    <Text style={styles.handle} numberOfLines={1}>
+                      @{partner.username}
+                    </Text>
+                  )}
                 </View>
               </Pressable>
             ) : null,
@@ -436,29 +482,35 @@ export default function ChatScreen() {
           </View>
         )}
 
-        <View style={[styles.inputBar, { paddingBottom: Math.max(insets.bottom, spacing.sm) }]}>
-          <TaggedTextInput
-            ref={inputRef}
-            value={draft}
-            onChangeText={setDraft}
-            containerStyle={styles.inputBox}
-            placeholder={replyTo !== null ? "Antwort…" : "Nachricht…"}
-            placeholderTextColor={colors.textSecondary}
-            maxLength={MESSAGE_MAX_LENGTH}
-            multiline
-            style={styles.input}
-            accessibilityLabel="Nachricht"
-          />
-          <Pressable
-            onPress={() => void send()}
-            disabled={!canSend}
-            accessibilityRole="button"
-            accessibilityLabel="Senden"
-            style={[styles.sendButton, !canSend && styles.sendDisabled]}
-          >
-            <Ionicons name="arrow-up" size={20} color={colors.onAccent} />
-          </Pressable>
-        </View>
+        {blocked ? (
+          <View style={[styles.blockedBar, { paddingBottom: Math.max(insets.bottom, spacing.sm) }]}>
+            <Text style={styles.blockedText}>In diesem Chat können keine Nachrichten mehr gesendet werden.</Text>
+          </View>
+        ) : (
+          <View style={[styles.inputBar, { paddingBottom: Math.max(insets.bottom, spacing.sm) }]}>
+            <TaggedTextInput
+              ref={inputRef}
+              value={draft}
+              onChangeText={setDraft}
+              containerStyle={styles.inputBox}
+              placeholder={replyTo !== null ? "Antwort…" : "Nachricht…"}
+              placeholderTextColor={colors.textSecondary}
+              maxLength={MESSAGE_MAX_LENGTH}
+              multiline
+              style={styles.input}
+              accessibilityLabel="Nachricht"
+            />
+            <Pressable
+              onPress={() => void send()}
+              disabled={!canSend}
+              accessibilityRole="button"
+              accessibilityLabel="Senden"
+              style={[styles.sendButton, !canSend && styles.sendDisabled]}
+            >
+              <Ionicons name="arrow-up" size={20} color={colors.onAccent} />
+            </Pressable>
+          </View>
+        )}
       </KeyboardAvoidingView>
 
       <ReactionPicker
@@ -468,6 +520,15 @@ export default function ChatScreen() {
           if (pickerMessage !== undefined) void react(pickerMessage, emoji);
         }}
         onClose={() => setPicker(null)}
+        onReport={
+          pickerMessage !== undefined && pickerMessage.senderId !== myId
+            ? () => {
+                const reported = pickerMessage;
+                setPicker(null);
+                openReport({ targetType: "message", targetId: reported.id });
+              }
+            : undefined
+        }
       />
     </>
   );
@@ -616,6 +677,24 @@ const useStyles = makeStyles(({ colors }) =>
     },
     sendDisabled: {
       opacity: 0.4,
+    },
+    headerButton: {
+      minWidth: 44,
+      minHeight: 44,
+      alignItems: "center",
+      justifyContent: "center",
+    },
+    blockedBar: {
+      paddingHorizontal: spacing.md,
+      paddingTop: spacing.ms,
+      borderTopWidth: StyleSheet.hairlineWidth,
+      borderTopColor: colors.border,
+      backgroundColor: colors.surface,
+    },
+    blockedText: {
+      color: colors.textSecondary,
+      fontSize: fontSize.sm,
+      textAlign: "center",
     },
   }),
 );
