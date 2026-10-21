@@ -1,0 +1,54 @@
+import { useEffect, useState } from "react";
+
+/** Tiny hash router: #/queue, #/reports/<id>, #/users, #/users/<id>, #/audit, #/ (overview). */
+export type Route =
+  | { page: "overview" }
+  | { page: "queue" }
+  | { page: "report"; id: string }
+  | { page: "users" }
+  | { page: "user"; id: string }
+  | { page: "audit" };
+
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+export function parseRoute(hash: string): Route {
+  const parts = hash.replace(/^#\/?/, "").split("/").filter((p) => p !== "");
+  const [first, second] = parts;
+  if (first === "queue") return { page: "queue" };
+  if (first === "reports" && second !== undefined && UUID.test(second)) return { page: "report", id: second };
+  if (first === "users" && second !== undefined && UUID.test(second)) return { page: "user", id: second };
+  if (first === "users") return { page: "users" };
+  if (first === "audit") return { page: "audit" };
+  return { page: "overview" };
+}
+
+export function href(route: Route): string {
+  switch (route.page) {
+    case "overview":
+      return "#/";
+    case "queue":
+      return "#/queue";
+    case "report":
+      return `#/reports/${route.id}`;
+    case "users":
+      return "#/users";
+    case "user":
+      return `#/users/${route.id}`;
+    case "audit":
+      return "#/audit";
+  }
+}
+
+export function navigate(route: Route): void {
+  window.location.hash = href(route);
+}
+
+export function useRoute(): Route {
+  const [route, setRoute] = useState<Route>(() => parseRoute(window.location.hash));
+  useEffect(() => {
+    const onChange = () => setRoute(parseRoute(window.location.hash));
+    window.addEventListener("hashchange", onChange);
+    return () => window.removeEventListener("hashchange", onChange);
+  }, []);
+  return route;
+}
