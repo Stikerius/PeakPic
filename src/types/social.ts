@@ -3,6 +3,8 @@ import type { DayKey } from "@/lib/streak";
 export type PublicProfile = {
   id: string;
   username: string;
+  /** Free display name (not unique); shown big, with @username next to or below it. */
+  displayName: string;
   /** Signed avatar URL, null if the user has none. */
   avatarUrl: string | null;
 };

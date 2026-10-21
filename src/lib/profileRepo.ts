@@ -1,3 +1,5 @@
+import { normalizeUsername } from "@/lib/auth";
+import { displayNameError, usernameFormatError, usernameLockedMessage } from "@/lib/names";
 import { getSignedPhotoUrl, removePhotos, uploadPhoto } from "@/lib/photoUpload";
 import { requireUserId } from "@/lib/session";
 import { supabase } from "@/lib/supabase";
@@ -6,6 +8,9 @@ import type { TagPermission, Visibility } from "@/types/database";
 export type Profile = {
   id: string;
   username: string;
+  displayName: string;
+  /** Last username change (the database allows the next one 14 days later). */
+  usernameChangedAt: string | null;
   avatarPath: string | null;
   /** Signed URL for the avatar, null if there is none. */
   avatarUrl: string | null;
@@ -51,19 +56,81 @@ export async function getMyProfile(): Promise<Profile> {
   const userId = await requireUserId();
   const { data, error } = await supabase
     .from("profiles")
-    .select("id, username, avatar_path, is_private, story_visibility, post_visibility")
+    .select("id, username, display_name, username_changed_at, avatar_path, is_private, story_visibility, post_visibility")
     .eq("id", userId)
     .single();
   if (error) throw error;
   return {
     id: data.id,
     username: data.username,
+    displayName: data.display_name,
+    usernameChangedAt: data.username_changed_at,
     avatarPath: data.avatar_path,
     avatarUrl: data.avatar_path !== null ? await getSignedPhotoUrl(data.avatar_path) : null,
     isPrivate: data.is_private,
     storyVisibility: data.story_visibility,
     postVisibility: data.post_visibility,
   };
+}
+
+/** A rename the database refused, with a message for the user. */
+export class NameChangeError extends Error {
+  constructor(
+    message: string,
+    readonly field: "username" | "displayName",
+  ) {
+    super(message);
+    this.name = "NameChangeError";
+  }
+}
+
+type PostgrestErrorLike = { code?: string; message?: string; hint?: string | null };
+
+function toNameChangeError(error: PostgrestErrorLike): Error {
+  if (error.message === "username_change_too_soon" && typeof error.hint === "string") {
+    return new NameChangeError(usernameLockedMessage(new Date(error.hint), new Date()), "username");
+  }
+  if (error.code === "23505") return new NameChangeError("Username vergeben.", "username");
+  if (error.code === "23514") {
+    return error.message?.includes("display_name") === true
+      ? new NameChangeError("Der Anzeigename muss 1 bis 30 Zeichen lang sein.", "displayName")
+      : new NameChangeError("Dieser Username ist ungültig.", "username");
+  }
+  return new Error(error.message ?? "Speichern fehlgeschlagen.");
+}
+
+/**
+ * Changes username and/or display name. The database enforces uniqueness (also for former
+ * names of other people) and the 14-day limit for usernames; this only maps its errors.
+ */
+export async function updateMyNames(change: { username?: string; displayName?: string }): Promise<Profile> {
+  const userId = await requireUserId();
+  const username = change.username !== undefined ? normalizeUsername(change.username) : undefined;
+  const displayName = change.displayName?.trim();
+  if (username !== undefined) {
+    const formatError = usernameFormatError(username);
+    if (formatError !== null) throw new NameChangeError(formatError, "username");
+  }
+  if (displayName !== undefined) {
+    const nameError = displayNameError(displayName);
+    if (nameError !== null) throw new NameChangeError(nameError, "displayName");
+  }
+  const { error } = await supabase
+    .from("profiles")
+    .update({
+      ...(username !== undefined ? { username } : {}),
+      ...(displayName !== undefined ? { display_name: displayName } : {}),
+    })
+    .eq("id", userId);
+  if (error) throw toNameChangeError(error);
+  return getMyProfile();
+}
+
+/** Whether a username is free (case-insensitive; your own names count as free). */
+export async function isUsernameAvailable(username: string): Promise<boolean> {
+  const { data, error } = await supabase.rpc("username_available", { name: normalizeUsername(username) });
+  if (error) throw error;
+  return data;
 }
 
 /**

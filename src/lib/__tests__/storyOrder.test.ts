@@ -5,7 +5,7 @@ import type { StoryGroup } from "@/types/social";
 
 function group(id: string, stories: { at: string; seen: boolean }[], isMine = false): StoryGroup {
   return {
-    author: { id, username: id, avatarUrl: null },
+    author: { id, username: id, displayName: id, avatarUrl: null },
     isMine,
     hasUnseen: stories.some((s) => !s.seen),
     stories: stories.map((s, index) => ({

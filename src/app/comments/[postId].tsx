@@ -24,7 +24,7 @@ import { TaggedTextInput } from "@/components/tagged-text-input";
 import { Avatar } from "@/components/ui/avatar";
 import { useOpenProfile } from "@/hooks/use-open-profile";
 import { useSwipeToDismiss } from "@/hooks/use-swipe-to-dismiss";
-import { fontSize, radius, spacing } from "@/constants/theme";
+import { fontSize, radius, spacing, typography } from "@/constants/theme";
 import { COMMENT_MAX_LENGTH, addComment, listComments, setCommentLiked } from "@/lib/commentRepo";
 import { emitAppEvent } from "@/lib/events";
 import { formatRelativeTime } from "@/lib/format";
@@ -71,7 +71,7 @@ function CommentRow({ comment, isReply, highlighted, onOpenProfile, onToggleLike
       <View style={styles.commentBody}>
         <Text style={styles.commentText}>
           <Text style={styles.username} onPress={() => onOpenProfile(comment.author.id)}>
-            @{comment.author.username}{" "}
+            {comment.author.displayName} <Text style={styles.handle}>@{comment.author.username}</Text>{" "}
           </Text>
           <TaggedText text={comment.body} />
         </Text>
@@ -488,6 +488,11 @@ const useStyles = makeStyles(({ colors }) =>
     },
     username: {
       fontWeight: "700",
+    },
+    handle: {
+      ...typography.caption,
+      fontWeight: "400",
+      color: colors.textSecondary,
     },
     metaRow: {
       flexDirection: "row",

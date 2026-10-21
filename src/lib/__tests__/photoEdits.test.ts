@@ -9,7 +9,7 @@ const createId = () => `id-${counter++}`;
 
 const items: MediaOverlay[] = [
   { id: "a", kind: "text", text: "Leg Day", color: "#FFFFFF", background: true, x: 195, y: 100 },
-  { id: "b", kind: "mention", user: { id: "u1", username: "lena", avatarUrl: "https://x" }, x: 39, y: 487.5 },
+  { id: "b", kind: "mention", user: { id: "u1", username: "lena", displayName: "Lena", avatarUrl: "https://x" }, x: 39, y: 487.5 },
 ];
 
 describe("photo edits", () => {

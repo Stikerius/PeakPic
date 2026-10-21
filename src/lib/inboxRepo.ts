@@ -91,7 +91,7 @@ export async function fetchInbox(): Promise<InboxItem[]> {
     return {
       id: row.id,
       type: row.type,
-      actor: actors.get(row.actor.id) ?? { id: row.actor.id, username: row.actor.username, avatarUrl: null },
+      actor: actors.get(row.actor.id) ?? { id: row.actor.id, username: row.actor.username, displayName: row.actor.display_name, avatarUrl: null },
       createdAt: row.created_at,
       read: row.read_at !== null,
       postId: row.post_id,

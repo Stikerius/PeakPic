@@ -4,7 +4,7 @@ import { Pressable, StyleSheet, Text, View } from "react-native";
 import { PhotoCarousel } from "@/components/feed/photo-carousel";
 import { TaggedText } from "@/components/tagged-text";
 import { Avatar } from "@/components/ui/avatar";
-import { fontSize, spacing } from "@/constants/theme";
+import { fontSize, spacing, typography } from "@/constants/theme";
 import { formatRelativeTime } from "@/lib/format";
 import { makeStyles, useTheme } from "@/lib/theme";
 import type { FeedPost } from "@/types/social";
@@ -35,7 +35,7 @@ export function PostCard({ post, onToggleLike, onOpenComments, onShare, onOpenPr
           >
             <Ionicons name="repeat" size={16} color={colors.textSecondary} />
             <Text style={styles.repostText}>
-              <Text style={styles.repostName}>@{repost.reposter.username}</Text> hat repostet
+              <Text style={styles.repostName}>{repost.reposter.displayName}</Text> hat repostet
             </Text>
           </Pressable>
           {repost.caption !== null && <TaggedText text={repost.caption} style={styles.repostCaption} />}
@@ -50,7 +50,9 @@ export function PostCard({ post, onToggleLike, onOpenComments, onShare, onOpenPr
         >
           <Avatar uri={post.author.avatarUrl} username={post.author.username} size={36} />
           <View style={styles.headerText}>
-            <Text style={styles.username}>@{post.author.username}</Text>
+            <Text style={styles.username} numberOfLines={1}>
+              {post.author.displayName} <Text style={styles.handle}>@{post.author.username}</Text>
+            </Text>
             <Text style={styles.meta}>
               {repost !== null ? "Original · " : ""}
               {formatRelativeTime(post.createdAt)}
@@ -138,7 +140,7 @@ export function PostCard({ post, onToggleLike, onOpenComments, onShare, onOpenPr
 
       {post.caption !== null && (
         <Text style={styles.caption}>
-          <Text style={styles.username}>@{post.author.username} </Text>
+          <Text style={styles.username}>{post.author.displayName} </Text>
           <TaggedText text={post.caption} />
         </Text>
       )}
@@ -197,6 +199,11 @@ const useStyles = makeStyles(({ colors }) =>
       color: colors.text,
       fontSize: fontSize.md,
       fontWeight: "700",
+    },
+    handle: {
+      ...typography.caption,
+      fontWeight: "400",
+      color: colors.textSecondary,
     },
     meta: {
       color: colors.textSecondary,

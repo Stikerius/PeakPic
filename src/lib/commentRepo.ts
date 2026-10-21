@@ -6,7 +6,7 @@ import type { PostComment, PublicProfile } from "@/types/social";
 export const COMMENT_MAX_LENGTH = 500;
 
 const COMMENT_SELECT =
-  "id, post_id, parent_comment_id, body, created_at, author:profiles!comments_user_id_fkey(id, username, avatar_path)";
+  "id, post_id, parent_comment_id, body, created_at, author:profiles!comments_user_id_fkey(id, username, display_name, avatar_path)";
 
 type CommentRow = {
   id: string;
@@ -14,7 +14,7 @@ type CommentRow = {
   parent_comment_id: string | null;
   body: string;
   created_at: string;
-  author: { id: string; username: string; avatar_path: string | null };
+  author: { id: string; username: string; display_name: string; avatar_path: string | null };
 };
 
 function toComment(
@@ -26,7 +26,7 @@ function toComment(
     id: row.id,
     postId: row.post_id,
     parentId: row.parent_comment_id,
-    author: authors.get(row.author.id) ?? { id: row.author.id, username: row.author.username, avatarUrl: null },
+    author: authors.get(row.author.id) ?? { id: row.author.id, username: row.author.username, displayName: row.author.display_name, avatarUrl: null },
     body: row.body,
     createdAt: row.created_at,
     likeCount: likes.count,

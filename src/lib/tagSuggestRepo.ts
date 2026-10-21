@@ -29,11 +29,15 @@ const usernameCache = new Map<string, PublicProfile | null>();
 export async function resolveUsernames(usernames: string[]): Promise<Map<string, PublicProfile | null>> {
   const missing = [...new Set(usernames)].filter((name) => !usernameCache.has(name));
   if (missing.length > 0) {
-    const { data, error } = await supabase.from("profiles").select(PROFILE_COLUMNS).in("username", missing);
+    // Also resolves former usernames, so mentions written before a rename still link correctly.
+    const { data: resolved, error: resolveError } = await supabase.rpc("resolve_usernames", { names: missing });
+    if (resolveError) throw resolveError;
+    const ids = [...new Set(resolved.map((r) => r.user_id))];
+    const { data, error } = ids.length > 0 ? await supabase.from("profiles").select(PROFILE_COLUMNS).in("id", ids) : { data: [], error: null };
     if (error) throw error;
     const profiles = await toPublicProfiles(data);
     for (const name of missing) usernameCache.set(name, null);
-    for (const profile of profiles.values()) usernameCache.set(profile.username, profile);
+    for (const row of resolved) usernameCache.set(row.username, profiles.get(row.user_id) ?? null);
   }
   return new Map(usernames.map((name) => [name, usernameCache.get(name) ?? null]));
 }

@@ -15,7 +15,8 @@ import { HighlightsRow } from "@/components/profile/highlights-row";
 import { PostGrid } from "@/components/profile/post-grid";
 import { FlameIcon } from "@/components/streak/flame-icon";
 import { Avatar } from "@/components/ui/avatar";
-import { fontSize, radius, spacing } from "@/constants/theme";
+import { Button } from "@/components/ui/button";
+import { fontSize, radius, spacing, typography } from "@/constants/theme";
 import { useFollowRequestCount } from "@/hooks/use-follow-requests";
 import { useWorkoutDays } from "@/hooks/use-workout-days";
 import { describeError } from "@/lib/errors";
@@ -145,7 +146,10 @@ export default function ProfileScreen() {
               )}
             </View>
           </Pressable>
-          <Text style={styles.username}>@{profile.username}</Text>
+          <View style={styles.names}>
+            <Text style={styles.displayName}>{profile.displayName}</Text>
+            <Text style={styles.username}>@{profile.username}</Text>
+          </View>
           {email !== undefined && <Text style={styles.email}>{email}</Text>}
           <View style={styles.followRow}>
             <Pressable onPress={() => openList("followers")} accessibilityRole="button" hitSlop={spacing.xs}>
@@ -171,6 +175,13 @@ export default function ProfileScreen() {
               </Text>
             </Pressable>
           )}
+          <Button
+            label="Profil bearbeiten"
+            variant="secondary"
+            size="sm"
+            onPress={() => router.push("/profile-edit")}
+            style={styles.editButton}
+          />
         </View>
       </View>
 
@@ -268,11 +279,21 @@ const useStyles = makeStyles(({ colors }) =>
       borderWidth: 3,
       borderColor: colors.background,
     },
-    username: {
+    names: {
       marginTop: spacing.sm,
+      alignItems: "center",
+    },
+    displayName: {
+      ...typography.title,
       color: colors.text,
-      fontSize: fontSize.xl,
-      fontWeight: "700",
+      textAlign: "center",
+    },
+    username: {
+      ...typography.body,
+      color: colors.textSecondary,
+    },
+    editButton: {
+      marginTop: spacing.ms,
     },
     followRow: {
       flexDirection: "row",

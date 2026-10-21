@@ -15,7 +15,7 @@ export type FeedPage = {
 };
 
 const POST_SELECT =
-  "id, photo_path, caption, workout_date, created_at, is_day_post, show_in_profile, author:profiles!posts_user_id_fkey(id, username, avatar_path)";
+  "id, photo_path, caption, workout_date, created_at, is_day_post, show_in_profile, author:profiles!posts_user_id_fkey(id, username, display_name, avatar_path)";
 
 type PostRow = {
   id: string;
@@ -25,7 +25,7 @@ type PostRow = {
   created_at: string;
   is_day_post: boolean;
   show_in_profile: boolean;
-  author: { id: string; username: string; avatar_path: string | null };
+  author: { id: string; username: string; display_name: string; avatar_path: string | null };
 };
 
 /** Adds author avatar, signed photo URLs, tags, like and comment counts to post rows. */
@@ -57,7 +57,7 @@ async function hydratePosts(rows: PostRow[], userId: string): Promise<FeedPost[]
     feedKey: r.id,
     repost: null,
     id: r.id,
-    author: authors.get(r.author.id) ?? { id: r.author.id, username: r.author.username, avatarUrl: null },
+    author: authors.get(r.author.id) ?? { id: r.author.id, username: r.author.username, displayName: r.author.display_name, avatarUrl: null },
     photoUrl: photoUrls.get(r.id)?.[0]?.url ?? null,
     photoUrls: (photoUrls.get(r.id) ?? []).map((p) => p.url),
     photoMentions: (photoUrls.get(r.id) ?? []).map((p) => p.mentions),

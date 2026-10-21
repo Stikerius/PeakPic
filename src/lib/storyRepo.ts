@@ -12,7 +12,7 @@ import type { PublicProfile, Story, StoryGroup } from "@/types/social";
  * grouped by author, in story bar order (see sortStoryGroups).
  */
 export const STORY_SELECT =
-  "id, user_id, photo_path, created_at, expires_at, mentioned_user_ids, mention_positions, canvas_aspect, author:profiles!stories_user_id_fkey(id, username, avatar_path)";
+  "id, user_id, photo_path, created_at, expires_at, mentioned_user_ids, mention_positions, canvas_aspect, author:profiles!stories_user_id_fkey(id, username, display_name, avatar_path)";
 
 export type StoryRow = {
   id: string;
@@ -23,7 +23,7 @@ export type StoryRow = {
   mentioned_user_ids: string[];
   mention_positions: Json;
   canvas_aspect: number | null;
-  author: { id: string; username: string; avatar_path: string | null };
+  author: { id: string; username: string; display_name: string; avatar_path: string | null };
 };
 
 /** Validates stored mention positions (jsonb); anything unexpected is dropped. */
@@ -115,6 +115,7 @@ export async function groupStoryRows(rows: StoryRow[], userId: string): Promise<
         author: authors.get(row.user_id) ?? {
           id: row.author.id,
           username: row.author.username,
+          displayName: row.author.display_name,
           avatarUrl: null,
         },
         stories: [story],

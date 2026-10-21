@@ -15,7 +15,7 @@ import {
 } from "react-native";
 
 import { Avatar } from "@/components/ui/avatar";
-import { fontSize, onPhoto, radius, spacing } from "@/constants/theme";
+import { fontSize, onPhoto, radius, spacing, typography } from "@/constants/theme";
 import { suggestHashtags, suggestPeople, type HashtagSuggestion } from "@/lib/tagSuggestRepo";
 import { activeToken, applySuggestion, normalizeHashtag, type ActiveToken } from "@/lib/taggedText";
 import { makeStyles, useTheme } from "@/lib/theme";
@@ -112,7 +112,10 @@ export const TaggedTextInput = forwardRef<TextInput, TaggedTextInputProps>(funct
               style={({ pressed }) => [styles.row, pressed && styles.pressed]}
             >
               <Avatar uri={person.avatarUrl} username={person.username} size={28} />
-              <Text style={[styles.rowText, dark && styles.rowTextDark]}>@{person.username}</Text>
+              <Text style={[styles.rowText, dark && styles.rowTextDark]} numberOfLines={1}>
+                {person.displayName}{" "}
+                <Text style={[styles.handle, dark && styles.handleDark]}>@{person.username}</Text>
+              </Text>
             </Pressable>
           ))
         : [
@@ -223,6 +226,14 @@ const useStyles = makeStyles(({ colors }) =>
       color: colors.text,
       fontSize: fontSize.md,
       fontWeight: "600",
+    },
+    handle: {
+      ...typography.caption,
+      fontWeight: "400",
+      color: colors.textSecondary,
+    },
+    handleDark: {
+      color: onPhoto.textSecondary,
     },
     rowTextDark: {
       color: onPhoto.text,

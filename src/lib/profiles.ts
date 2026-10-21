@@ -1,10 +1,10 @@
 import { getSignedPhotoUrls } from "@/lib/photoUpload";
 import type { PublicProfile } from "@/types/social";
 
-export type ProfileRow = { id: string; username: string; avatar_path: string | null };
+export type ProfileRow = { id: string; username: string; display_name: string; avatar_path: string | null };
 
 /** Columns to select for embedding a profile, e.g. `author:profiles!fk(${PROFILE_COLUMNS})`. */
-export const PROFILE_COLUMNS = "id, username, avatar_path";
+export const PROFILE_COLUMNS = "id, username, display_name, avatar_path";
 
 /** Turns profile rows into PublicProfiles with signed avatar URLs (one batch request). */
 export async function toPublicProfiles(rows: ProfileRow[]): Promise<Map<string, PublicProfile>> {
@@ -16,6 +16,7 @@ export async function toPublicProfiles(rows: ProfileRow[]): Promise<Map<string, 
       {
         id: r.id,
         username: r.username,
+        displayName: r.display_name,
         avatarUrl: r.avatar_path !== null ? (urls.get(r.avatar_path) ?? null) : null,
       },
     ]),

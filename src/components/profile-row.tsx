@@ -2,7 +2,7 @@ import type { ReactNode } from "react";
 import { Pressable, StyleSheet, Text, View } from "react-native";
 
 import { Avatar } from "@/components/ui/avatar";
-import { fontSize, spacing } from "@/constants/theme";
+import { spacing, typography } from "@/constants/theme";
 import { makeStyles } from "@/lib/theme";
 import type { PublicProfile } from "@/types/social";
 
@@ -19,9 +19,14 @@ export function ProfileRow({ profile, accessory, onPress }: ProfileRowProps) {
   const identity = (
     <>
       <Avatar uri={profile.avatarUrl} username={profile.username} size={44} />
-      <Text style={styles.username} numberOfLines={1}>
-        @{profile.username}
-      </Text>
+      <View style={styles.names}>
+        <Text style={styles.displayName} numberOfLines={1}>
+          {profile.displayName}
+        </Text>
+        <Text style={styles.handle} numberOfLines={1}>
+          @{profile.username}
+        </Text>
+      </View>
     </>
   );
   return (
@@ -58,11 +63,17 @@ const useStyles = makeStyles(({ colors }) =>
       alignItems: "center",
       gap: spacing.md,
     },
-    username: {
+    names: {
       flex: 1,
-      color: colors.text,
-      fontSize: fontSize.md,
+    },
+    displayName: {
+      ...typography.body,
       fontWeight: "600",
+      color: colors.text,
+    },
+    handle: {
+      ...typography.caption,
+      color: colors.textSecondary,
     },
   }),
 );

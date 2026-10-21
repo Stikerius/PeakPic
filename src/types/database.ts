@@ -28,6 +28,8 @@ export type Database = {
         Row: {
           id: Uuid;
           username: string;
+          display_name: string;
+          username_changed_at: Timestamp | null;
           avatar_path: string | null;
           created_at: Timestamp;
           notifications_seen_at: Timestamp;
@@ -38,9 +40,10 @@ export type Database = {
           tag_notifications: boolean;
           tag_chat_messages: boolean;
         };
-        Insert: { id: Uuid; username: string; avatar_path?: string | null; created_at?: Timestamp };
+        Insert: { id: Uuid; username: string; display_name?: string; avatar_path?: string | null; created_at?: Timestamp };
         Update: {
           username?: string;
+          display_name?: string;
           avatar_path?: string | null;
           notifications_seen_at?: Timestamp;
           is_private?: boolean;
@@ -397,6 +400,7 @@ export type Database = {
     Views: Record<string, never>;
     Functions: {
       username_available: { Args: { name: string }; Returns: boolean };
+      resolve_usernames: { Args: { names: string[] }; Returns: { username: string; user_id: Uuid }[] };
       get_or_create_direct_conversation: { Args: { other_user: Uuid }; Returns: Uuid };
       set_message_pinned: { Args: { message: Uuid; pinned: boolean }; Returns: undefined };
       follow_counts: { Args: { target: Uuid }; Returns: { followers: number; following: number }[] };

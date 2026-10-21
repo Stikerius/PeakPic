@@ -158,22 +158,25 @@ function escapeLike(input: string): string {
   return input.replace(/[\\%_]/g, (char) => `\\${char}`);
 }
 
-/** Other users whose username contains `query` (case-insensitive). */
+/** Other users whose username or display name contains `query` (case-insensitive). */
 export async function searchProfiles(query: string): Promise<PublicProfile[]> {
-  const term = query.trim().toLowerCase();
-  if (term.length === 0) return [];
+  const raw = query.trim().replace(/^@/, "");
+  if (raw.length === 0) return [];
+  const pattern = `%${escapeLike(raw)}%`;
   const userId = await requireUserId();
-  const { data, error } = await supabase
-    .from("profiles")
-    .select(PROFILE_COLUMNS)
-    .ilike("username", `%${escapeLike(term)}%`)
-    .neq("id", userId)
-    .order("username")
-    .limit(SEARCH_LIMIT);
-  if (error) throw error;
-  const profiles = await toPublicProfiles(data);
-  return data.flatMap((row) => {
-    const profile = profiles.get(row.id);
-    return profile !== undefined ? [profile] : [];
-  });
+  // Two simple queries instead of one or() filter, so any input is matched literally.
+  const [byUsername, byDisplayName] = await Promise.all([
+    supabase.from("profiles").select(PROFILE_COLUMNS).ilike("username", pattern).neq("id", userId).limit(SEARCH_LIMIT),
+    supabase.from("profiles").select(PROFILE_COLUMNS).ilike("display_name", pattern).neq("id", userId).limit(SEARCH_LIMIT),
+  ]);
+  if (byUsername.error) throw byUsername.error;
+  if (byDisplayName.error) throw byDisplayName.error;
+  const rows = new Map([...byUsername.data, ...byDisplayName.data].map((row) => [row.id, row]));
+  const profiles = await toPublicProfiles([...rows.values()]);
+  const term = raw.toLowerCase();
+  // Usernames starting with the query first, then alphabetically by display name.
+  const rank = (p: PublicProfile) => (p.username.startsWith(term) ? 0 : p.displayName.toLowerCase().startsWith(term) ? 1 : 2);
+  return [...profiles.values()]
+    .sort((a, b) => rank(a) - rank(b) || a.displayName.localeCompare(b.displayName, "de"))
+    .slice(0, SEARCH_LIMIT);
 }

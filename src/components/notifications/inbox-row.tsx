@@ -126,7 +126,7 @@ export function InboxRow({ item, onChanged }: InboxRowProps) {
       <Avatar uri={item.actor.avatarUrl} username={item.actor.username} size={44} />
       <View style={styles.body}>
         <Text style={styles.sentence}>
-          <Text style={styles.name}>{item.actor.username}</Text> {sentence(item)}
+          <Text style={styles.name}>{item.actor.displayName}</Text> {sentence(item)}
         </Text>
         <Text style={styles.time}>{formatRelativeTime(item.createdAt)}</Text>
         {actions}

@@ -6,7 +6,11 @@
 -- without dropping data.
 --
 -- Visibility model
---   * profiles      readable by every signed-in user (name, avatar, privacy settings)
+--   * profiles      readable by every signed-in user (name, avatar, privacy settings).
+--                   username is unique (also case-insensitively) and can change at most
+--                   once per 14 days (trigger); display_name is free text, not unique.
+--                   Former usernames stay reserved for their owner (username_history),
+--                   so old @mentions in texts keep pointing to the same user id.
 --   * follows       a follow is 'pending' (request to a private profile) or 'accepted';
 --                   only accepted follows count anywhere (is_following). The status is set
 --                   by a trigger, only the followed person can accept. Follower lists are
@@ -85,6 +89,33 @@ begin
   end if;
 end;
 $$;
+-- Names. display_name is shown big on the profile and next to @username in lists; it does not
+-- have to be unique. Existing profiles start with their username. username_changed_at is set
+-- by the profiles_guard trigger only (clients cannot fake it).
+alter table public.profiles add column if not exists display_name text;
+update public.profiles set display_name = username where display_name is null;
+alter table public.profiles alter column display_name set not null;
+alter table public.profiles add column if not exists username_changed_at timestamptz;
+do $$
+begin
+  if not exists (select 1 from pg_constraint where conname = 'profiles_display_name_check') then
+    alter table public.profiles
+      add constraint profiles_display_name_check
+      check (char_length(display_name) between 1 and 30 and display_name = btrim(display_name));
+  end if;
+end;
+$$;
+-- "Ivan" and "ivan" are the same name (usernames are stored lowercase anyway).
+create unique index if not exists profiles_username_lower_idx on public.profiles (lower(username));
+
+-- Usernames someone used before. They stay reserved for that user, and old @mentions in
+-- captions and comments resolve through this table. No client access (only via functions).
+create table if not exists public.username_history (
+  username    text primary key,
+  user_id     uuid not null references public.profiles (id) on delete cascade,
+  released_at timestamptz not null default now()
+);
+create index if not exists username_history_user_idx on public.username_history (user_id);
 
 create table if not exists public.posts (
   id           uuid primary key default gen_random_uuid(),
@@ -1065,7 +1096,7 @@ begin
   for mentioned in
     select distinct pr.id
     from regexp_matches(new.body, '@([a-z0-9_.]{3,20})', 'gi') as m(parts)
-    join public.profiles pr on pr.username = lower(m.parts[1])
+    join public.profiles pr on pr.id = public.user_id_for_username(m.parts[1])
     limit 10
   loop
     if public.tag_allowed(new.user_id, mentioned, coalesce(post_public, false))
@@ -1155,7 +1186,7 @@ begin
   for mentioned in
     select distinct pr.id
     from regexp_matches(coalesce(new.caption, ''), '@([a-z0-9_.]{3,20})', 'gi') as m(parts)
-    join public.profiles pr on pr.username = lower(rtrim(m.parts[1], '.'))
+    join public.profiles pr on pr.id = public.user_id_for_username(rtrim(m.parts[1], '.'))
     limit 10
   loop
     if public.tag_allowed(new.user_id, mentioned, post_public) and public.user_can_see_post(mentioned, new.id) then
@@ -1300,12 +1331,89 @@ begin
 end;
 $$;
 
--- Lets the sign-up screen check a username before an account exists.
+-- Lets the sign-up screen check a username before an account exists, and the profile editor
+-- before a rename. Case-insensitive; your own current or former names count as available.
 create or replace function public.username_available(name text)
 returns boolean
 language sql stable security definer set search_path = ''
 as $$
-  select not exists (select 1 from public.profiles where username = lower(name));
+  select not exists (
+      select 1 from public.profiles p
+      where lower(p.username) = lower(btrim(name)) and p.id is distinct from auth.uid()
+    )
+    and not exists (
+      select 1 from public.username_history h
+      where h.username = lower(btrim(name)) and h.user_id is distinct from auth.uid()
+    );
+$$;
+
+-- Current owner of a username, falling back to whoever used it before (username_history).
+-- Internal: used by the mention triggers and resolve_usernames.
+create or replace function public.user_id_for_username(name text)
+returns uuid
+language sql stable security definer set search_path = ''
+as $$
+  select coalesce(
+    (select p.id from public.profiles p where p.username = lower(name)),
+    (select h.user_id from public.username_history h where h.username = lower(name))
+  );
+$$;
+
+-- User ids for @usernames in texts, including former names, so mentions survive renames.
+create or replace function public.resolve_usernames(names text[])
+returns table (username text, user_id uuid)
+language sql stable security definer set search_path = ''
+as $$
+  select r.name, r.id
+  from (
+    select n.name, public.user_id_for_username(n.name) as id
+    from unnest(names[1:100]) as n(name)
+  ) r
+  where r.id is not null;
+$$;
+
+-- Normalizes names and enforces the rename rules on every insert / update of a profile:
+-- a username may change at most once per 14 days, never to a name someone else used before,
+-- and username_changed_at can only be set here.
+create or replace function public.on_profile_write()
+returns trigger
+language plpgsql security definer set search_path = ''
+as $$
+declare
+  next_change timestamptz;
+begin
+  new.username := lower(btrim(new.username));
+  new.display_name := coalesce(nullif(btrim(new.display_name), ''), new.username);
+  if exists (
+    select 1 from public.username_history h where h.username = new.username and h.user_id <> new.id
+  ) then
+    raise exception 'username_taken' using errcode = '23505';
+  end if;
+
+  if tg_op = 'INSERT' then
+    new.username_changed_at := null;
+    return new;
+  end if;
+
+  if new.username = old.username then
+    new.username_changed_at := old.username_changed_at;
+    return new;
+  end if;
+
+  next_change := old.username_changed_at + interval '14 days';
+  if next_change is not null and next_change > now() then
+    raise exception 'username_change_too_soon'
+      using errcode = 'P0001', hint = to_char(next_change at time zone 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"');
+  end if;
+  insert into public.username_history (username, user_id, released_at)
+  values (old.username, old.id, now())
+  on conflict (username) do update set released_at = excluded.released_at
+    where public.username_history.user_id = excluded.user_id;
+  -- Taking back one of your own former names.
+  delete from public.username_history where username = new.username and user_id = new.id;
+  new.username_changed_at := now();
+  return new;
+end;
 $$;
 
 -- Returns the 1:1 conversation with `other_user`, creating it if needed.
@@ -1338,13 +1446,15 @@ returns trigger
 language plpgsql security definer set search_path = ''
 as $$
 begin
-  insert into public.profiles (id, username)
+  insert into public.profiles (id, username, display_name)
   values (
     new.id,
     coalesce(
       lower(new.raw_user_meta_data ->> 'username'),
       'user_' || substr(replace(new.id::text, '-', ''), 1, 12)
-    )
+    ),
+    -- Empty or missing: on_profile_write falls back to the username.
+    btrim(left(btrim(coalesce(new.raw_user_meta_data ->> 'display_name', '')), 30))
   );
   return new;
 end;
@@ -1450,6 +1560,11 @@ create trigger notifications_guard_update
   before update on public.notifications
   for each row execute function public.on_notification_update();
 
+drop trigger if exists profiles_guard on public.profiles;
+create trigger profiles_guard
+  before insert or update on public.profiles
+  for each row execute function public.on_profile_write();
+
 drop trigger if exists profiles_privacy_changed on public.profiles;
 create trigger profiles_privacy_changed
   after update of is_private on public.profiles
@@ -1458,6 +1573,10 @@ create trigger profiles_privacy_changed
 revoke all on function public.get_or_create_direct_conversation(uuid) from public, anon;
 grant execute on function public.get_or_create_direct_conversation(uuid) to authenticated;
 grant execute on function public.username_available(text) to anon, authenticated;
+revoke all on function public.resolve_usernames(text[]) from public, anon;
+grant execute on function public.resolve_usernames(text[]) to authenticated;
+revoke all on function public.user_id_for_username(text) from public, anon, authenticated;
+revoke all on function public.on_profile_write() from public, anon, authenticated;
 revoke all on function public.set_message_pinned(uuid, boolean) from public, anon;
 grant execute on function public.set_message_pinned(uuid, boolean) to authenticated;
 -- New in the privacy model: nothing of it for anonymous users.
@@ -1508,6 +1627,8 @@ to authenticated;
 -- Hashtags: read only; rows and counters are maintained by triggers.
 revoke all on public.hashtags, public.content_hashtags from anon, authenticated;
 grant select on public.hashtags, public.content_hashtags to authenticated;
+-- Former usernames: no direct access at all (resolve_usernames / username_available only).
+revoke all on public.username_history from anon, authenticated;
 -- Notifications: read and mark as read only; inserts come from security definer functions.
 revoke all on public.notifications from anon, authenticated;
 grant select, update on public.notifications to authenticated;
@@ -1538,6 +1659,7 @@ alter table public.message_reactions    enable row level security;
 alter table public.workout_shares       enable row level security;
 alter table public.post_reposts         enable row level security;
 alter table public.notifications        enable row level security;
+alter table public.username_history     enable row level security;
 alter table public.hashtags             enable row level security;
 alter table public.content_hashtags     enable row level security;
 

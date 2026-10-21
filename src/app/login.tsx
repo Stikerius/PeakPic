@@ -21,6 +21,7 @@ import {
   signIn,
   signUp,
 } from "@/lib/auth";
+import { DISPLAY_NAME_MAX_LENGTH } from "@/lib/names";
 import { makeStyles, useTheme } from "@/lib/theme";
 
 type Mode = "login" | "register";
@@ -44,6 +45,7 @@ export default function LoginScreen() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [username, setUsername] = useState("");
+  const [displayName, setDisplayName] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [info, setInfo] = useState<string | null>(null);
@@ -69,7 +71,7 @@ export default function LoginScreen() {
         setError(await signIn(email, password));
         return;
       }
-      const result = await signUp(email, password, username);
+      const result = await signUp(email, password, username, displayName);
       if (result.status === "error") setError(result.message);
       if (result.status === "confirm-email") {
         setInfo(
@@ -131,6 +133,19 @@ export default function LoginScreen() {
               textContentType="username"
               maxLength={20}
               hint="3–20 Zeichen: a–z, 0–9, _ und Punkt"
+            />
+          )}
+          {mode === "register" && (
+            <TextField
+              label="Anzeigename (optional)"
+              value={displayName}
+              onChangeText={setDisplayName}
+              placeholder={normalizeUsername(username) || "z.B. Lena"}
+              autoCapitalize="words"
+              autoComplete="name"
+              textContentType="name"
+              maxLength={DISPLAY_NAME_MAX_LENGTH}
+              hint="Muss nicht eindeutig sein. Leer lassen = Username."
             />
           )}
           <TextField

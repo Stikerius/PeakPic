@@ -21,7 +21,7 @@ import { ReactionPicker } from "@/components/chat/reaction-picker";
 import { SwipeableMessage } from "@/components/chat/swipeable-message";
 import { TaggedTextInput } from "@/components/tagged-text-input";
 import { Avatar } from "@/components/ui/avatar";
-import { fontSize, radius, spacing } from "@/constants/theme";
+import { fontSize, radius, spacing, typography } from "@/constants/theme";
 import {
   MESSAGE_MAX_LENGTH,
   MESSAGE_PAGE_SIZE,
@@ -313,7 +313,14 @@ export default function ChatScreen() {
                 style={styles.headerTitle}
               >
                 <Avatar uri={partner.avatarUrl} username={partner.username} size={30} />
-                <Text style={styles.headerName}>{partner.username}</Text>
+                <View>
+                  <Text style={styles.headerName} numberOfLines={1}>
+                    {partner.displayName}
+                  </Text>
+                  <Text style={styles.handle} numberOfLines={1}>
+                    @{partner.username}
+                  </Text>
+                </View>
               </Pressable>
             ) : null,
         }}
@@ -487,6 +494,11 @@ const useStyles = makeStyles(({ colors }) =>
       color: colors.text,
       fontSize: fontSize.md,
       fontWeight: "700",
+    },
+    handle: {
+      ...typography.label,
+      fontWeight: "400",
+      color: colors.textSecondary,
     },
     pinnedBanner: {
       flexDirection: "row",

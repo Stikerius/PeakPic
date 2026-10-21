@@ -20,7 +20,7 @@ type RepostRow = {
   original_post_id: string;
   caption: string | null;
   created_at: string;
-  reposter: { id: string; username: string; avatar_path: string | null };
+  reposter: { id: string; username: string; display_name: string; avatar_path: string | null };
 };
 
 async function toReposts(rows: RepostRow[]): Promise<Repost[]> {
@@ -28,7 +28,7 @@ async function toReposts(rows: RepostRow[]): Promise<Repost[]> {
   return rows.map((r) => ({
     id: r.id,
     originalPostId: r.original_post_id,
-    reposter: profiles.get(r.reposter.id) ?? { id: r.reposter.id, username: r.reposter.username, avatarUrl: null },
+    reposter: profiles.get(r.reposter.id) ?? { id: r.reposter.id, username: r.reposter.username, displayName: r.reposter.display_name, avatarUrl: null },
     caption: r.caption,
     createdAt: r.created_at,
   }));

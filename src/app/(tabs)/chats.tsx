@@ -5,7 +5,7 @@ import { ActivityIndicator, FlatList, Pressable, RefreshControl, StyleSheet, Tex
 
 import { Avatar } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
-import { fontSize, radius, spacing } from "@/constants/theme";
+import { fontSize, radius, spacing, typography } from "@/constants/theme";
 import { listConversations, subscribeToMessages } from "@/lib/chatRepo";
 import { formatRelativeTime } from "@/lib/format";
 import { makeStyles, useTheme } from "@/lib/theme";
@@ -75,7 +75,7 @@ export default function ChatListScreen() {
                 <Avatar uri={item.partner.avatarUrl} username={item.partner.username} size={52} />
                 <View style={styles.rowText}>
                   <Text style={[styles.username, unread && styles.bold]} numberOfLines={1}>
-                    {item.partner.username}
+                    {item.partner.displayName} <Text style={styles.handle}>@{item.partner.username}</Text>
                   </Text>
                   <Text style={[styles.preview, unread && styles.previewUnread]} numberOfLines={1}>
                     {item.lastMessage === null
@@ -145,6 +145,11 @@ const useStyles = makeStyles(({ colors }) =>
       color: colors.text,
       fontSize: fontSize.md,
       fontWeight: "600",
+    },
+    handle: {
+      ...typography.caption,
+      fontWeight: "400",
+      color: colors.textSecondary,
     },
     bold: {
       fontWeight: "800",

@@ -2,7 +2,7 @@ import type { AuthError } from "@supabase/supabase-js";
 
 import { supabase } from "@/lib/supabase";
 
-export const USERNAME_PATTERN = /^[a-z0-9_.]{3,20}$/;
+export { USERNAME_PATTERN } from "@/lib/names";
 export const MIN_PASSWORD_LENGTH = 6;
 
 export function normalizeUsername(input: string): string {
@@ -46,8 +46,11 @@ export async function signUp(
   email: string,
   password: string,
   rawUsername: string,
+  rawDisplayName: string,
 ): Promise<SignUpResult> {
   const username = normalizeUsername(rawUsername);
+  // Empty means "use the username" (the database fills it in).
+  const displayName = rawDisplayName.trim();
 
   const { data: available, error: rpcError } = await supabase.rpc("username_available", {
     name: username,
@@ -62,7 +65,7 @@ export async function signUp(
   const { data, error } = await supabase.auth.signUp({
     email: email.trim(),
     password,
-    options: { data: { username } },
+    options: { data: { username, display_name: displayName } },
   });
   if (error) return { status: "error", message: authErrorMessage(error) };
   // Without a session, the project requires email confirmation first.

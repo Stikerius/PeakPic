@@ -11,7 +11,7 @@ import { PostGrid } from "@/components/profile/post-grid";
 import { FlameIcon } from "@/components/streak/flame-icon";
 import { MonthCalendar } from "@/components/streak/month-calendar";
 import { Button } from "@/components/ui/button";
-import { fontSize, radius, spacing } from "@/constants/theme";
+import { fontSize, radius, spacing, typography } from "@/constants/theme";
 import { getOrCreateDirectConversation } from "@/lib/chatRepo";
 import { describeError } from "@/lib/errors";
 import { listHighlights, type Highlight } from "@/lib/highlightRepo";
@@ -165,7 +165,10 @@ export default function UserProfileScreen() {
         ) : (
           <Avatar uri={profile.avatarUrl} username={profile.username} size={AVATAR_SIZE} />
         )}
-        <Text style={styles.username}>@{profile.username}</Text>
+        <View style={styles.names}>
+          <Text style={styles.displayName}>{profile.displayName}</Text>
+          <Text style={styles.handle}>@{profile.username}</Text>
+        </View>
         <View style={styles.badges}>
           {summary.isPrivate && (
             <View style={styles.badge}>
@@ -307,6 +310,19 @@ const useStyles = makeStyles(({ colors }) =>
       color: colors.text,
       fontSize: fontSize.xl,
       fontWeight: "700",
+    },
+    names: {
+      marginTop: spacing.sm,
+      alignItems: "center",
+    },
+    displayName: {
+      ...typography.title,
+      color: colors.text,
+      textAlign: "center",
+    },
+    handle: {
+      ...typography.body,
+      color: colors.textSecondary,
     },
     badges: {
       flexDirection: "row",

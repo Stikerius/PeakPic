@@ -5,7 +5,7 @@ import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, View } from
 
 import { STORY_RING_INSET, StoryRing } from "@/components/stories/story-ring";
 import { Avatar } from "@/components/ui/avatar";
-import { fontSize, radius, spacing } from "@/constants/theme";
+import { fontSize, radius, spacing, typography } from "@/constants/theme";
 import { getMyProfile, type Profile } from "@/lib/profileRepo";
 import { refreshStories, useStories } from "@/lib/storyStore";
 import { makeStyles, useTheme } from "@/lib/theme";
@@ -88,7 +88,10 @@ export function StoryBar() {
             <Avatar uri={group.author.avatarUrl} username={group.author.username} size={AVATAR_SIZE} />
           </StoryRing>
           <Text style={[styles.label, !group.hasUnseen && styles.labelSeen]} numberOfLines={1}>
-            {group.author.username}
+            {group.author.displayName}
+          </Text>
+          <Text style={styles.handle} numberOfLines={1}>
+            @{group.author.username}
           </Text>
         </Pressable>
       ))}
@@ -129,6 +132,13 @@ const useStyles = makeStyles(({ colors }) =>
       width: ITEM_SIZE + spacing.sm,
       color: colors.text,
       fontSize: fontSize.sm - 1,
+      textAlign: "center",
+    },
+    handle: {
+      ...typography.label,
+      fontWeight: "400",
+      width: ITEM_SIZE + spacing.sm,
+      color: colors.textTertiary,
       textAlign: "center",
     },
     labelSeen: {

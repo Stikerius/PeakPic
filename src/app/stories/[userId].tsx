@@ -23,7 +23,7 @@ import { StoryActivitySheet } from "@/components/stories/story-activity-sheet";
 import { Avatar } from "@/components/ui/avatar";
 import { useOpenProfile } from "@/hooks/use-open-profile";
 import { useSwipeToDismiss } from "@/hooks/use-swipe-to-dismiss";
-import { fontSize, onPhoto, radius, spacing } from "@/constants/theme";
+import { fontSize, onPhoto, radius, spacing, typography } from "@/constants/theme";
 import { describeError } from "@/lib/errors";
 import { emitAppEvent } from "@/lib/events";
 import { formatRelativeTime } from "@/lib/format";
@@ -107,7 +107,16 @@ function StoryPreview({ group, topInset }: { group: StoryGroup; topInset: number
         </View>
         <View style={styles.header}>
           <Avatar uri={group.author.avatarUrl} username={group.author.username} size={32} />
-          <Text style={styles.username}>{group.isMine ? "Deine Story" : group.author.username}</Text>
+          <View>
+            <Text style={styles.username} numberOfLines={1}>
+              {group.isMine ? "Deine Story" : group.author.displayName}
+            </Text>
+            {!group.isMine && (
+              <Text style={styles.handle} numberOfLines={1}>
+                @{group.author.username}
+              </Text>
+            )}
+          </View>
         </View>
       </View>
     </View>
@@ -516,7 +525,16 @@ function StoryViewerScreenContent() {
                 style={styles.author}
               >
                 <Avatar uri={group.author.avatarUrl} username={group.author.username} size={32} />
-                <Text style={styles.username}>{group.isMine ? "Deine Story" : group.author.username}</Text>
+                <View>
+            <Text style={styles.username} numberOfLines={1}>
+              {group.isMine ? "Deine Story" : group.author.displayName}
+            </Text>
+            {!group.isMine && (
+              <Text style={styles.handle} numberOfLines={1}>
+                @{group.author.username}
+              </Text>
+            )}
+          </View>
               </Pressable>
               <Text style={styles.time}>{formatRelativeTime(story.createdAt)}</Text>
               <View style={styles.flex} />
@@ -681,6 +699,11 @@ const useStyles = makeStyles(({ colors }) =>
       color: colors.text,
       fontSize: fontSize.md,
       fontWeight: "700",
+    },
+    handle: {
+      ...typography.label,
+      fontWeight: "400",
+      color: onPhoto.textSecondary,
     },
     time: {
       color: onPhoto.textSecondary,

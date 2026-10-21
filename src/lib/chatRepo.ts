@@ -191,7 +191,7 @@ async function hydrateMessages(rows: MessageRow[]): Promise<ChatMessage[]> {
     for (const p of data) {
       posts.set(p.id, {
         id: p.id,
-        author: authors.get(p.author.id) ?? { id: p.author.id, username: p.author.username, avatarUrl: null },
+        author: authors.get(p.author.id) ?? { id: p.author.id, username: p.author.username, displayName: p.author.display_name, avatarUrl: null },
         photoUrl: photoUrls.get(p.photo_path) ?? null,
         caption: p.caption,
       });
@@ -211,7 +211,7 @@ async function hydrateMessages(rows: MessageRow[]): Promise<ChatMessage[]> {
         id: c.id,
         postId: c.post_id,
         body: c.body,
-        author: authors.get(c.author.id) ?? { id: c.author.id, username: c.author.username, avatarUrl: null },
+        author: authors.get(c.author.id) ?? { id: c.author.id, username: c.author.username, displayName: c.author.display_name, avatarUrl: null },
       });
     }
   }

@@ -47,7 +47,7 @@ export function fromPhotoEdits(
       const y = item.y * size.height;
       return item.kind === "text"
         ? { id: createId(), kind: "text", text: item.text, color: item.color, background: item.background, x, y }
-        : { id: createId(), kind: "mention", user: { ...item.user, avatarUrl: null }, x, y };
+        : { id: createId(), kind: "mention", user: { ...item.user, displayName: item.user.username, avatarUrl: null }, x, y };
     }),
   };
 }
