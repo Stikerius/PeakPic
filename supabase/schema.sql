@@ -11,6 +11,8 @@
 --                   once per 14 days (trigger); display_name is free text, not unique.
 --                   Former usernames stay reserved for their owner (username_history),
 --                   so old @mentions in texts keep pointing to the same user id.
+--                   onboarding_done_at: set once by the user (the trigger stamps the server
+--                   time and never clears it); profiles from before the intro count as done.
 --   * follows       a follow is 'pending' (request to a private profile) or 'accepted';
 --                   only accepted follows count anywhere (is_following). The status is set
 --                   by a trigger, only the followed person can accept. Follower lists are
@@ -119,6 +121,11 @@ begin
   end if;
 end;
 $$;
+-- When the intro after sign-up was finished or skipped. Added with now() as the default, so
+-- every profile that exists when the column is created counts as done; afterwards the default
+-- is null, so new sign-ups see the intro. Running the file again changes nothing.
+alter table public.profiles add column if not exists onboarding_done_at timestamptz default now();
+alter table public.profiles alter column onboarding_done_at set default null;
 -- "Ivan" and "ivan" are the same name (usernames are stored lowercase anyway).
 create unique index if not exists profiles_username_lower_idx on public.profiles (lower(username));
 
@@ -1445,7 +1452,8 @@ $$;
 
 -- Normalizes names and enforces the rename rules on every insert / update of a profile:
 -- a username may change at most once per 14 days, never to a name someone else used before,
--- and username_changed_at can only be set here.
+-- and username_changed_at can only be set here. onboarding_done_at can only go from empty to
+-- "now" (server time), never back or to another time.
 create or replace function public.on_profile_write()
 returns trigger
 language plpgsql security definer set search_path = ''
@@ -1463,7 +1471,14 @@ begin
 
   if tg_op = 'INSERT' then
     new.username_changed_at := null;
+    new.onboarding_done_at := null;
     return new;
+  end if;
+
+  if old.onboarding_done_at is not null then
+    new.onboarding_done_at := old.onboarding_done_at;
+  elsif new.onboarding_done_at is not null then
+    new.onboarding_done_at := now();
   end if;
 
   if new.username = old.username then

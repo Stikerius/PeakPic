@@ -293,6 +293,13 @@ export default function SettingsScreen() {
           subtitle={appIconLabel ?? "…"}
           onPress={() => router.push("/app-icon")}
         />
+        <View style={styles.separator} />
+        <SettingsRow
+          icon="information-circle-outline"
+          title="Einführung nochmal ansehen"
+          subtitle="Kurzer Überblick über die App"
+          onPress={() => router.push({ pathname: "/onboarding", params: { replay: "1" } })}
+        />
       </View>
 
       <Text style={[styles.sectionTitle, styles.sectionSpacing]}>Privatsphäre</Text>

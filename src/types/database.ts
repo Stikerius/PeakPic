@@ -30,6 +30,7 @@ export type Database = {
           username: string;
           display_name: string;
           username_changed_at: Timestamp | null;
+          onboarding_done_at: Timestamp | null;
           avatar_path: string | null;
           created_at: Timestamp;
           notifications_seen_at: Timestamp;
@@ -44,6 +45,7 @@ export type Database = {
         Update: {
           username?: string;
           display_name?: string;
+          onboarding_done_at?: Timestamp;
           avatar_path?: string | null;
           notifications_seen_at?: Timestamp;
           is_private?: boolean;

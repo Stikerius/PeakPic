@@ -2,10 +2,11 @@ import { ThemeProvider as NavigationThemeProvider, SplashScreen, Stack } from "e
 import { StatusBar } from "expo-status-bar";
 import * as SystemUI from "expo-system-ui";
 import { useEffect, type ReactNode } from "react";
-import { StyleSheet } from "react-native";
+import { ActivityIndicator, StyleSheet, View } from "react-native";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
 
 import { navigationThemeFor } from "@/constants/theme";
+import { OnboardingProvider, useOnboarding } from "@/lib/onboarding";
 import { SessionProvider, useSession } from "@/lib/session";
 import { ThemeProvider, makeStyles, useTheme } from "@/lib/theme";
 
@@ -17,7 +18,9 @@ export default function RootLayout() {
     <ThemeProvider>
       <ThemedRoot>
         <SessionProvider>
-          <RootNavigator />
+          <OnboardingProvider>
+            <RootNavigator />
+          </OnboardingProvider>
         </SessionProvider>
       </ThemedRoot>
     </ThemeProvider>
@@ -46,15 +49,26 @@ function ThemedRoot({ children }: { children: ReactNode }) {
 
 function RootNavigator() {
   const { colors } = useTheme();
+  const styles = useStyles();
   const { session, loading } = useSession();
+  const { needed: onboardingNeeded } = useOnboarding();
+  const signedIn = session !== null;
+  // Splash stays up until we know whether the intro comes first (never longer than its timeout).
+  const ready = !loading && !(signedIn && onboardingNeeded === null);
 
   useEffect(() => {
-    if (!loading) void SplashScreen.hideAsync();
-  }, [loading]);
+    if (ready) void SplashScreen.hideAsync();
+  }, [ready]);
 
-  if (loading) return null;
+  if (!ready) {
+    // Right after a login the splash is gone already: show that something is happening.
+    return loading ? null : (
+      <View style={[styles.root, styles.centered]}>
+        <ActivityIndicator color={colors.textSecondary} />
+      </View>
+    );
+  }
 
-  const signedIn = session !== null;
   return (
     <Stack
       screenOptions={{
@@ -64,7 +78,8 @@ function RootNavigator() {
         contentStyle: { backgroundColor: colors.background },
       }}
     >
-      <Stack.Protected guard={signedIn}>
+      {/* Login first, then the intro (if not done yet), then the app. */}
+      <Stack.Protected guard={signedIn && onboardingNeeded !== true}>
         <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
         <Stack.Screen name="search" options={{ title: "Leute finden", presentation: "modal" }} />
         <Stack.Screen
@@ -110,6 +125,10 @@ function RootNavigator() {
           options={{ headerShown: false, presentation: "fullScreenModal", animation: "fade" }}
         />
       </Stack.Protected>
+      <Stack.Protected guard={signedIn}>
+        {/* Also reachable later from the settings ("Einführung nochmal ansehen"). */}
+        <Stack.Screen name="onboarding" options={{ headerShown: false, gestureEnabled: false, animation: "fade" }} />
+      </Stack.Protected>
       <Stack.Protected guard={!signedIn}>
         <Stack.Screen name="login" options={{ headerShown: false }} />
       </Stack.Protected>
@@ -122,6 +141,10 @@ const useStyles = makeStyles(({ colors }) =>
     root: {
       flex: 1,
       backgroundColor: colors.background,
+    },
+    centered: {
+      alignItems: "center",
+      justifyContent: "center",
     },
   }),
 );
