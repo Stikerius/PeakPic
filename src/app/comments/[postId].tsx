@@ -24,10 +24,11 @@ import { TaggedText } from "@/components/tagged-text";
 import { TaggedTextInput } from "@/components/tagged-text-input";
 import { useOpenProfile } from "@/hooks/use-open-profile";
 import { useSwipeToDismiss } from "@/hooks/use-swipe-to-dismiss";
-import { colors, fontSize, radius, spacing } from "@/constants/theme";
+import { fontSize, radius, spacing } from "@/constants/theme";
 import { COMMENT_MAX_LENGTH, addComment, listComments, setCommentLiked } from "@/lib/commentRepo";
 import { emitAppEvent } from "@/lib/events";
 import { formatRelativeTime } from "@/lib/format";
+import { makeStyles, useTheme } from "@/lib/theme";
 import type { PostComment } from "@/types/social";
 
 /** Sheet height as a fraction of the screen. */
@@ -48,6 +49,8 @@ type CommentRowProps = {
 };
 
 function CommentRow({ comment, isReply, highlighted, onOpenProfile, onToggleLike, onReply, onLongPress }: CommentRowProps) {
+  const { colors } = useTheme();
+  const styles = useStyles();
   return (
     <Pressable
       onLongPress={() => onLongPress(comment)}
@@ -90,7 +93,7 @@ function CommentRow({ comment, isReply, highlighted, onOpenProfile, onToggleLike
         <Ionicons
           name={comment.likedByMe ? "heart" : "heart-outline"}
           size={16}
-          color={comment.likedByMe ? colors.danger : colors.textMuted}
+          color={comment.likedByMe ? colors.danger : colors.textSecondary}
         />
         {comment.likeCount > 0 && <Text style={styles.likeCount}>{comment.likeCount}</Text>}
       </Pressable>
@@ -99,6 +102,8 @@ function CommentRow({ comment, isReply, highlighted, onOpenProfile, onToggleLike
 }
 
 export default function CommentsScreen() {
+  const { colors } = useTheme();
+  const styles = useStyles();
   // commentId: opened from a shared comment in a chat; scroll to it and highlight it.
   const { postId, commentId } = useLocalSearchParams<{ postId: string; commentId?: string }>();
   const insets = useSafeAreaInsets();
@@ -289,7 +294,7 @@ export default function CommentsScreen() {
                 {error !== null ? (
                   <Text style={styles.error}>{error}</Text>
                 ) : (
-                  <ActivityIndicator color={colors.primary} />
+                  <ActivityIndicator color={colors.accent} />
                 )}
               </View>
             ) : (
@@ -367,7 +372,7 @@ export default function CommentsScreen() {
                   accessibilityLabel="Antworten abbrechen"
                   hitSlop={spacing.sm}
                 >
-                  <Ionicons name="close" size={18} color={colors.textMuted} />
+                  <Ionicons name="close" size={18} color={colors.textSecondary} />
                 </Pressable>
               </View>
             )}
@@ -379,7 +384,7 @@ export default function CommentsScreen() {
                 onChangeText={setDraft}
                 containerStyle={styles.inputBox}
                 placeholder={replyTo !== null ? "Antwort schreiben…" : "Kommentar schreiben…"}
-                placeholderTextColor={colors.textMuted}
+                placeholderTextColor={colors.textSecondary}
                 maxLength={COMMENT_MAX_LENGTH}
                 multiline
                 style={styles.input}
@@ -393,9 +398,9 @@ export default function CommentsScreen() {
                 style={[styles.sendButton, !canSend && styles.sendDisabled]}
               >
                 {sending ? (
-                  <ActivityIndicator size="small" color={colors.text} />
+                  <ActivityIndicator size="small" color={colors.onAccent} />
                 ) : (
-                  <Ionicons name="arrow-up" size={20} color={colors.text} />
+                  <Ionicons name="arrow-up" size={20} color={colors.onAccent} />
                 )}
               </Pressable>
             </View>
@@ -406,184 +411,186 @@ export default function CommentsScreen() {
   );
 }
 
-const styles = StyleSheet.create({
-  screen: {
-    flex: 1,
-  },
-  backdrop: {
-    backgroundColor: "rgba(0, 0, 0, 0.55)",
-  },
-  keyboard: {
-    flex: 1,
-    justifyContent: "flex-end",
-  },
-  sheetFrame: {
-    flexShrink: 1,
-  },
-  sheet: {
-    flex: 1,
-    overflow: "hidden",
-    borderTopLeftRadius: radius.lg,
-    borderTopRightRadius: radius.lg,
-    backgroundColor: colors.background,
-  },
-  handleArea: {
-    alignItems: "center",
-    gap: spacing.sm,
-    paddingTop: spacing.sm,
-    paddingBottom: spacing.md,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: colors.border,
-  },
-  grabber: {
-    width: 40,
-    height: 5,
-    borderRadius: radius.full,
-    backgroundColor: colors.border,
-  },
-  title: {
-    color: colors.text,
-    fontSize: fontSize.md,
-    fontWeight: "700",
-  },
-  centered: {
-    flex: 1,
-    alignItems: "center",
-    justifyContent: "center",
-    padding: spacing.lg,
-  },
-  list: {
-    paddingVertical: spacing.sm,
-  },
-  emptyContainer: {
-    flexGrow: 1,
-  },
-  comment: {
-    flexDirection: "row",
-    gap: spacing.sm,
-    paddingHorizontal: spacing.md,
-    paddingVertical: spacing.sm,
-  },
-  reply: {
-    paddingLeft: spacing.md + 32 + spacing.sm,
-    paddingVertical: spacing.xs,
-  },
-  commentHighlighted: {
-    backgroundColor: colors.surfaceElevated,
-  },
-  commentBody: {
-    flex: 1,
-    gap: 2,
-  },
-  commentText: {
-    color: colors.text,
-    fontSize: fontSize.md,
-    lineHeight: 21,
-  },
-  username: {
-    fontWeight: "700",
-  },
-  metaRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: spacing.md,
-  },
-  meta: {
-    color: colors.textMuted,
-    fontSize: fontSize.sm,
-  },
-  metaAction: {
-    color: colors.textMuted,
-    fontSize: fontSize.sm,
-    fontWeight: "700",
-  },
-  like: {
-    alignItems: "center",
-    paddingTop: 2,
-    minWidth: 24,
-  },
-  likeCount: {
-    color: colors.textMuted,
-    fontSize: 11,
-  },
-  toggleReplies: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: spacing.sm,
-    paddingLeft: spacing.md + 32 + spacing.sm,
-    paddingVertical: spacing.xs,
-  },
-  toggleLine: {
-    width: 24,
-    height: StyleSheet.hairlineWidth,
-    backgroundColor: colors.textMuted,
-  },
-  toggleText: {
-    color: colors.textMuted,
-    fontSize: fontSize.sm,
-    fontWeight: "700",
-  },
-  emptyText: {
-    color: colors.textMuted,
-    fontSize: fontSize.md,
-    textAlign: "center",
-  },
-  error: {
-    color: colors.danger,
-    fontSize: fontSize.md,
-    textAlign: "center",
-  },
-  inlineError: {
-    color: colors.danger,
-    fontSize: fontSize.sm,
-    paddingHorizontal: spacing.md,
-  },
-  replyBanner: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: spacing.sm,
-    paddingHorizontal: spacing.md,
-    paddingVertical: spacing.sm,
-    backgroundColor: colors.surfaceElevated,
-  },
-  replyText: {
-    flex: 1,
-    color: colors.textMuted,
-    fontSize: fontSize.sm,
-  },
-  inputBar: {
-    flexDirection: "row",
-    alignItems: "flex-end",
-    gap: spacing.sm,
-    paddingHorizontal: spacing.md,
-    paddingTop: spacing.sm,
-    borderTopWidth: StyleSheet.hairlineWidth,
-    borderTopColor: colors.border,
-    backgroundColor: colors.surface,
-  },
-  inputBox: {
-    flex: 1,
-  },
-  input: {
-    minHeight: 40,
-    maxHeight: 120,
-    paddingHorizontal: spacing.md,
-    paddingTop: 10,
-    paddingBottom: 10,
-    borderRadius: radius.lg,
-    backgroundColor: colors.surfaceElevated,
-    color: colors.text,
-    fontSize: fontSize.md,
-  },
-  sendButton: {
-    width: 40,
-    height: 40,
-    borderRadius: radius.full,
-    alignItems: "center",
-    justifyContent: "center",
-    backgroundColor: colors.primary,
-  },
-  sendDisabled: {
-    opacity: 0.4,
-  },
-});
+const useStyles = makeStyles(({ colors }) =>
+  StyleSheet.create({
+    screen: {
+      flex: 1,
+    },
+    backdrop: {
+      backgroundColor: colors.backdrop,
+    },
+    keyboard: {
+      flex: 1,
+      justifyContent: "flex-end",
+    },
+    sheetFrame: {
+      flexShrink: 1,
+    },
+    sheet: {
+      flex: 1,
+      overflow: "hidden",
+      borderTopLeftRadius: radius.lg,
+      borderTopRightRadius: radius.lg,
+      backgroundColor: colors.background,
+    },
+    handleArea: {
+      alignItems: "center",
+      gap: spacing.sm,
+      paddingTop: spacing.sm,
+      paddingBottom: spacing.md,
+      borderBottomWidth: StyleSheet.hairlineWidth,
+      borderBottomColor: colors.border,
+    },
+    grabber: {
+      width: 40,
+      height: 5,
+      borderRadius: radius.full,
+      backgroundColor: colors.border,
+    },
+    title: {
+      color: colors.text,
+      fontSize: fontSize.md,
+      fontWeight: "700",
+    },
+    centered: {
+      flex: 1,
+      alignItems: "center",
+      justifyContent: "center",
+      padding: spacing.lg,
+    },
+    list: {
+      paddingVertical: spacing.sm,
+    },
+    emptyContainer: {
+      flexGrow: 1,
+    },
+    comment: {
+      flexDirection: "row",
+      gap: spacing.sm,
+      paddingHorizontal: spacing.md,
+      paddingVertical: spacing.sm,
+    },
+    reply: {
+      paddingLeft: spacing.md + 32 + spacing.sm,
+      paddingVertical: spacing.xs,
+    },
+    commentHighlighted: {
+      backgroundColor: colors.surfaceRaised,
+    },
+    commentBody: {
+      flex: 1,
+      gap: 2,
+    },
+    commentText: {
+      color: colors.text,
+      fontSize: fontSize.md,
+      lineHeight: 21,
+    },
+    username: {
+      fontWeight: "700",
+    },
+    metaRow: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: spacing.md,
+    },
+    meta: {
+      color: colors.textSecondary,
+      fontSize: fontSize.sm,
+    },
+    metaAction: {
+      color: colors.textSecondary,
+      fontSize: fontSize.sm,
+      fontWeight: "700",
+    },
+    like: {
+      alignItems: "center",
+      paddingTop: 2,
+      minWidth: 24,
+    },
+    likeCount: {
+      color: colors.textSecondary,
+      fontSize: 11,
+    },
+    toggleReplies: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: spacing.sm,
+      paddingLeft: spacing.md + 32 + spacing.sm,
+      paddingVertical: spacing.xs,
+    },
+    toggleLine: {
+      width: 24,
+      height: StyleSheet.hairlineWidth,
+      backgroundColor: colors.textSecondary,
+    },
+    toggleText: {
+      color: colors.textSecondary,
+      fontSize: fontSize.sm,
+      fontWeight: "700",
+    },
+    emptyText: {
+      color: colors.textSecondary,
+      fontSize: fontSize.md,
+      textAlign: "center",
+    },
+    error: {
+      color: colors.danger,
+      fontSize: fontSize.md,
+      textAlign: "center",
+    },
+    inlineError: {
+      color: colors.danger,
+      fontSize: fontSize.sm,
+      paddingHorizontal: spacing.md,
+    },
+    replyBanner: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: spacing.sm,
+      paddingHorizontal: spacing.md,
+      paddingVertical: spacing.sm,
+      backgroundColor: colors.surfaceRaised,
+    },
+    replyText: {
+      flex: 1,
+      color: colors.textSecondary,
+      fontSize: fontSize.sm,
+    },
+    inputBar: {
+      flexDirection: "row",
+      alignItems: "flex-end",
+      gap: spacing.sm,
+      paddingHorizontal: spacing.md,
+      paddingTop: spacing.sm,
+      borderTopWidth: StyleSheet.hairlineWidth,
+      borderTopColor: colors.border,
+      backgroundColor: colors.surface,
+    },
+    inputBox: {
+      flex: 1,
+    },
+    input: {
+      minHeight: 40,
+      maxHeight: 120,
+      paddingHorizontal: spacing.md,
+      paddingTop: 10,
+      paddingBottom: 10,
+      borderRadius: radius.lg,
+      backgroundColor: colors.surfaceRaised,
+      color: colors.text,
+      fontSize: fontSize.md,
+    },
+    sendButton: {
+      width: 40,
+      height: 40,
+      borderRadius: radius.full,
+      alignItems: "center",
+      justifyContent: "center",
+      backgroundColor: colors.accent,
+    },
+    sendDisabled: {
+      opacity: 0.4,
+    },
+  }),
+);

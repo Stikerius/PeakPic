@@ -14,12 +14,13 @@ import {
 import { Button } from "@/components/button";
 import { PostCard } from "@/components/feed/post-card";
 import { StoryBar } from "@/components/stories/story-bar";
-import { colors, fontSize, radius, spacing } from "@/constants/theme";
+import { fontSize, radius, spacing } from "@/constants/theme";
 import { useOpenProfile } from "@/hooks/use-open-profile";
 import { usePostActions, useRepostActions } from "@/hooks/use-post-actions";
 import { useSession } from "@/lib/session";
 import { useFeed } from "@/hooks/use-feed";
 import { refreshStories } from "@/lib/storyStore";
+import { makeStyles, useTheme } from "@/lib/theme";
 import type { FeedPost } from "@/types/social";
 
 /** The bits of the tab navigator this screen needs; expo-router doesn't export its tab types. */
@@ -29,6 +30,8 @@ type TabScreenNavigation = {
 };
 
 export default function FeedScreen() {
+  const { colors } = useTheme();
+  const styles = useStyles();
   const { posts, status, error, hasMore, refresh, loadMore, toggleLike, dismissError } = useFeed();
   const listRef = useRef<FlatList<FeedPost>>(null);
   const navigation = useNavigation<TabScreenNavigation>();
@@ -50,7 +53,7 @@ export default function FeedScreen() {
   if (status === "loading") {
     return (
       <View style={styles.centered}>
-        <ActivityIndicator color={colors.primary} />
+        <ActivityIndicator color={colors.accent} />
       </View>
     );
   }
@@ -99,17 +102,17 @@ export default function FeedScreen() {
               void refresh();
               void refreshStories();
             }}
-            tintColor={colors.primary}
+            tintColor={colors.accent}
           />
         }
         ListFooterComponent={
           status === "loadingMore" ? (
-            <ActivityIndicator style={styles.footer} color={colors.primary} />
+            <ActivityIndicator style={styles.footer} color={colors.accent} />
           ) : null
         }
         ListEmptyComponent={
           <View style={styles.empty}>
-            <Ionicons name="people-outline" size={56} color={colors.textMuted} />
+            <Ionicons name="people-outline" size={56} color={colors.textSecondary} />
             <Text style={styles.emptyTitle}>Noch nichts zu sehen</Text>
             <Text style={styles.emptyBody}>
               Folge Freunden, um ihre Workouts hier zu sehen, oder poste dein erstes Foto.
@@ -123,53 +126,55 @@ export default function FeedScreen() {
   );
 }
 
-const styles = StyleSheet.create({
-  screen: {
-    flex: 1,
-    backgroundColor: colors.background,
-  },
-  centered: {
-    flex: 1,
-    alignItems: "center",
-    justifyContent: "center",
-    backgroundColor: colors.background,
-  },
-  errorBanner: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: spacing.sm,
-    margin: spacing.sm,
-    padding: spacing.sm,
-    borderRadius: radius.md,
-    backgroundColor: colors.primaryMuted,
-  },
-  errorText: {
-    flex: 1,
-    color: colors.text,
-    fontSize: fontSize.sm,
-  },
-  footer: {
-    paddingVertical: spacing.lg,
-  },
-  emptyContainer: {
-    flexGrow: 1,
-  },
-  empty: {
-    flex: 1,
-    alignItems: "center",
-    justifyContent: "center",
-    gap: spacing.md,
-    padding: spacing.xl,
-  },
-  emptyTitle: {
-    color: colors.text,
-    fontSize: fontSize.lg,
-    fontWeight: "700",
-  },
-  emptyBody: {
-    color: colors.textMuted,
-    fontSize: fontSize.md,
-    textAlign: "center",
-    lineHeight: 22,
-  },
-});
+const useStyles = makeStyles(({ colors }) =>
+  StyleSheet.create({
+    screen: {
+      flex: 1,
+      backgroundColor: colors.background,
+    },
+    centered: {
+      flex: 1,
+      alignItems: "center",
+      justifyContent: "center",
+      backgroundColor: colors.background,
+    },
+    errorBanner: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: spacing.sm,
+      margin: spacing.sm,
+      padding: spacing.sm,
+      borderRadius: radius.md,
+      backgroundColor: colors.accentSoft,
+    },
+    errorText: {
+      flex: 1,
+      color: colors.text,
+      fontSize: fontSize.sm,
+    },
+    footer: {
+      paddingVertical: spacing.lg,
+    },
+    emptyContainer: {
+      flexGrow: 1,
+    },
+    empty: {
+      flex: 1,
+      alignItems: "center",
+      justifyContent: "center",
+      gap: spacing.md,
+      padding: spacing.xl,
+    },
+    emptyTitle: {
+      color: colors.text,
+      fontSize: fontSize.lg,
+      fontWeight: "700",
+    },
+    emptyBody: {
+      color: colors.textSecondary,
+      fontSize: fontSize.md,
+      textAlign: "center",
+      lineHeight: 22,
+    },
+  }),
+);

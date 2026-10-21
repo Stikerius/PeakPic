@@ -13,7 +13,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { Button } from "@/components/button";
 import { TextField } from "@/components/text-field";
-import { colors, fontSize, radius, spacing } from "@/constants/theme";
+import { fontSize, radius, spacing } from "@/constants/theme";
 import {
   MIN_PASSWORD_LENGTH,
   USERNAME_PATTERN,
@@ -21,6 +21,7 @@ import {
   signIn,
   signUp,
 } from "@/lib/auth";
+import { makeStyles, useTheme } from "@/lib/theme";
 
 type Mode = "login" | "register";
 
@@ -36,6 +37,8 @@ function validate(mode: Mode, email: string, password: string, username: string)
 }
 
 export default function LoginScreen() {
+  const { colors } = useTheme();
+  const styles = useStyles();
   const insets = useSafeAreaInsets();
   const [mode, setMode] = useState<Mode>("login");
   const [email, setEmail] = useState("");
@@ -92,7 +95,7 @@ export default function LoginScreen() {
         keyboardShouldPersistTaps="handled"
       >
         <View style={styles.brand}>
-          <Ionicons name="flame" size={56} color={colors.primary} />
+          <Ionicons name="flame" size={56} color={colors.accent} />
           <Text style={styles.title}>PeakPic</Text>
           <Text style={styles.subtitle}>
             {mode === "login" ? "Willkommen zurück!" : "Starte deinen Streak."}
@@ -168,61 +171,63 @@ export default function LoginScreen() {
   );
 }
 
-const styles = StyleSheet.create({
-  screen: {
-    flex: 1,
-    backgroundColor: colors.background,
-  },
-  content: {
-    paddingHorizontal: spacing.lg,
-    gap: spacing.xl,
-  },
-  brand: {
-    alignItems: "center",
-    gap: spacing.xs,
-  },
-  title: {
-    color: colors.text,
-    fontSize: 36,
-    fontWeight: "800",
-  },
-  subtitle: {
-    color: colors.textMuted,
-    fontSize: fontSize.md,
-  },
-  tabs: {
-    flexDirection: "row",
-    padding: spacing.xs,
-    borderRadius: radius.md,
-    backgroundColor: colors.surface,
-  },
-  tab: {
-    flex: 1,
-    paddingVertical: spacing.sm,
-    borderRadius: radius.sm,
-    alignItems: "center",
-  },
-  tabActive: {
-    backgroundColor: colors.surfaceElevated,
-  },
-  tabLabel: {
-    color: colors.textMuted,
-    fontSize: fontSize.md,
-    fontWeight: "600",
-  },
-  tabLabelActive: {
-    color: colors.text,
-  },
-  form: {
-    gap: spacing.md,
-  },
-  error: {
-    color: colors.danger,
-    fontSize: fontSize.sm,
-  },
-  info: {
-    color: colors.success,
-    fontSize: fontSize.sm,
-    lineHeight: 20,
-  },
-});
+const useStyles = makeStyles(({ colors }) =>
+  StyleSheet.create({
+    screen: {
+      flex: 1,
+      backgroundColor: colors.background,
+    },
+    content: {
+      paddingHorizontal: spacing.lg,
+      gap: spacing.xl,
+    },
+    brand: {
+      alignItems: "center",
+      gap: spacing.xs,
+    },
+    title: {
+      color: colors.text,
+      fontSize: 36,
+      fontWeight: "800",
+    },
+    subtitle: {
+      color: colors.textSecondary,
+      fontSize: fontSize.md,
+    },
+    tabs: {
+      flexDirection: "row",
+      padding: spacing.xs,
+      borderRadius: radius.md,
+      backgroundColor: colors.surface,
+    },
+    tab: {
+      flex: 1,
+      paddingVertical: spacing.sm,
+      borderRadius: radius.sm,
+      alignItems: "center",
+    },
+    tabActive: {
+      backgroundColor: colors.surfaceRaised,
+    },
+    tabLabel: {
+      color: colors.textSecondary,
+      fontSize: fontSize.md,
+      fontWeight: "600",
+    },
+    tabLabelActive: {
+      color: colors.text,
+    },
+    form: {
+      gap: spacing.md,
+    },
+    error: {
+      color: colors.danger,
+      fontSize: fontSize.sm,
+    },
+    info: {
+      color: colors.success,
+      fontSize: fontSize.sm,
+      lineHeight: 20,
+    },
+  }),
+);

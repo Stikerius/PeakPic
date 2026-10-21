@@ -6,7 +6,7 @@ import { ActivityIndicator, FlatList, Pressable, RefreshControl, StyleSheet, Tex
 
 import { Avatar } from "@/components/avatar";
 import { InboxRow } from "@/components/notifications/inbox-row";
-import { colors, fontSize, radius, spacing } from "@/constants/theme";
+import { fontSize, radius, spacing, type ColorName } from "@/constants/theme";
 import { useOpenProfile } from "@/hooks/use-open-profile";
 import { formatRelativeTime } from "@/lib/format";
 import { fetchInbox, markInboxRead, subscribeToInbox, type InboxItem } from "@/lib/inboxRepo";
@@ -20,19 +20,22 @@ import {
 import { useSession } from "@/lib/session";
 import { refreshStories } from "@/lib/storyStore";
 import { toDayKey } from "@/lib/streak";
+import { makeStyles, useTheme } from "@/lib/theme";
 
-const KIND_ICONS: Record<NotificationKind, { name: ComponentProps<typeof Ionicons>["name"]; color: string }> = {
-  story: { name: "aperture", color: colors.primary },
-  workout: { name: "barbell", color: colors.primary },
-  post_like: { name: "heart", color: colors.danger },
-  comment: { name: "chatbubble", color: colors.text },
-  follow: { name: "person-add", color: colors.success },
-  story_like: { name: "heart", color: colors.danger },
-  mention: { name: "at", color: colors.warning },
-  post_tag: { name: "pricetag", color: colors.warning },
+const KIND_ICONS: Record<NotificationKind, { name: ComponentProps<typeof Ionicons>["name"]; color: ColorName }> = {
+  story: { name: "aperture", color: "accent" },
+  workout: { name: "barbell", color: "accent" },
+  post_like: { name: "heart", color: "danger" },
+  comment: { name: "chatbubble", color: "text" },
+  follow: { name: "person-add", color: "success" },
+  story_like: { name: "heart", color: "danger" },
+  mention: { name: "at", color: "warning" },
+  post_tag: { name: "pricetag", color: "warning" },
 };
 
 export default function NotificationsScreen() {
+  const { colors } = useTheme();
+  const styles = useStyles();
   const myId = useSession().session?.user.id;
   const openProfile = useOpenProfile();
   const [feed, setFeed] = useState<NotificationFeed | null>(null);
@@ -101,7 +104,7 @@ export default function NotificationsScreen() {
   if (feed === null) {
     return (
       <View style={styles.centered}>
-        {error !== null ? <Text style={styles.error}>{error}</Text> : <ActivityIndicator color={colors.primary} />}
+        {error !== null ? <Text style={styles.error}>{error}</Text> : <ActivityIndicator color={colors.accent} />}
       </View>
     );
   }
@@ -133,7 +136,7 @@ export default function NotificationsScreen() {
             await load();
             setRefreshing(false);
           }}
-          tintColor={colors.primary}
+          tintColor={colors.accent}
         />
       }
       renderItem={({ item }) => {
@@ -176,7 +179,7 @@ export default function NotificationsScreen() {
       ListEmptyComponent={
         inbox.length > 0 ? null : (
           <View style={styles.centered}>
-            <Ionicons name="notifications-off-outline" size={48} color={colors.textMuted} />
+            <Ionicons name="notifications-off-outline" size={48} color={colors.textSecondary} />
             <Text style={styles.emptyText}>Noch nichts Neues. Folge Freunden, um mitzubekommen, wann sie trainieren.</Text>
           </View>
         )
@@ -185,98 +188,100 @@ export default function NotificationsScreen() {
   );
 }
 
-const styles = StyleSheet.create({
-  screen: {
-    flex: 1,
-    backgroundColor: colors.background,
-  },
-  centered: {
-    flex: 1,
-    alignItems: "center",
-    justifyContent: "center",
-    gap: spacing.md,
-    padding: spacing.xl,
-    backgroundColor: colors.background,
-  },
-  emptyContainer: {
-    flexGrow: 1,
-  },
-  sectionTitle: {
-    color: colors.textMuted,
-    fontSize: fontSize.sm,
-    fontWeight: "700",
-    paddingHorizontal: spacing.md,
-    paddingTop: spacing.md,
-    paddingBottom: spacing.xs,
-  },
-  row: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: spacing.md,
-    paddingHorizontal: spacing.md,
-    paddingVertical: spacing.sm + 2,
-  },
-  unread: {
-    backgroundColor: colors.surface,
-  },
-  pressed: {
-    opacity: 0.7,
-  },
-  avatars: {
-    width: 52,
-    height: 52,
-  },
-  secondAvatar: {
-    position: "absolute",
-    right: -2,
-    bottom: -2,
-    borderRadius: radius.full,
-    borderWidth: 2,
-    borderColor: colors.background,
-  },
-  kindBadge: {
-    position: "absolute",
-    left: -2,
-    bottom: -2,
-    width: 22,
-    height: 22,
-    borderRadius: radius.full,
-    alignItems: "center",
-    justifyContent: "center",
-    backgroundColor: colors.surfaceElevated,
-    borderWidth: 2,
-    borderColor: colors.background,
-  },
-  text: {
-    flex: 1,
-    gap: 2,
-  },
-  sentence: {
-    color: colors.text,
-    fontSize: fontSize.md,
-    lineHeight: 21,
-  },
-  names: {
-    fontWeight: "700",
-  },
-  time: {
-    color: colors.textMuted,
-    fontSize: fontSize.sm,
-  },
-  unreadDot: {
-    width: 8,
-    height: 8,
-    borderRadius: radius.full,
-    backgroundColor: colors.primary,
-  },
-  emptyText: {
-    color: colors.textMuted,
-    fontSize: fontSize.md,
-    textAlign: "center",
-  },
-  error: {
-    color: colors.danger,
-    fontSize: fontSize.md,
-    textAlign: "center",
-  },
-});
+const useStyles = makeStyles(({ colors }) =>
+  StyleSheet.create({
+    screen: {
+      flex: 1,
+      backgroundColor: colors.background,
+    },
+    centered: {
+      flex: 1,
+      alignItems: "center",
+      justifyContent: "center",
+      gap: spacing.md,
+      padding: spacing.xl,
+      backgroundColor: colors.background,
+    },
+    emptyContainer: {
+      flexGrow: 1,
+    },
+    sectionTitle: {
+      color: colors.textSecondary,
+      fontSize: fontSize.sm,
+      fontWeight: "700",
+      paddingHorizontal: spacing.md,
+      paddingTop: spacing.md,
+      paddingBottom: spacing.xs,
+    },
+    row: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: spacing.md,
+      paddingHorizontal: spacing.md,
+      paddingVertical: spacing.sm + 2,
+    },
+    unread: {
+      backgroundColor: colors.surface,
+    },
+    pressed: {
+      opacity: 0.7,
+    },
+    avatars: {
+      width: 52,
+      height: 52,
+    },
+    secondAvatar: {
+      position: "absolute",
+      right: -2,
+      bottom: -2,
+      borderRadius: radius.full,
+      borderWidth: 2,
+      borderColor: colors.background,
+    },
+    kindBadge: {
+      position: "absolute",
+      left: -2,
+      bottom: -2,
+      width: 22,
+      height: 22,
+      borderRadius: radius.full,
+      alignItems: "center",
+      justifyContent: "center",
+      backgroundColor: colors.surfaceRaised,
+      borderWidth: 2,
+      borderColor: colors.background,
+    },
+    text: {
+      flex: 1,
+      gap: 2,
+    },
+    sentence: {
+      color: colors.text,
+      fontSize: fontSize.md,
+      lineHeight: 21,
+    },
+    names: {
+      fontWeight: "700",
+    },
+    time: {
+      color: colors.textSecondary,
+      fontSize: fontSize.sm,
+    },
+    unreadDot: {
+      width: 8,
+      height: 8,
+      borderRadius: radius.full,
+      backgroundColor: colors.accent,
+    },
+    emptyText: {
+      color: colors.textSecondary,
+      fontSize: fontSize.md,
+      textAlign: "center",
+    },
+    error: {
+      color: colors.danger,
+      fontSize: fontSize.md,
+      textAlign: "center",
+    },
+  }),
+);

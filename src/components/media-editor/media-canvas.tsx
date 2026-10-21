@@ -11,8 +11,9 @@ import {
   type MediaOverlay,
   type OverlayFonts,
 } from "@/components/media-editor/overlay";
-import { colors, radius, spacing } from "@/constants/theme";
+import { onPhoto, radius, spacing } from "@/constants/theme";
 import { STORY_FILTERS } from "@/lib/storyFilters";
+import { makeStyles, useTheme } from "@/lib/theme";
 
 /** Height of the drop zone at the bottom of the canvas that deletes a dragged overlay. */
 const TRASH_ZONE = 120;
@@ -49,6 +50,8 @@ export function MediaCanvas({
   onEditItem,
   onDraggingChange,
 }: MediaCanvasProps) {
+  const { colors } = useTheme();
+  const styles = useStyles();
   const image = useImage(photo.uri);
   const containerRef = useRef<View>(null);
   const [pageY, setPageY] = useState(0);
@@ -160,47 +163,49 @@ export function MediaCanvas({
   );
 }
 
-const styles = StyleSheet.create({
-  container: {
-    overflow: "hidden",
-    backgroundColor: "#000000",
-  },
-  center: {
-    position: "absolute",
-    top: 0,
-    right: 0,
-    bottom: 0,
-    left: 0,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  toastText: {
-    color: colors.text,
-    fontSize: 28,
-    fontWeight: "800",
-    textShadowColor: "rgba(0, 0, 0, 0.6)",
-    textShadowRadius: 8,
-  },
-  trash: {
-    position: "absolute",
-    left: 0,
-    right: 0,
-    bottom: spacing.lg,
-    alignItems: "center",
-  },
-  trashCircle: {
-    width: 56,
-    height: 56,
-    borderRadius: radius.full,
-    alignItems: "center",
-    justifyContent: "center",
-    backgroundColor: "rgba(0, 0, 0, 0.55)",
-    borderWidth: 2,
-    borderColor: colors.text,
-  },
-  trashCircleActive: {
-    width: 72,
-    height: 72,
-    backgroundColor: colors.danger,
-  },
-});
+const useStyles = makeStyles(({ colors }) =>
+  StyleSheet.create({
+    container: {
+      overflow: "hidden",
+      backgroundColor: onPhoto.background,
+    },
+    center: {
+      position: "absolute",
+      top: 0,
+      right: 0,
+      bottom: 0,
+      left: 0,
+      alignItems: "center",
+      justifyContent: "center",
+    },
+    toastText: {
+      color: colors.text,
+      fontSize: 28,
+      fontWeight: "800",
+      textShadowColor: onPhoto.textShadow,
+      textShadowRadius: 8,
+    },
+    trash: {
+      position: "absolute",
+      left: 0,
+      right: 0,
+      bottom: spacing.lg,
+      alignItems: "center",
+    },
+    trashCircle: {
+      width: 56,
+      height: 56,
+      borderRadius: radius.full,
+      alignItems: "center",
+      justifyContent: "center",
+      backgroundColor: onPhoto.scrimStrong,
+      borderWidth: 2,
+      borderColor: colors.text,
+    },
+    trashCircleActive: {
+      width: 72,
+      height: 72,
+      backgroundColor: colors.danger,
+    },
+  }),
+);

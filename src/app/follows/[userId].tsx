@@ -5,7 +5,7 @@ import { ActivityIndicator, Alert, FlatList, Pressable, StyleSheet, Text, TextIn
 
 import { FollowButton } from "@/components/follow-button";
 import { ProfileRow } from "@/components/profile-row";
-import { colors, fontSize, radius, spacing } from "@/constants/theme";
+import { fontSize, radius, spacing } from "@/constants/theme";
 import { useOpenProfile } from "@/hooks/use-open-profile";
 import { describeError } from "@/lib/errors";
 import { emitAppEvent } from "@/lib/events";
@@ -17,6 +17,7 @@ import {
   removeFollower,
   type FollowStatus,
 } from "@/lib/socialRepo";
+import { makeStyles, useTheme } from "@/lib/theme";
 import { fetchUserProfile } from "@/lib/userProfileRepo";
 import type { PublicProfile } from "@/types/social";
 
@@ -27,6 +28,8 @@ type ListKind = "followers" | "following";
  * profiles and people I follow; otherwise only the counts are visible (RLS agrees).
  */
 export default function FollowListScreen() {
+  const { colors, scheme } = useTheme();
+  const styles = useStyles();
   const { userId, list } = useLocalSearchParams<{ userId: string; list: ListKind }>();
   const myId = useSession().session?.user.id;
   const isMine = userId === myId;
@@ -96,22 +99,23 @@ export default function FollowListScreen() {
       <Stack.Screen options={{ title }} />
       {locked ? (
         <View style={styles.centered}>
-          <Ionicons name="lock-closed-outline" size={36} color={colors.textMuted} />
+          <Ionicons name="lock-closed-outline" size={36} color={colors.textSecondary} />
           <Text style={styles.muted}>Dieses Profil ist privat. Die Liste sehen nur bestätigte Follower.</Text>
         </View>
       ) : people === null ? (
         <View style={styles.centered}>
-          {error !== null ? <Text style={styles.error}>{error}</Text> : <ActivityIndicator color={colors.primary} />}
+          {error !== null ? <Text style={styles.error}>{error}</Text> : <ActivityIndicator color={colors.accent} />}
         </View>
       ) : (
         <>
           <View style={styles.searchBar}>
-            <Ionicons name="search" size={18} color={colors.textMuted} />
+            <Ionicons name="search" size={18} color={colors.textSecondary} />
             <TextInput
+              keyboardAppearance={scheme}
               value={query}
               onChangeText={setQuery}
               placeholder="Suchen"
-              placeholderTextColor={colors.textMuted}
+              placeholderTextColor={colors.textSecondary}
               autoCapitalize="none"
               autoCorrect={false}
               style={styles.searchInput}
@@ -144,7 +148,7 @@ export default function FollowListScreen() {
                           hitSlop={spacing.sm}
                           style={styles.removeButton}
                         >
-                          <Ionicons name="close" size={18} color={colors.textMuted} />
+                          <Ionicons name="close" size={18} color={colors.textSecondary} />
                         </Pressable>
                       )}
                     </View>
@@ -164,52 +168,54 @@ export default function FollowListScreen() {
   );
 }
 
-const styles = StyleSheet.create({
-  screen: {
-    flex: 1,
-    backgroundColor: colors.background,
-  },
-  centered: {
-    flex: 1,
-    alignItems: "center",
-    justifyContent: "center",
-    gap: spacing.md,
-    padding: spacing.xl,
-  },
-  searchBar: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: spacing.sm,
-    margin: spacing.md,
-    paddingHorizontal: spacing.md,
-    minHeight: 44,
-    borderRadius: radius.md,
-    backgroundColor: colors.surface,
-  },
-  searchInput: {
-    flex: 1,
-    color: colors.text,
-    fontSize: fontSize.md,
-  },
-  actions: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: spacing.sm,
-  },
-  removeButton: {
-    padding: spacing.xs,
-  },
-  muted: {
-    color: colors.textMuted,
-    fontSize: fontSize.md,
-    textAlign: "center",
-  },
-  padded: {
-    padding: spacing.lg,
-  },
-  error: {
-    color: colors.danger,
-    fontSize: fontSize.md,
-    textAlign: "center",
-  },
-});
+const useStyles = makeStyles(({ colors }) =>
+  StyleSheet.create({
+    screen: {
+      flex: 1,
+      backgroundColor: colors.background,
+    },
+    centered: {
+      flex: 1,
+      alignItems: "center",
+      justifyContent: "center",
+      gap: spacing.md,
+      padding: spacing.xl,
+    },
+    searchBar: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: spacing.sm,
+      margin: spacing.md,
+      paddingHorizontal: spacing.md,
+      minHeight: 44,
+      borderRadius: radius.md,
+      backgroundColor: colors.surface,
+    },
+    searchInput: {
+      flex: 1,
+      color: colors.text,
+      fontSize: fontSize.md,
+    },
+    actions: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: spacing.sm,
+    },
+    removeButton: {
+      padding: spacing.xs,
+    },
+    muted: {
+      color: colors.textSecondary,
+      fontSize: fontSize.md,
+      textAlign: "center",
+    },
+    padded: {
+      padding: spacing.lg,
+    },
+    error: {
+      color: colors.danger,
+      fontSize: fontSize.md,
+      textAlign: "center",
+    },
+  }),
+);

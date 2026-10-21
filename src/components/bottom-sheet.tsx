@@ -14,8 +14,9 @@ import { GestureDetector, GestureHandlerRootView } from "react-native-gesture-ha
 import Animated, { interpolate, useAnimatedStyle } from "react-native-reanimated";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
-import { colors, fontSize, radius, spacing } from "@/constants/theme";
+import { fontSize, radius, spacing } from "@/constants/theme";
 import { useSwipeToDismiss } from "@/hooks/use-swipe-to-dismiss";
+import { makeStyles, useTheme } from "@/lib/theme";
 
 type BottomSheetProps = {
   visible: boolean;
@@ -31,6 +32,8 @@ type BottomSheetProps = {
  * (useSwipeToDismiss), tapping the backdrop or the close button.
  */
 export function BottomSheet({ visible, title, onClose, heightFraction = 0.6, children }: BottomSheetProps) {
+  const { colors } = useTheme();
+  const styles = useStyles();
   const { height } = useWindowDimensions();
   const insets = useSafeAreaInsets();
   const swipe = useSwipeToDismiss({ onDismiss: onClose, fadeTo: 1 });
@@ -78,51 +81,53 @@ export function BottomSheet({ visible, title, onClose, heightFraction = 0.6, chi
   );
 }
 
-const styles = StyleSheet.create({
-  root: {
-    flex: 1,
-  },
-  backdrop: {
-    backgroundColor: "rgba(0, 0, 0, 0.55)",
-  },
-  keyboard: {
-    flex: 1,
-    justifyContent: "flex-end",
-  },
-  sheet: {
-    flexShrink: 1,
-    overflow: "hidden",
-    borderTopLeftRadius: radius.lg,
-    borderTopRightRadius: radius.lg,
-    backgroundColor: colors.background,
-  },
-  header: {
-    alignItems: "center",
-    gap: spacing.sm,
-    paddingTop: spacing.sm,
-    paddingBottom: spacing.md,
-    paddingHorizontal: spacing.md,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: colors.border,
-  },
-  grabber: {
-    width: 40,
-    height: 5,
-    borderRadius: radius.full,
-    backgroundColor: colors.border,
-  },
-  titleRow: {
-    alignSelf: "stretch",
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-  },
-  title: {
-    color: colors.text,
-    fontSize: fontSize.md,
-    fontWeight: "700",
-  },
-  body: {
-    flex: 1,
-  },
-});
+const useStyles = makeStyles(({ colors }) =>
+  StyleSheet.create({
+    root: {
+      flex: 1,
+    },
+    backdrop: {
+      backgroundColor: colors.backdrop,
+    },
+    keyboard: {
+      flex: 1,
+      justifyContent: "flex-end",
+    },
+    sheet: {
+      flexShrink: 1,
+      overflow: "hidden",
+      borderTopLeftRadius: radius.lg,
+      borderTopRightRadius: radius.lg,
+      backgroundColor: colors.background,
+    },
+    header: {
+      alignItems: "center",
+      gap: spacing.sm,
+      paddingTop: spacing.sm,
+      paddingBottom: spacing.md,
+      paddingHorizontal: spacing.md,
+      borderBottomWidth: StyleSheet.hairlineWidth,
+      borderBottomColor: colors.border,
+    },
+    grabber: {
+      width: 40,
+      height: 5,
+      borderRadius: radius.full,
+      backgroundColor: colors.border,
+    },
+    titleRow: {
+      alignSelf: "stretch",
+      flexDirection: "row",
+      alignItems: "center",
+      justifyContent: "space-between",
+    },
+    title: {
+      color: colors.text,
+      fontSize: fontSize.md,
+      fontWeight: "700",
+    },
+    body: {
+      flex: 1,
+    },
+  }),
+);

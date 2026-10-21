@@ -2,10 +2,10 @@ import { router } from "expo-router";
 import { useEffect, useMemo, useState } from "react";
 import { StyleSheet, Text, type StyleProp, type TextStyle } from "react-native";
 
-import { colors } from "@/constants/theme";
 import { useOpenProfile } from "@/hooks/use-open-profile";
 import { cachedProfile, resolveUsernames } from "@/lib/tagSuggestRepo";
 import { parseTaggedText } from "@/lib/taggedText";
+import { makeStyles } from "@/lib/theme";
 
 type TaggedTextProps = {
   text: string;
@@ -20,6 +20,7 @@ type TaggedTextProps = {
  * Can be nested inside another <Text>. Mentions of unknown usernames stay plain text.
  */
 export function TaggedText({ text, style, linkStyle, numberOfLines }: TaggedTextProps) {
+  const styles = useStyles();
   const openProfile = useOpenProfile();
   const segments = useMemo(() => parseTaggedText(text), [text]);
   const usernames = useMemo(
@@ -75,9 +76,11 @@ export function TaggedText({ text, style, linkStyle, numberOfLines }: TaggedText
   );
 }
 
-const styles = StyleSheet.create({
-  link: {
-    color: colors.text,
-    fontWeight: "700",
-  },
-});
+const useStyles = makeStyles(({ colors }) =>
+  StyleSheet.create({
+    link: {
+      color: colors.text,
+      fontWeight: "700",
+    },
+  }),
+);

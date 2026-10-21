@@ -5,13 +5,14 @@ import { ActivityIndicator, FlatList, Pressable, StyleSheet, Text, TextInput, Vi
 
 import { BottomSheet } from "@/components/bottom-sheet";
 import { Button } from "@/components/button";
-import { colors, fontSize, radius, spacing } from "@/constants/theme";
+import { fontSize, radius, spacing } from "@/constants/theme";
 import {
   HIGHLIGHT_TITLE_MAX_LENGTH,
   listMyHighlights,
   type Highlight,
   type HighlightChoice,
 } from "@/lib/highlightRepo";
+import { makeStyles, useTheme } from "@/lib/theme";
 
 type HighlightPickerProps = {
   visible: boolean;
@@ -21,6 +22,8 @@ type HighlightPickerProps = {
 
 /** Pick one of my highlights, or name a new one (the story becomes its cover). */
 export function HighlightPicker({ visible, onPick, onClose }: HighlightPickerProps) {
+  const { colors, scheme } = useTheme();
+  const styles = useStyles();
   const [highlights, setHighlights] = useState<Highlight[] | null>(null);
   const [failed, setFailed] = useState(false);
   const [newTitle, setNewTitle] = useState<string | null>(null);
@@ -40,10 +43,11 @@ export function HighlightPicker({ visible, onPick, onClose }: HighlightPickerPro
       {newTitle !== null ? (
         <View style={styles.form}>
           <TextInput
+            keyboardAppearance={scheme}
             value={newTitle}
             onChangeText={setNewTitle}
             placeholder="Name des Highlights"
-            placeholderTextColor={colors.textMuted}
+            placeholderTextColor={colors.textSecondary}
             maxLength={HIGHLIGHT_TITLE_MAX_LENGTH}
             autoFocus
             style={styles.input}
@@ -57,7 +61,7 @@ export function HighlightPicker({ visible, onPick, onClose }: HighlightPickerPro
           />
         </View>
       ) : highlights === null && !failed ? (
-        <ActivityIndicator style={styles.loader} color={colors.primary} />
+        <ActivityIndicator style={styles.loader} color={colors.accent} />
       ) : (
         <FlatList
           data={highlights ?? []}
@@ -103,59 +107,61 @@ export function HighlightPicker({ visible, onPick, onClose }: HighlightPickerPro
   );
 }
 
-const styles = StyleSheet.create({
-  loader: {
-    marginTop: spacing.xl,
-  },
-  form: {
-    gap: spacing.md,
-    padding: spacing.md,
-  },
-  input: {
-    minHeight: 48,
-    paddingHorizontal: spacing.md,
-    borderRadius: radius.md,
-    backgroundColor: colors.surface,
-    borderWidth: 1,
-    borderColor: colors.border,
-    color: colors.text,
-    fontSize: fontSize.md,
-  },
-  row: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: spacing.md,
-    paddingHorizontal: spacing.md,
-    paddingVertical: spacing.sm,
-  },
-  pressed: {
-    backgroundColor: colors.surface,
-  },
-  cover: {
-    width: 52,
-    height: 52,
-    borderRadius: radius.full,
-    backgroundColor: colors.surfaceElevated,
-  },
-  newCover: {
-    alignItems: "center",
-    justifyContent: "center",
-    borderWidth: 1,
-    borderColor: colors.border,
-  },
-  rowText: {
-    flex: 1,
-  },
-  rowTitle: {
-    color: colors.text,
-    fontSize: fontSize.md,
-    fontWeight: "600",
-  },
-  hint: {
-    color: colors.textMuted,
-    fontSize: fontSize.sm,
-  },
-  padded: {
-    padding: spacing.md,
-  },
-});
+const useStyles = makeStyles(({ colors }) =>
+  StyleSheet.create({
+    loader: {
+      marginTop: spacing.xl,
+    },
+    form: {
+      gap: spacing.md,
+      padding: spacing.md,
+    },
+    input: {
+      minHeight: 48,
+      paddingHorizontal: spacing.md,
+      borderRadius: radius.md,
+      backgroundColor: colors.surface,
+      borderWidth: 1,
+      borderColor: colors.border,
+      color: colors.text,
+      fontSize: fontSize.md,
+    },
+    row: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: spacing.md,
+      paddingHorizontal: spacing.md,
+      paddingVertical: spacing.sm,
+    },
+    pressed: {
+      backgroundColor: colors.surface,
+    },
+    cover: {
+      width: 52,
+      height: 52,
+      borderRadius: radius.full,
+      backgroundColor: colors.surfaceRaised,
+    },
+    newCover: {
+      alignItems: "center",
+      justifyContent: "center",
+      borderWidth: 1,
+      borderColor: colors.border,
+    },
+    rowText: {
+      flex: 1,
+    },
+    rowTitle: {
+      color: colors.text,
+      fontSize: fontSize.md,
+      fontWeight: "600",
+    },
+    hint: {
+      color: colors.textSecondary,
+      fontSize: fontSize.sm,
+    },
+    padded: {
+      padding: spacing.md,
+    },
+  }),
+);

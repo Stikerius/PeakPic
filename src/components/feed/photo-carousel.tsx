@@ -12,7 +12,8 @@ import {
 } from "react-native";
 
 import { MentionSpots } from "@/components/mention-spots";
-import { colors, radius, spacing } from "@/constants/theme";
+import { onPhoto, radius, spacing } from "@/constants/theme";
+import { makeStyles, useTheme } from "@/lib/theme";
 import type { PhotoMention } from "@/types/social";
 
 /** Posts are edited on a 4:5 canvas. */
@@ -40,6 +41,8 @@ export function PhotoCarousel({
   mentions,
   onPressMention,
 }: PhotoCarouselProps) {
+  const { colors } = useTheme();
+  const styles = useStyles();
   const [width, setWidth] = useState(0);
   const [page, setPage] = useState(0);
 
@@ -54,7 +57,7 @@ export function PhotoCarousel({
   if (photoUrls.length === 0) {
     return (
       <View style={[styles.photo, styles.missing]}>
-        <Ionicons name="image-outline" size={40} color={colors.textMuted} />
+        <Ionicons name="image-outline" size={40} color={colors.textSecondary} />
       </View>
     );
   }
@@ -101,7 +104,7 @@ export function PhotoCarousel({
       {photoUrls.length > 1 && (
         <>
           <View style={styles.badge} pointerEvents="none">
-            <Ionicons name="copy-outline" size={14} color={colors.text} />
+            <Ionicons name="copy-outline" size={14} color={onPhoto.text} />
           </View>
           <View style={styles.dots} pointerEvents="none">
             {photoUrls.map((url, index) => (
@@ -114,40 +117,42 @@ export function PhotoCarousel({
   );
 }
 
-const styles = StyleSheet.create({
-  photo: {
-    width: "100%",
-    aspectRatio: 4 / 5,
-    backgroundColor: colors.surface,
-  },
-  missing: {
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  badge: {
-    position: "absolute",
-    top: spacing.sm,
-    right: spacing.sm,
-    padding: 6,
-    borderRadius: radius.full,
-    backgroundColor: "rgba(0, 0, 0, 0.5)",
-  },
-  dots: {
-    position: "absolute",
-    bottom: spacing.sm,
-    left: 0,
-    right: 0,
-    flexDirection: "row",
-    justifyContent: "center",
-    gap: 5,
-  },
-  dot: {
-    width: 6,
-    height: 6,
-    borderRadius: radius.full,
-    backgroundColor: "rgba(255, 255, 255, 0.45)",
-  },
-  dotActive: {
-    backgroundColor: colors.text,
-  },
-});
+const useStyles = makeStyles(({ colors }) =>
+  StyleSheet.create({
+    photo: {
+      width: "100%",
+      aspectRatio: 4 / 5,
+      backgroundColor: colors.surface,
+    },
+    missing: {
+      alignItems: "center",
+      justifyContent: "center",
+    },
+    badge: {
+      position: "absolute",
+      top: spacing.sm,
+      right: spacing.sm,
+      padding: 6,
+      borderRadius: radius.full,
+      backgroundColor: onPhoto.scrim,
+    },
+    dots: {
+      position: "absolute",
+      bottom: spacing.sm,
+      left: 0,
+      right: 0,
+      flexDirection: "row",
+      justifyContent: "center",
+      gap: 5,
+    },
+    dot: {
+      width: 6,
+      height: 6,
+      borderRadius: radius.full,
+      backgroundColor: onPhoto.fillStrong,
+    },
+    dotActive: {
+      backgroundColor: onPhoto.text,
+    },
+  }),
+);

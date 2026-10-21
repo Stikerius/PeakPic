@@ -31,11 +31,12 @@ import { MentionPicker } from "@/components/media-editor/mention-picker";
 import type { MediaOverlay } from "@/components/media-editor/overlay";
 import { sameEdits, toPhotoEdits, type PhotoEdits } from "@/lib/photoEdits";
 import { TextOverlayEditor, type TextOverlayValue } from "@/components/media-editor/text-overlay-editor";
-import { colors, fontSize, radius, spacing } from "@/constants/theme";
+import { fontSize, onPhoto, photoTextColors, radius, spacing } from "@/constants/theme";
 import { describeError } from "@/lib/errors";
 import { filterTaggable } from "@/lib/inboxRepo";
 import { resolveUsernames } from "@/lib/tagSuggestRepo";
 import { extractMentions } from "@/lib/taggedText";
+import { makeStyles, useTheme } from "@/lib/theme";
 import { MAX_TAGS } from "@/lib/workoutLinks";
 import { STORY_FILTERS } from "@/lib/storyFilters";
 import type { PublicProfile } from "@/types/social";
@@ -164,6 +165,8 @@ export function MediaEditor({
   onBack,
   onSubmit,
 }: MediaEditorProps) {
+  const { colors } = useTheme();
+  const styles = useStyles();
   const { width, height } = useWindowDimensions();
   const insets = useSafeAreaInsets();
   const [fonts] = useState(overlayFonts);
@@ -205,7 +208,7 @@ export function MediaEditor({
   }
 
   function openNewText() {
-    setTextEditing({ id: null, initial: { text: "", color: "#FFFFFF", background: false } });
+    setTextEditing({ id: null, initial: { text: "", color: photoTextColors[0], background: false } });
   }
 
   function finishText({ text, color, background }: TextOverlayValue) {
@@ -575,10 +578,10 @@ export function MediaEditor({
                   style={styles.tagChip}
                 >
                   {workoutLinks.has(user.id) && (
-                    <Ionicons name="link" size={14} color={colors.primary} accessibilityLabel="fürs Workout verlinkt" />
+                    <Ionicons name="link" size={14} color={colors.accent} accessibilityLabel="fürs Workout verlinkt" />
                   )}
                   <Text style={styles.tagChipText}>@{user.username}</Text>
-                  <Ionicons name="close" size={14} color={colors.textMuted} />
+                  <Ionicons name="close" size={14} color={colors.textSecondary} />
                 </Pressable>
               ))}
             </ScrollView>
@@ -589,7 +592,7 @@ export function MediaEditor({
               value={caption}
               onChangeText={setCaption}
               placeholder="Beschriftung hinzufügen… (@ und # möglich)"
-              placeholderTextColor={colors.textMuted}
+              placeholderTextColor={colors.textSecondary}
               maxLength={CAPTION_MAX_LENGTH}
               style={styles.caption}
               editable={!submitting}
@@ -605,7 +608,7 @@ export function MediaEditor({
               <Switch
                 value={showInProfile}
                 onValueChange={setShowInProfile}
-                trackColor={{ true: colors.primary, false: colors.border }}
+                trackColor={{ true: colors.accent, false: colors.border }}
                 accessibilityLabel="Im Profil anzeigen"
               />
             </View>
@@ -619,209 +622,211 @@ export function MediaEditor({
   );
 }
 
-const styles = StyleSheet.create({
-  screen: {
-    flex: 1,
-    backgroundColor: "#000000",
-  },
-  flex: {
-    flex: 1,
-  },
-  storyTop: {
-    position: "absolute",
-    top: 0,
-    left: 0,
-    right: 0,
-    flexDirection: "row",
-    justifyContent: "space-between",
-    paddingHorizontal: spacing.md,
-  },
-  storyBottom: {
-    position: "absolute",
-    left: 0,
-    right: 0,
-    bottom: 0,
-    gap: spacing.md,
-  },
-  tools: {
-    flexDirection: "row",
-    gap: spacing.sm,
-  },
-  roundButton: {
-    width: 44,
-    height: 44,
-    borderRadius: radius.full,
-    alignItems: "center",
-    justifyContent: "center",
-    backgroundColor: "rgba(0, 0, 0, 0.45)",
-  },
-  toolLabel: {
-    color: colors.text,
-    fontSize: fontSize.lg,
-    fontWeight: "800",
-  },
-  filters: {
-    gap: spacing.sm,
-    paddingHorizontal: spacing.md,
-  },
-  filterChip: {
-    paddingHorizontal: spacing.md,
-    paddingVertical: spacing.sm,
-    borderRadius: radius.full,
-    backgroundColor: "rgba(255, 255, 255, 0.12)",
-  },
-  filterChipActive: {
-    backgroundColor: colors.text,
-  },
-  filterLabel: {
-    color: colors.text,
-    fontSize: fontSize.sm,
-    fontWeight: "600",
-  },
-  filterLabelActive: {
-    color: colors.background,
-  },
-  submitButton: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "center",
-    gap: spacing.sm,
-    minHeight: 48,
-    marginHorizontal: spacing.md,
-    paddingHorizontal: spacing.lg,
-    borderRadius: radius.full,
-    backgroundColor: colors.primary,
-  },
-  submitStory: {
-    alignSelf: "flex-end",
-  },
-  submitLabel: {
-    color: colors.text,
-    fontSize: fontSize.md,
-    fontWeight: "700",
-  },
-  pressed: {
-    opacity: 0.7,
-  },
-  postHeader: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-    paddingHorizontal: spacing.md,
-    paddingBottom: spacing.sm,
-  },
-  postTitle: {
-    color: colors.text,
-    fontSize: fontSize.md,
-    fontWeight: "700",
-  },
-  headerSpacer: {
-    width: 28,
-  },
-  canvasFrame: {
-    alignSelf: "center",
-  },
-  canvasTools: {
-    position: "absolute",
-    top: spacing.sm,
-    right: spacing.sm,
-  },
-  pageBadge: {
-    position: "absolute",
-    top: spacing.sm,
-    left: spacing.sm,
-    paddingHorizontal: spacing.sm,
-    paddingVertical: 2,
-    borderRadius: radius.full,
-    backgroundColor: "rgba(0, 0, 0, 0.55)",
-  },
-  pageBadgeText: {
-    color: colors.text,
-    fontSize: fontSize.sm,
-    fontWeight: "700",
-  },
-  postControls: {
-    gap: spacing.sm,
-    paddingTop: spacing.sm,
-    backgroundColor: "#000000",
-  },
-  stripRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    paddingRight: spacing.md,
-  },
-  strip: {
-    gap: spacing.sm,
-    paddingHorizontal: spacing.md,
-  },
-  thumb: {
-    width: 48,
-    height: 60,
-    borderRadius: radius.sm,
-    overflow: "hidden",
-    borderWidth: 2,
-    borderColor: "transparent",
-  },
-  thumbActive: {
-    borderColor: colors.primary,
-  },
-  thumbImage: {
-    width: "100%",
-    height: "100%",
-  },
-  addThumb: {
-    alignItems: "center",
-    justifyContent: "center",
-    borderColor: colors.border,
-    borderStyle: "dashed",
-  },
-  orderButtons: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: spacing.md,
-  },
-  tagRow: {
-    alignItems: "center",
-    gap: spacing.xs,
-    paddingHorizontal: spacing.md,
-  },
-  tagged: {
-    color: colors.textMuted,
-    fontSize: fontSize.sm,
-  },
-  tagChip: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 2,
-    paddingHorizontal: spacing.sm,
-    paddingVertical: 4,
-    borderRadius: radius.full,
-    backgroundColor: colors.surfaceElevated,
-  },
-  tagChipText: {
-    color: colors.text,
-    fontSize: fontSize.sm,
-    fontWeight: "600",
-  },
-  switchRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-    paddingHorizontal: spacing.md,
-  },
-  switchLabel: {
-    color: colors.text,
-    fontSize: fontSize.md,
-  },
-  caption: {
-    minHeight: 44,
-    marginHorizontal: spacing.md,
-    paddingHorizontal: spacing.md,
-    borderRadius: radius.md,
-    backgroundColor: colors.surface,
-    borderWidth: 1,
-    borderColor: colors.border,
-    color: colors.text,
-    fontSize: fontSize.md,
-  },
-});
+const useStyles = makeStyles(({ colors }) =>
+  StyleSheet.create({
+    screen: {
+      flex: 1,
+      backgroundColor: onPhoto.background,
+    },
+    flex: {
+      flex: 1,
+    },
+    storyTop: {
+      position: "absolute",
+      top: 0,
+      left: 0,
+      right: 0,
+      flexDirection: "row",
+      justifyContent: "space-between",
+      paddingHorizontal: spacing.md,
+    },
+    storyBottom: {
+      position: "absolute",
+      left: 0,
+      right: 0,
+      bottom: 0,
+      gap: spacing.md,
+    },
+    tools: {
+      flexDirection: "row",
+      gap: spacing.sm,
+    },
+    roundButton: {
+      width: 44,
+      height: 44,
+      borderRadius: radius.full,
+      alignItems: "center",
+      justifyContent: "center",
+      backgroundColor: onPhoto.scrim,
+    },
+    toolLabel: {
+      color: colors.text,
+      fontSize: fontSize.lg,
+      fontWeight: "800",
+    },
+    filters: {
+      gap: spacing.sm,
+      paddingHorizontal: spacing.md,
+    },
+    filterChip: {
+      paddingHorizontal: spacing.md,
+      paddingVertical: spacing.sm,
+      borderRadius: radius.full,
+      backgroundColor: onPhoto.fill,
+    },
+    filterChipActive: {
+      backgroundColor: colors.text,
+    },
+    filterLabel: {
+      color: colors.text,
+      fontSize: fontSize.sm,
+      fontWeight: "600",
+    },
+    filterLabelActive: {
+      color: colors.background,
+    },
+    submitButton: {
+      flexDirection: "row",
+      alignItems: "center",
+      justifyContent: "center",
+      gap: spacing.sm,
+      minHeight: 48,
+      marginHorizontal: spacing.md,
+      paddingHorizontal: spacing.lg,
+      borderRadius: radius.full,
+      backgroundColor: colors.accent,
+    },
+    submitStory: {
+      alignSelf: "flex-end",
+    },
+    submitLabel: {
+      color: colors.onAccent,
+      fontSize: fontSize.md,
+      fontWeight: "700",
+    },
+    pressed: {
+      opacity: 0.7,
+    },
+    postHeader: {
+      flexDirection: "row",
+      alignItems: "center",
+      justifyContent: "space-between",
+      paddingHorizontal: spacing.md,
+      paddingBottom: spacing.sm,
+    },
+    postTitle: {
+      color: colors.text,
+      fontSize: fontSize.md,
+      fontWeight: "700",
+    },
+    headerSpacer: {
+      width: 28,
+    },
+    canvasFrame: {
+      alignSelf: "center",
+    },
+    canvasTools: {
+      position: "absolute",
+      top: spacing.sm,
+      right: spacing.sm,
+    },
+    pageBadge: {
+      position: "absolute",
+      top: spacing.sm,
+      left: spacing.sm,
+      paddingHorizontal: spacing.sm,
+      paddingVertical: 2,
+      borderRadius: radius.full,
+      backgroundColor: onPhoto.scrimStrong,
+    },
+    pageBadgeText: {
+      color: colors.text,
+      fontSize: fontSize.sm,
+      fontWeight: "700",
+    },
+    postControls: {
+      gap: spacing.sm,
+      paddingTop: spacing.sm,
+      backgroundColor: onPhoto.background,
+    },
+    stripRow: {
+      flexDirection: "row",
+      alignItems: "center",
+      paddingRight: spacing.md,
+    },
+    strip: {
+      gap: spacing.sm,
+      paddingHorizontal: spacing.md,
+    },
+    thumb: {
+      width: 48,
+      height: 60,
+      borderRadius: radius.sm,
+      overflow: "hidden",
+      borderWidth: 2,
+      borderColor: "transparent",
+    },
+    thumbActive: {
+      borderColor: colors.accent,
+    },
+    thumbImage: {
+      width: "100%",
+      height: "100%",
+    },
+    addThumb: {
+      alignItems: "center",
+      justifyContent: "center",
+      borderColor: colors.border,
+      borderStyle: "dashed",
+    },
+    orderButtons: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: spacing.md,
+    },
+    tagRow: {
+      alignItems: "center",
+      gap: spacing.xs,
+      paddingHorizontal: spacing.md,
+    },
+    tagged: {
+      color: colors.textSecondary,
+      fontSize: fontSize.sm,
+    },
+    tagChip: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 2,
+      paddingHorizontal: spacing.sm,
+      paddingVertical: 4,
+      borderRadius: radius.full,
+      backgroundColor: colors.surfaceRaised,
+    },
+    tagChipText: {
+      color: colors.text,
+      fontSize: fontSize.sm,
+      fontWeight: "600",
+    },
+    switchRow: {
+      flexDirection: "row",
+      alignItems: "center",
+      justifyContent: "space-between",
+      paddingHorizontal: spacing.md,
+    },
+    switchLabel: {
+      color: colors.text,
+      fontSize: fontSize.md,
+    },
+    caption: {
+      minHeight: 44,
+      marginHorizontal: spacing.md,
+      paddingHorizontal: spacing.md,
+      borderRadius: radius.md,
+      backgroundColor: colors.surface,
+      borderWidth: 1,
+      borderColor: colors.border,
+      color: colors.text,
+      fontSize: fontSize.md,
+    },
+  }),
+);

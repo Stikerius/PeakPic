@@ -11,7 +11,7 @@ import { HighlightsRow } from "@/components/profile/highlights-row";
 import { PostGrid } from "@/components/profile/post-grid";
 import { FlameIcon } from "@/components/streak/flame-icon";
 import { MonthCalendar } from "@/components/streak/month-calendar";
-import { colors, fontSize, radius, spacing } from "@/constants/theme";
+import { fontSize, radius, spacing } from "@/constants/theme";
 import { getOrCreateDirectConversation } from "@/lib/chatRepo";
 import { describeError } from "@/lib/errors";
 import { listHighlights, type Highlight } from "@/lib/highlightRepo";
@@ -25,6 +25,7 @@ import {
   toDayKey,
   type DayKey,
 } from "@/lib/streak";
+import { makeStyles, useTheme } from "@/lib/theme";
 import {
   fetchProfileGrid,
   fetchUserProfile,
@@ -48,6 +49,7 @@ type Content = {
 type StatProps = { value: number; label: string; icon?: ReactNode; onPress?: () => void };
 
 function Stat({ value, label, icon, onPress }: StatProps) {
+  const styles = useStyles();
   const content = (
     <>
       <View style={styles.statValueRow}>
@@ -67,6 +69,8 @@ function Stat({ value, label, icon, onPress }: StatProps) {
 }
 
 export default function UserProfileScreen() {
+  const { colors } = useTheme();
+  const styles = useStyles();
   const { userId } = useLocalSearchParams<{ userId: string }>();
 
   const [summary, setSummary] = useState<UserProfileSummary | null | undefined>(undefined);
@@ -110,7 +114,6 @@ export default function UserProfileScreen() {
     void load();
   }, [userId]);
 
-
   async function openChat() {
     if (chatBusy) return;
     setChatBusy(true);
@@ -127,7 +130,7 @@ export default function UserProfileScreen() {
   if (summary === undefined) {
     return (
       <View style={styles.centered}>
-        {error !== null ? <Text style={styles.error}>{error}</Text> : <ActivityIndicator color={colors.primary} />}
+        {error !== null ? <Text style={styles.error}>{error}</Text> : <ActivityIndicator color={colors.accent} />}
       </View>
     );
   }
@@ -166,7 +169,7 @@ export default function UserProfileScreen() {
         <View style={styles.badges}>
           {summary.isPrivate && (
             <View style={styles.badge}>
-              <Ionicons name="lock-closed" size={11} color={colors.textMuted} />
+              <Ionicons name="lock-closed" size={11} color={colors.textSecondary} />
               <Text style={styles.badgeText}>Privat</Text>
             </View>
           )}
@@ -230,7 +233,7 @@ export default function UserProfileScreen() {
 
       {!summary.canSeePosts && !summary.canSeeStories ? (
         <View style={styles.locked}>
-          <Ionicons name="lock-closed-outline" size={36} color={colors.textMuted} />
+          <Ionicons name="lock-closed-outline" size={36} color={colors.textSecondary} />
           <Text style={styles.lockedTitle}>Dieses Profil ist privat</Text>
           <Text style={styles.muted}>
             {summary.followStatus === "pending"
@@ -239,14 +242,14 @@ export default function UserProfileScreen() {
           </Text>
         </View>
       ) : content === null ? (
-        <ActivityIndicator color={colors.primary} />
+        <ActivityIndicator color={colors.accent} />
       ) : (
         <>
           <HighlightsRow highlights={content.highlights} editable={false} />
 
           {!summary.canSeePosts ? (
             <View style={styles.locked}>
-              <Ionicons name="images-outline" size={32} color={colors.textMuted} />
+              <Ionicons name="images-outline" size={32} color={colors.textSecondary} />
               <Text style={styles.muted}>Kalender und Beiträge von @{profile.username} sehen nur Follower.</Text>
             </View>
           ) : (
@@ -277,124 +280,126 @@ export default function UserProfileScreen() {
   );
 }
 
-const styles = StyleSheet.create({
-  screen: {
-    flex: 1,
-    backgroundColor: colors.background,
-  },
-  content: {
-    paddingBottom: spacing.xl,
-    gap: spacing.md,
-  },
-  centered: {
-    flex: 1,
-    alignItems: "center",
-    justifyContent: "center",
-    padding: spacing.xl,
-    backgroundColor: colors.background,
-  },
-  header: {
-    alignItems: "center",
-    gap: spacing.xs,
-    paddingTop: spacing.lg,
-  },
-  username: {
-    marginTop: spacing.sm,
-    color: colors.text,
-    fontSize: fontSize.xl,
-    fontWeight: "700",
-  },
-  badges: {
-    flexDirection: "row",
-    gap: spacing.xs,
-  },
-  badge: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 3,
-    paddingHorizontal: spacing.sm,
-    paddingVertical: 2,
-    borderRadius: radius.sm,
-    backgroundColor: colors.surface,
-  },
-  badgeText: {
-    color: colors.textMuted,
-    fontSize: fontSize.sm,
-  },
-  followsYou: {
-    color: colors.textMuted,
-    fontSize: fontSize.sm,
-    paddingHorizontal: spacing.sm,
-    paddingVertical: 2,
-    borderRadius: radius.sm,
-    backgroundColor: colors.surface,
-    overflow: "hidden",
-  },
-  stats: {
-    flexDirection: "row",
-    marginHorizontal: spacing.md,
-    paddingVertical: spacing.md,
-    borderRadius: radius.lg,
-    backgroundColor: colors.surface,
-  },
-  stat: {
-    flex: 1,
-    alignItems: "center",
-    gap: 2,
-  },
-  statValueRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 2,
-  },
-  statValue: {
-    color: colors.text,
-    fontSize: fontSize.lg,
-    fontWeight: "800",
-  },
-  statLabel: {
-    color: colors.textMuted,
-    fontSize: fontSize.sm,
-  },
-  actions: {
-    flexDirection: "row",
-    gap: spacing.sm,
-    paddingHorizontal: spacing.md,
-  },
-  action: {
-    flex: 1,
-  },
-  locked: {
-    alignItems: "center",
-    gap: spacing.sm,
-    margin: spacing.md,
-    padding: spacing.xl,
-    borderRadius: radius.lg,
-    backgroundColor: colors.surface,
-  },
-  lockedTitle: {
-    color: colors.text,
-    fontSize: fontSize.lg,
-    fontWeight: "700",
-  },
-  calendar: {
-    paddingHorizontal: spacing.md,
-  },
-  sectionTitle: {
-    color: colors.text,
-    fontSize: fontSize.lg,
-    fontWeight: "700",
-    paddingHorizontal: spacing.md,
-  },
-  muted: {
-    color: colors.textMuted,
-    fontSize: fontSize.md,
-    textAlign: "center",
-  },
-  error: {
-    color: colors.danger,
-    fontSize: fontSize.sm,
-    textAlign: "center",
-    paddingHorizontal: spacing.md,
-  },
-});
+const useStyles = makeStyles(({ colors }) =>
+  StyleSheet.create({
+    screen: {
+      flex: 1,
+      backgroundColor: colors.background,
+    },
+    content: {
+      paddingBottom: spacing.xl,
+      gap: spacing.md,
+    },
+    centered: {
+      flex: 1,
+      alignItems: "center",
+      justifyContent: "center",
+      padding: spacing.xl,
+      backgroundColor: colors.background,
+    },
+    header: {
+      alignItems: "center",
+      gap: spacing.xs,
+      paddingTop: spacing.lg,
+    },
+    username: {
+      marginTop: spacing.sm,
+      color: colors.text,
+      fontSize: fontSize.xl,
+      fontWeight: "700",
+    },
+    badges: {
+      flexDirection: "row",
+      gap: spacing.xs,
+    },
+    badge: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 3,
+      paddingHorizontal: spacing.sm,
+      paddingVertical: 2,
+      borderRadius: radius.sm,
+      backgroundColor: colors.surface,
+    },
+    badgeText: {
+      color: colors.textSecondary,
+      fontSize: fontSize.sm,
+    },
+    followsYou: {
+      color: colors.textSecondary,
+      fontSize: fontSize.sm,
+      paddingHorizontal: spacing.sm,
+      paddingVertical: 2,
+      borderRadius: radius.sm,
+      backgroundColor: colors.surface,
+      overflow: "hidden",
+    },
+    stats: {
+      flexDirection: "row",
+      marginHorizontal: spacing.md,
+      paddingVertical: spacing.md,
+      borderRadius: radius.lg,
+      backgroundColor: colors.surface,
+    },
+    stat: {
+      flex: 1,
+      alignItems: "center",
+      gap: 2,
+    },
+    statValueRow: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 2,
+    },
+    statValue: {
+      color: colors.text,
+      fontSize: fontSize.lg,
+      fontWeight: "800",
+    },
+    statLabel: {
+      color: colors.textSecondary,
+      fontSize: fontSize.sm,
+    },
+    actions: {
+      flexDirection: "row",
+      gap: spacing.sm,
+      paddingHorizontal: spacing.md,
+    },
+    action: {
+      flex: 1,
+    },
+    locked: {
+      alignItems: "center",
+      gap: spacing.sm,
+      margin: spacing.md,
+      padding: spacing.xl,
+      borderRadius: radius.lg,
+      backgroundColor: colors.surface,
+    },
+    lockedTitle: {
+      color: colors.text,
+      fontSize: fontSize.lg,
+      fontWeight: "700",
+    },
+    calendar: {
+      paddingHorizontal: spacing.md,
+    },
+    sectionTitle: {
+      color: colors.text,
+      fontSize: fontSize.lg,
+      fontWeight: "700",
+      paddingHorizontal: spacing.md,
+    },
+    muted: {
+      color: colors.textSecondary,
+      fontSize: fontSize.md,
+      textAlign: "center",
+    },
+    error: {
+      color: colors.danger,
+      fontSize: fontSize.sm,
+      textAlign: "center",
+      paddingHorizontal: spacing.md,
+    },
+  }),
+);

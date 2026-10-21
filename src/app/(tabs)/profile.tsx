@@ -15,7 +15,7 @@ import { Avatar } from "@/components/avatar";
 import { HighlightsRow } from "@/components/profile/highlights-row";
 import { PostGrid } from "@/components/profile/post-grid";
 import { FlameIcon } from "@/components/streak/flame-icon";
-import { colors, fontSize, radius, spacing } from "@/constants/theme";
+import { fontSize, radius, spacing } from "@/constants/theme";
 import { useFollowRequestCount } from "@/hooks/use-follow-requests";
 import { useWorkoutDays } from "@/hooks/use-workout-days";
 import { describeError } from "@/lib/errors";
@@ -25,11 +25,14 @@ import { getMyProfile, updateMyAvatar, type Profile } from "@/lib/profileRepo";
 import { useSession } from "@/lib/session";
 import { fetchFollowCounts } from "@/lib/socialRepo";
 import { computeStreakStatsFromDays, flameTier, toDayKey } from "@/lib/streak";
+import { makeStyles, useTheme } from "@/lib/theme";
 import { fetchProfileGrid, type PostThumbnail } from "@/lib/userProfileRepo";
 
 const AVATAR_SIZE = 112;
 
 export default function ProfileScreen() {
+  const { colors } = useTheme();
+  const styles = useStyles();
   // Session can briefly be null while signing out, before the route guard unmounts us.
   const email = useSession().session?.user.email;
   const { days } = useWorkoutDays();
@@ -116,7 +119,7 @@ export default function ProfileScreen() {
         {error !== null ? (
           <Text style={styles.error}>{error}</Text>
         ) : (
-          <ActivityIndicator color={colors.primary} />
+          <ActivityIndicator color={colors.accent} />
         )}
       </View>
     );
@@ -136,9 +139,9 @@ export default function ProfileScreen() {
             <Avatar uri={profile.avatarUrl} username={profile.username} size={AVATAR_SIZE} />
             <View style={styles.avatarBadge}>
               {uploading ? (
-                <ActivityIndicator size="small" color={colors.text} />
+                <ActivityIndicator size="small" color={colors.onAccent} />
               ) : (
-                <Ionicons name="camera" size={16} color={colors.text} />
+                <Ionicons name="camera" size={16} color={colors.onAccent} />
               )}
             </View>
           </Pressable>
@@ -162,7 +165,7 @@ export default function ProfileScreen() {
               accessibilityRole="button"
               style={styles.requestsChip}
             >
-              <Ionicons name="person-add" size={14} color={colors.text} />
+              <Ionicons name="person-add" size={14} color={colors.onAccent} />
               <Text style={styles.requestsText}>
                 {requestCount} {requestCount === 1 ? "Follower-Anfrage" : "Follower-Anfragen"}
               </Text>
@@ -182,7 +185,7 @@ export default function ProfileScreen() {
               {stats.current > 0 ? (
                 <FlameIcon tier={flameTier(stats.current)} baseSize={28} />
               ) : (
-                <Ionicons name="flame-outline" size={28} color={colors.textMuted} />
+                <Ionicons name="flame-outline" size={28} color={colors.textSecondary} />
               )}
             </View>
             <Text style={styles.statValue}>{stats.current}</Text>
@@ -197,7 +200,7 @@ export default function ProfileScreen() {
           </View>
           <View style={styles.stat}>
             <View style={styles.statIcon}>
-              <Ionicons name="barbell" size={28} color={colors.primary} />
+              <Ionicons name="barbell" size={28} color={colors.accent} />
             </View>
             <Text style={styles.statValue}>{stats.trainingDays.size}</Text>
             <Text style={styles.statLabel}>Trainingstage</Text>
@@ -207,7 +210,7 @@ export default function ProfileScreen() {
 
       <Text style={[styles.sectionTitle, styles.padded]}>Beiträge</Text>
       {posts === null ? (
-        <ActivityIndicator color={colors.primary} />
+        <ActivityIndicator color={colors.accent} />
       ) : (
         <PostGrid posts={posts} emptyText="Noch keine Beiträge im Profil. Teile ein Workout im Feed." />
       )}
@@ -215,122 +218,124 @@ export default function ProfileScreen() {
   );
 }
 
-const styles = StyleSheet.create({
-  screen: {
-    flex: 1,
-    backgroundColor: colors.background,
-  },
-  content: {
-    paddingVertical: spacing.md,
-    gap: spacing.lg,
-  },
-  padded: {
-    paddingHorizontal: spacing.md,
-  },
-  section: {
-    gap: spacing.lg,
-  },
-  sectionTitle: {
-    color: colors.text,
-    fontSize: fontSize.lg,
-    fontWeight: "700",
-    marginBottom: -spacing.sm,
-  },
-  centered: {
-    flex: 1,
-    alignItems: "center",
-    justifyContent: "center",
-    padding: spacing.lg,
-    backgroundColor: colors.background,
-  },
-  header: {
-    alignItems: "center",
-    gap: spacing.xs,
-    paddingTop: spacing.md,
-  },
-  pressed: {
-    opacity: 0.7,
-  },
-  avatarBadge: {
-    position: "absolute",
-    right: 0,
-    bottom: 0,
-    width: 34,
-    height: 34,
-    borderRadius: radius.full,
-    alignItems: "center",
-    justifyContent: "center",
-    backgroundColor: colors.primary,
-    borderWidth: 3,
-    borderColor: colors.background,
-  },
-  username: {
-    marginTop: spacing.sm,
-    color: colors.text,
-    fontSize: fontSize.xl,
-    fontWeight: "700",
-  },
-  followRow: {
-    flexDirection: "row",
-    gap: spacing.lg,
-    marginTop: spacing.sm,
-  },
-  followText: {
-    color: colors.textMuted,
-    fontSize: fontSize.md,
-  },
-  followCount: {
-    color: colors.text,
-    fontWeight: "800",
-  },
-  requestsChip: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: spacing.xs,
-    marginTop: spacing.sm,
-    paddingHorizontal: spacing.md,
-    paddingVertical: 6,
-    borderRadius: radius.full,
-    backgroundColor: colors.primary,
-  },
-  requestsText: {
-    color: colors.text,
-    fontSize: fontSize.sm,
-    fontWeight: "700",
-  },
-  email: {
-    color: colors.textMuted,
-    fontSize: fontSize.sm,
-  },
-  error: {
-    color: colors.danger,
-    fontSize: fontSize.md,
-    textAlign: "center",
-  },
-  stats: {
-    flexDirection: "row",
-    gap: spacing.sm,
-  },
-  stat: {
-    flex: 1,
-    alignItems: "center",
-    gap: spacing.xs,
-    paddingVertical: spacing.md,
-    borderRadius: radius.lg,
-    backgroundColor: colors.surface,
-  },
-  statIcon: {
-    height: 44,
-    justifyContent: "flex-end",
-  },
-  statValue: {
-    color: colors.text,
-    fontSize: fontSize.xl,
-    fontWeight: "800",
-  },
-  statLabel: {
-    color: colors.textMuted,
-    fontSize: fontSize.sm,
-    textAlign: "center",
-  },
-});
+const useStyles = makeStyles(({ colors }) =>
+  StyleSheet.create({
+    screen: {
+      flex: 1,
+      backgroundColor: colors.background,
+    },
+    content: {
+      paddingVertical: spacing.md,
+      gap: spacing.lg,
+    },
+    padded: {
+      paddingHorizontal: spacing.md,
+    },
+    section: {
+      gap: spacing.lg,
+    },
+    sectionTitle: {
+      color: colors.text,
+      fontSize: fontSize.lg,
+      fontWeight: "700",
+      marginBottom: -spacing.sm,
+    },
+    centered: {
+      flex: 1,
+      alignItems: "center",
+      justifyContent: "center",
+      padding: spacing.lg,
+      backgroundColor: colors.background,
+    },
+    header: {
+      alignItems: "center",
+      gap: spacing.xs,
+      paddingTop: spacing.md,
+    },
+    pressed: {
+      opacity: 0.7,
+    },
+    avatarBadge: {
+      position: "absolute",
+      right: 0,
+      bottom: 0,
+      width: 34,
+      height: 34,
+      borderRadius: radius.full,
+      alignItems: "center",
+      justifyContent: "center",
+      backgroundColor: colors.accent,
+      borderWidth: 3,
+      borderColor: colors.background,
+    },
+    username: {
+      marginTop: spacing.sm,
+      color: colors.text,
+      fontSize: fontSize.xl,
+      fontWeight: "700",
+    },
+    followRow: {
+      flexDirection: "row",
+      gap: spacing.lg,
+      marginTop: spacing.sm,
+    },
+    followText: {
+      color: colors.textSecondary,
+      fontSize: fontSize.md,
+    },
+    followCount: {
+      color: colors.text,
+      fontWeight: "800",
+    },
+    requestsChip: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: spacing.xs,
+      marginTop: spacing.sm,
+      paddingHorizontal: spacing.md,
+      paddingVertical: 6,
+      borderRadius: radius.full,
+      backgroundColor: colors.accent,
+    },
+    requestsText: {
+      color: colors.onAccent,
+      fontSize: fontSize.sm,
+      fontWeight: "700",
+    },
+    email: {
+      color: colors.textSecondary,
+      fontSize: fontSize.sm,
+    },
+    error: {
+      color: colors.danger,
+      fontSize: fontSize.md,
+      textAlign: "center",
+    },
+    stats: {
+      flexDirection: "row",
+      gap: spacing.sm,
+    },
+    stat: {
+      flex: 1,
+      alignItems: "center",
+      gap: spacing.xs,
+      paddingVertical: spacing.md,
+      borderRadius: radius.lg,
+      backgroundColor: colors.surface,
+    },
+    statIcon: {
+      height: 44,
+      justifyContent: "flex-end",
+    },
+    statValue: {
+      color: colors.text,
+      fontSize: fontSize.xl,
+      fontWeight: "800",
+    },
+    statLabel: {
+      color: colors.textSecondary,
+      fontSize: fontSize.sm,
+      textAlign: "center",
+    },
+  }),
+);

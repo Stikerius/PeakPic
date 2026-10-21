@@ -3,8 +3,9 @@ import { useRef } from "react";
 import { StyleSheet, View } from "react-native";
 import { Gesture, GestureDetector } from "react-native-gesture-handler";
 
-import { colors } from "@/constants/theme";
+import { accent, onPhoto } from "@/constants/theme";
 import type { MediaOverlay } from "@/lib/photoEdits";
+import { makeStyles } from "@/lib/theme";
 
 export type { MediaOverlay };
 
@@ -17,7 +18,7 @@ const PADDING_Y = 8;
 export function contrastColor(hex: string): string {
   const value = parseInt(hex.replace("#", ""), 16);
   const [r, g, b] = [(value >> 16) & 255, (value >> 8) & 255, value & 255];
-  return 0.299 * r + 0.587 * g + 0.114 * b > 160 ? "#000000" : "#FFFFFF";
+  return 0.299 * r + 0.587 * g + 0.114 * b > 160 ? onPhoto.background : onPhoto.text;
 }
 
 type OverlayLayout = {
@@ -38,12 +39,12 @@ export function layoutOverlay(item: MediaOverlay, fonts: OverlayFonts): OverlayL
   const metrics = font.measureText(label);
   const width = metrics.width + 2 * PADDING_X;
   const height = metrics.height + 2 * PADDING_Y;
-  const background = isText ? (item.background ? item.color : null) : "#FFFFFF";
+  const background = isText ? (item.background ? item.color : null) : onPhoto.text;
   const textColor = isText
     ? item.background
       ? contrastColor(item.color)
       : item.color
-    : colors.primary;
+    : accent;
   return {
     label,
     font,
@@ -77,7 +78,7 @@ export function OverlayDrawing({ item, fonts }: { item: MediaOverlay; fonts: Ove
           y={layout.baseline.y + 1.5}
           text={layout.label}
           font={layout.font}
-          color="rgba(0, 0, 0, 0.45)"
+          color={onPhoto.scrim}
         />
       )}
       <SkiaText
@@ -102,6 +103,7 @@ type OverlayHandleProps = {
 
 /** Invisible touch area on top of an overlay: drag to move, tap to edit. */
 export function OverlayHandle({ item, fonts, onMove, onDragStart, onDragEnd, onTap }: OverlayHandleProps) {
+  const styles = useStyles();
   const start = useRef({ x: item.x, y: item.y });
   const { box } = layoutOverlay(item, fonts);
 
@@ -136,8 +138,10 @@ export function OverlayHandle({ item, fonts, onMove, onDragStart, onDragEnd, onT
   );
 }
 
-const styles = StyleSheet.create({
-  handle: {
-    position: "absolute",
-  },
-});
+const useStyles = makeStyles(({ colors }) =>
+  StyleSheet.create({
+    handle: {
+      position: "absolute",
+    },
+  }),
+);

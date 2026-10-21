@@ -6,7 +6,7 @@ import { Alert, Pressable, ScrollView, StyleSheet, Switch, Text, View } from "re
 
 import { Button } from "@/components/button";
 import { appIconForNativeName } from "@/constants/appIcons";
-import { colors, fontSize, radius, spacing } from "@/constants/theme";
+import { fontSize, radius, spacing, type ThemePreference } from "@/constants/theme";
 import { useFollowRequestCount } from "@/hooks/use-follow-requests";
 import { loadAppIconLibrary } from "@/lib/appIcon";
 import { signOut } from "@/lib/auth";
@@ -21,6 +21,7 @@ import {
   type PrivacySettings,
   type TagSettings,
 } from "@/lib/profileRepo";
+import { makeStyles, useTheme } from "@/lib/theme";
 import type { AudienceScope, TagPermission, Visibility } from "@/types/database";
 
 type RowProps = {
@@ -31,6 +32,8 @@ type RowProps = {
 };
 
 function SettingsRow({ icon, title, subtitle, onPress }: RowProps) {
+  const { colors } = useTheme();
+  const styles = useStyles();
   return (
     <Pressable
       onPress={onPress}
@@ -43,7 +46,7 @@ function SettingsRow({ icon, title, subtitle, onPress }: RowProps) {
         <Text style={styles.rowTitle}>{title}</Text>
         <Text style={styles.rowSubtitle}>{subtitle}</Text>
       </View>
-      <Ionicons name="chevron-forward" size={20} color={colors.textMuted} />
+      <Ionicons name="chevron-forward" size={20} color={colors.textSecondary} />
     </Pressable>
   );
 }
@@ -58,6 +61,7 @@ type ChoiceProps<T extends string> = {
 
 /** Segmented choice ("Alle" / "Nur Follower", "Wer darf mich markieren", …). */
 function Choice<T extends string>({ title, value, options, disabled = false, onChange }: ChoiceProps<T>) {
+  const styles = useStyles();
   const shown = value;
   return (
     <View style={[styles.choiceRow, disabled && styles.disabled]}>
@@ -87,6 +91,12 @@ const VISIBILITY_OPTIONS: { value: Visibility; label: string }[] = [
   { value: "followers", label: "Nur Follower" },
 ];
 
+const APPEARANCE_OPTIONS: { value: ThemePreference; label: string }[] = [
+  { value: "system", label: "System" },
+  { value: "light", label: "Hell" },
+  { value: "dark", label: "Dunkel" },
+];
+
 const TAG_OPTIONS: { value: TagPermission; label: string }[] = [
   { value: "everyone", label: "Alle" },
   { value: "connections", label: "Verbindungen" },
@@ -100,6 +110,8 @@ function countLabel(count: number | undefined): string {
 }
 
 export default function SettingsScreen() {
+  const { colors, preference, setPreference } = useTheme();
+  const styles = useStyles();
   const [counts, setCounts] = useState<Partial<Record<AudienceScope, number>>>({});
   const [appIconLabel, setAppIconLabel] = useState<string | null>(null);
   const [privacy, setPrivacy] = useState<PrivacySettings | null>(null);
@@ -194,7 +206,7 @@ export default function SettingsScreen() {
             value={privacy?.isPrivate ?? true}
             onValueChange={setPrivate}
             disabled={privacy === null}
-            trackColor={{ true: colors.primary, false: colors.border }}
+            trackColor={{ true: colors.accent, false: colors.border }}
             accessibilityLabel="Privates Profil"
           />
         </View>
@@ -250,7 +262,7 @@ export default function SettingsScreen() {
             value={tags?.tagNotifications ?? true}
             onValueChange={(tagNotifications) => void saveTags({ tagNotifications })}
             disabled={tags === null}
-            trackColor={{ true: colors.primary, false: colors.border }}
+            trackColor={{ true: colors.accent, false: colors.border }}
             accessibilityLabel="Mitteilung bei Markierungen"
           />
         </View>
@@ -265,7 +277,7 @@ export default function SettingsScreen() {
             value={tags?.tagChatMessages ?? true}
             onValueChange={(tagChatMessages) => void saveTags({ tagChatMessages })}
             disabled={tags === null}
-            trackColor={{ true: colors.primary, false: colors.border }}
+            trackColor={{ true: colors.accent, false: colors.border }}
             accessibilityLabel="Markierungen im Chat"
           />
         </View>
@@ -277,6 +289,13 @@ export default function SettingsScreen() {
 
       <Text style={[styles.sectionTitle, styles.sectionSpacing]}>Darstellung</Text>
       <View style={styles.card}>
+        <Choice
+          title="Erscheinungsbild"
+          options={APPEARANCE_OPTIONS}
+          value={preference}
+          onChange={setPreference}
+        />
+        <View style={styles.separator} />
         <SettingsRow
           icon="apps-outline"
           title="App-Icon"
@@ -313,93 +332,95 @@ export default function SettingsScreen() {
   );
 }
 
-const styles = StyleSheet.create({
-  screen: {
-    flex: 1,
-    backgroundColor: colors.background,
-  },
-  content: {
-    padding: spacing.md,
-    gap: spacing.sm,
-  },
-  sectionTitle: {
-    color: colors.textMuted,
-    fontSize: fontSize.sm,
-    fontWeight: "600",
-    paddingHorizontal: spacing.sm,
-  },
-  sectionSpacing: {
-    marginTop: spacing.md,
-  },
-  card: {
-    borderRadius: radius.lg,
-    backgroundColor: colors.surface,
-    overflow: "hidden",
-  },
-  row: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: spacing.md,
-    padding: spacing.md,
-  },
-  pressed: {
-    backgroundColor: colors.surfaceElevated,
-  },
-  rowText: {
-    flex: 1,
-    gap: 2,
-  },
-  rowTitle: {
-    color: colors.text,
-    fontSize: fontSize.md,
-    fontWeight: "600",
-  },
-  rowSubtitle: {
-    color: colors.textMuted,
-    fontSize: fontSize.sm,
-  },
-  separator: {
-    height: StyleSheet.hairlineWidth,
-    marginLeft: spacing.md + 22 + spacing.md,
-    backgroundColor: colors.border,
-  },
-  choiceRow: {
-    gap: spacing.sm,
-    padding: spacing.md,
-  },
-  disabled: {
-    opacity: 0.45,
-  },
-  segments: {
-    flexDirection: "row",
-    padding: 3,
-    borderRadius: radius.md,
-    backgroundColor: colors.surfaceElevated,
-  },
-  segment: {
-    flex: 1,
-    alignItems: "center",
-    paddingVertical: spacing.sm,
-    borderRadius: radius.sm,
-  },
-  segmentActive: {
-    backgroundColor: colors.primary,
-  },
-  segmentLabel: {
-    color: colors.textMuted,
-    fontSize: fontSize.sm,
-    fontWeight: "600",
-  },
-  segmentLabelActive: {
-    color: colors.text,
-  },
-  signOut: {
-    marginTop: spacing.lg,
-  },
-  footnote: {
-    color: colors.textMuted,
-    fontSize: fontSize.sm,
-    lineHeight: 19,
-    paddingHorizontal: spacing.sm,
-  },
-});
+const useStyles = makeStyles(({ colors }) =>
+  StyleSheet.create({
+    screen: {
+      flex: 1,
+      backgroundColor: colors.background,
+    },
+    content: {
+      padding: spacing.md,
+      gap: spacing.sm,
+    },
+    sectionTitle: {
+      color: colors.textSecondary,
+      fontSize: fontSize.sm,
+      fontWeight: "600",
+      paddingHorizontal: spacing.sm,
+    },
+    sectionSpacing: {
+      marginTop: spacing.md,
+    },
+    card: {
+      borderRadius: radius.lg,
+      backgroundColor: colors.surface,
+      overflow: "hidden",
+    },
+    row: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: spacing.md,
+      padding: spacing.md,
+    },
+    pressed: {
+      backgroundColor: colors.surfaceRaised,
+    },
+    rowText: {
+      flex: 1,
+      gap: 2,
+    },
+    rowTitle: {
+      color: colors.text,
+      fontSize: fontSize.md,
+      fontWeight: "600",
+    },
+    rowSubtitle: {
+      color: colors.textSecondary,
+      fontSize: fontSize.sm,
+    },
+    separator: {
+      height: StyleSheet.hairlineWidth,
+      marginLeft: spacing.md + 22 + spacing.md,
+      backgroundColor: colors.border,
+    },
+    choiceRow: {
+      gap: spacing.sm,
+      padding: spacing.md,
+    },
+    disabled: {
+      opacity: 0.45,
+    },
+    segments: {
+      flexDirection: "row",
+      padding: 3,
+      borderRadius: radius.md,
+      backgroundColor: colors.surfaceRaised,
+    },
+    segment: {
+      flex: 1,
+      alignItems: "center",
+      paddingVertical: spacing.sm,
+      borderRadius: radius.sm,
+    },
+    segmentActive: {
+      backgroundColor: colors.accent,
+    },
+    segmentLabel: {
+      color: colors.textSecondary,
+      fontSize: fontSize.sm,
+      fontWeight: "600",
+    },
+    segmentLabelActive: {
+      color: colors.onAccent,
+    },
+    signOut: {
+      marginTop: spacing.lg,
+    },
+    footnote: {
+      color: colors.textSecondary,
+      fontSize: fontSize.sm,
+      lineHeight: 19,
+      paddingHorizontal: spacing.sm,
+    },
+  }),
+);

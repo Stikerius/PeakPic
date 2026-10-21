@@ -5,15 +5,18 @@ import { ActivityIndicator, FlatList, StyleSheet, Text, TextInput, View } from "
 
 import { Button } from "@/components/button";
 import { ProfileRow } from "@/components/profile-row";
-import { colors, fontSize, radius, spacing } from "@/constants/theme";
+import { fontSize, radius, spacing } from "@/constants/theme";
 import { MESSAGE_MAX_LENGTH, shareCommentWithUser, sharePostWithUser } from "@/lib/chatRepo";
 import { listFollowing } from "@/lib/socialRepo";
+import { makeStyles, useTheme } from "@/lib/theme";
 import type { PublicProfile } from "@/types/social";
 
 type SendState = "sending" | "sent" | "error";
 
 /** Sends a post, or with `commentId` one of its comments, into direct chats. */
 export default function SharePostScreen() {
+  const { colors, scheme } = useTheme();
+  const styles = useStyles();
   const { postId, commentId } = useLocalSearchParams<{ postId: string; commentId?: string }>();
   const [people, setPeople] = useState<PublicProfile[] | null>(null);
   const [loadError, setLoadError] = useState(false);
@@ -52,7 +55,7 @@ export default function SharePostScreen() {
         {loadError ? (
           <Text style={styles.error}>Kontakte konnten nicht geladen werden.</Text>
         ) : (
-          <ActivityIndicator color={colors.primary} />
+          <ActivityIndicator color={colors.accent} />
         )}
       </View>
     );
@@ -62,10 +65,11 @@ export default function SharePostScreen() {
     <View style={styles.screen}>
       {people.length > 0 && (
         <TextInput
+          keyboardAppearance={scheme}
           value={note}
           onChangeText={setNote}
           placeholder="Nachricht hinzufügen (optional)"
-          placeholderTextColor={colors.textMuted}
+          placeholderTextColor={colors.textSecondary}
           maxLength={MESSAGE_MAX_LENGTH}
           multiline
           style={styles.note}
@@ -113,7 +117,7 @@ export default function SharePostScreen() {
         }}
         ListEmptyComponent={
           <View style={styles.centered}>
-            <Ionicons name="paper-plane-outline" size={48} color={colors.textMuted} />
+            <Ionicons name="paper-plane-outline" size={48} color={colors.textSecondary} />
             <Text style={styles.emptyText}>
               Du kannst Posts an Leute senden, denen du folgst. Du folgst noch niemandem.
             </Text>
@@ -131,65 +135,67 @@ export default function SharePostScreen() {
   );
 }
 
-const styles = StyleSheet.create({
-  screen: {
-    flex: 1,
-    backgroundColor: colors.background,
-  },
-  list: {
-    paddingVertical: spacing.sm,
-  },
-  emptyContainer: {
-    flexGrow: 1,
-  },
-  centered: {
-    flex: 1,
-    alignItems: "center",
-    justifyContent: "center",
-    gap: spacing.md,
-    padding: spacing.xl,
-    backgroundColor: colors.background,
-  },
-  note: {
-    minHeight: 44,
-    maxHeight: 120,
-    margin: spacing.md,
-    marginBottom: spacing.sm,
-    paddingHorizontal: spacing.md,
-    paddingTop: 12,
-    paddingBottom: 12,
-    borderRadius: radius.md,
-    backgroundColor: colors.surface,
-    borderWidth: 1,
-    borderColor: colors.border,
-    color: colors.text,
-    fontSize: fontSize.md,
-  },
-  hint: {
-    color: colors.textMuted,
-    fontSize: fontSize.sm,
-    paddingHorizontal: spacing.md,
-    paddingBottom: spacing.sm,
-  },
-  sent: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: spacing.xs,
-  },
-  sentText: {
-    color: colors.success,
-    fontSize: fontSize.sm,
-    fontWeight: "600",
-  },
-  emptyText: {
-    color: colors.textMuted,
-    fontSize: fontSize.md,
-    textAlign: "center",
-    lineHeight: 22,
-  },
-  error: {
-    color: colors.danger,
-    fontSize: fontSize.md,
-    textAlign: "center",
-  },
-});
+const useStyles = makeStyles(({ colors }) =>
+  StyleSheet.create({
+    screen: {
+      flex: 1,
+      backgroundColor: colors.background,
+    },
+    list: {
+      paddingVertical: spacing.sm,
+    },
+    emptyContainer: {
+      flexGrow: 1,
+    },
+    centered: {
+      flex: 1,
+      alignItems: "center",
+      justifyContent: "center",
+      gap: spacing.md,
+      padding: spacing.xl,
+      backgroundColor: colors.background,
+    },
+    note: {
+      minHeight: 44,
+      maxHeight: 120,
+      margin: spacing.md,
+      marginBottom: spacing.sm,
+      paddingHorizontal: spacing.md,
+      paddingTop: 12,
+      paddingBottom: 12,
+      borderRadius: radius.md,
+      backgroundColor: colors.surface,
+      borderWidth: 1,
+      borderColor: colors.border,
+      color: colors.text,
+      fontSize: fontSize.md,
+    },
+    hint: {
+      color: colors.textSecondary,
+      fontSize: fontSize.sm,
+      paddingHorizontal: spacing.md,
+      paddingBottom: spacing.sm,
+    },
+    sent: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: spacing.xs,
+    },
+    sentText: {
+      color: colors.success,
+      fontSize: fontSize.sm,
+      fontWeight: "600",
+    },
+    emptyText: {
+      color: colors.textSecondary,
+      fontSize: fontSize.md,
+      textAlign: "center",
+      lineHeight: 22,
+    },
+    error: {
+      color: colors.danger,
+      fontSize: fontSize.md,
+      textAlign: "center",
+    },
+  }),
+);

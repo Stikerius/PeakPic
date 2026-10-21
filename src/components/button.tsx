@@ -7,7 +7,8 @@ import {
   type ViewStyle,
 } from "react-native";
 
-import { colors, fontSize, radius, spacing } from "@/constants/theme";
+import { fontSize, radius, spacing } from "@/constants/theme";
+import { makeStyles, useTheme } from "@/lib/theme";
 
 type ButtonVariant = "primary" | "secondary";
 type ButtonSize = "md" | "sm";
@@ -31,6 +32,8 @@ export function Button({
   loading = false,
   style,
 }: ButtonProps) {
+  const { colors } = useTheme();
+  const styles = useStyles();
   const isDisabled = disabled || loading;
   return (
     <Pressable
@@ -47,44 +50,51 @@ export function Button({
       ]}
     >
       {loading ? (
-        <ActivityIndicator color={colors.text} />
+        <ActivityIndicator color={variant === "primary" ? colors.onAccent : colors.text} />
       ) : (
-        <Text style={[styles.label, size === "sm" && styles.smallLabel]}>{label}</Text>
+        <Text style={[styles.label, variant === "primary" && styles.primaryLabel, size === "sm" && styles.smallLabel]}>
+          {label}
+        </Text>
       )}
     </Pressable>
   );
 }
 
-const styles = StyleSheet.create({
-  base: {
-    minHeight: 48,
-    paddingHorizontal: spacing.lg,
-    borderRadius: radius.md,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  small: {
-    minHeight: 34,
-    paddingHorizontal: spacing.md,
-    borderRadius: radius.sm,
-  },
-  primary: {
-    backgroundColor: colors.primary,
-  },
-  secondary: {
-    backgroundColor: colors.surfaceElevated,
-    borderWidth: 1,
-    borderColor: colors.border,
-  },
-  dimmed: {
-    opacity: 0.6,
-  },
-  label: {
-    color: colors.text,
-    fontSize: fontSize.md,
-    fontWeight: "600",
-  },
-  smallLabel: {
-    fontSize: fontSize.sm,
-  },
-});
+const useStyles = makeStyles(({ colors }) =>
+  StyleSheet.create({
+    base: {
+      minHeight: 48,
+      paddingHorizontal: spacing.lg,
+      borderRadius: radius.md,
+      alignItems: "center",
+      justifyContent: "center",
+    },
+    small: {
+      minHeight: 34,
+      paddingHorizontal: spacing.md,
+      borderRadius: radius.sm,
+    },
+    primary: {
+      backgroundColor: colors.accent,
+    },
+    secondary: {
+      backgroundColor: colors.surfaceRaised,
+      borderWidth: 1,
+      borderColor: colors.border,
+    },
+    dimmed: {
+      opacity: 0.6,
+    },
+    label: {
+      color: colors.text,
+      fontSize: fontSize.md,
+      fontWeight: "600",
+    },
+    primaryLabel: {
+      color: colors.onAccent,
+    },
+    smallLabel: {
+      fontSize: fontSize.sm,
+    },
+  }),
+);

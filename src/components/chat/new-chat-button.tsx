@@ -2,9 +2,12 @@ import Ionicons from "@expo/vector-icons/Ionicons";
 import { Link } from "expo-router";
 import { Pressable, StyleSheet } from "react-native";
 
-import { colors, spacing } from "@/constants/theme";
+import { spacing } from "@/constants/theme";
+import { makeStyles, useTheme } from "@/lib/theme";
 
 export function NewChatButton() {
+  const { colors } = useTheme();
+  const styles = useStyles();
   return (
     <Link href="/chats/new" asChild>
       <Pressable
@@ -19,8 +22,10 @@ export function NewChatButton() {
   );
 }
 
-const styles = StyleSheet.create({
-  button: {
-    paddingHorizontal: spacing.md,
-  },
-});
+const useStyles = makeStyles(({ colors }) =>
+  StyleSheet.create({
+    button: {
+      paddingHorizontal: spacing.md,
+    },
+  }),
+);

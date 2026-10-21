@@ -6,8 +6,9 @@ import { Pressable, StyleSheet, Text, View } from "react-native";
 import { SharedCommentCard } from "@/components/chat/shared-comment-card";
 import { SharedPostCard } from "@/components/chat/shared-post-card";
 import { TaggedText } from "@/components/tagged-text";
-import { colors, fontSize, radius, spacing } from "@/constants/theme";
+import { fontSize, radius, spacing } from "@/constants/theme";
 import { formatTime } from "@/lib/format";
+import { makeStyles, useTheme } from "@/lib/theme";
 import type { ChatMessage } from "@/types/chat";
 
 type MessageBubbleProps = {
@@ -40,6 +41,8 @@ export function MessageBubble({
   onPressQuote,
   onPressReaction,
 }: MessageBubbleProps) {
+  const { colors } = useTheme();
+  const styles = useStyles();
   const reactions = groupReactions(message, myId);
   const quote = message.replyTo;
 
@@ -112,7 +115,7 @@ export function MessageBubble({
       )}
       {message.body !== null && (
         <View style={[styles.bubble, mine ? styles.bubbleMine : styles.bubbleTheirs]}>
-          <TaggedText text={message.body} style={styles.body} linkStyle={styles.bodyLink} />
+          <TaggedText text={message.body} style={[styles.body, mine && styles.bodyMine]} linkStyle={styles.bodyLink} />
         </View>
       )}
       {reactions.length > 0 && (
@@ -133,7 +136,7 @@ export function MessageBubble({
       )}
       <View style={styles.meta}>
         {message.pinnedAt !== null && (
-          <Ionicons name="pin" size={11} color={colors.textMuted} accessibilityLabel="Angeheftet" />
+          <Ionicons name="pin" size={11} color={colors.textSecondary} accessibilityLabel="Angeheftet" />
         )}
         <Text style={styles.time}>{message.pending ? "Wird gesendet…" : formatTime(message.createdAt)}</Text>
       </View>
@@ -141,143 +144,148 @@ export function MessageBubble({
   );
 }
 
-const styles = StyleSheet.create({
-  row: {
-    maxWidth: "80%",
-    gap: 2,
-    marginVertical: 3,
-    borderRadius: radius.lg,
-  },
-  rowMine: {
-    alignSelf: "flex-end",
-    alignItems: "flex-end",
-  },
-  rowTheirs: {
-    alignSelf: "flex-start",
-    alignItems: "flex-start",
-  },
-  pending: {
-    opacity: 0.6,
-  },
-  highlighted: {
-    backgroundColor: colors.primaryMuted,
-  },
-  tagHeader: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: spacing.xs,
-    paddingHorizontal: spacing.xs,
-  },
-  tagHeaderMine: {
-    alignSelf: "flex-end",
-  },
-  tagText: {
-    color: colors.textMuted,
-    fontSize: fontSize.sm,
-    fontWeight: "600",
-  },
-  storyCard: {
-    borderRadius: radius.lg,
-    overflow: "hidden",
-  },
-  storyImage: {
-    width: 140,
-    height: 224,
-    backgroundColor: colors.surfaceElevated,
-  },
-  storyGone: {
-    alignItems: "center",
-    justifyContent: "center",
-    padding: spacing.sm,
-  },
-  storyGoneText: {
-    color: colors.textMuted,
-    fontSize: fontSize.sm,
-    textAlign: "center",
-  },
-  quote: {
-    maxWidth: "100%",
-    paddingHorizontal: spacing.sm,
-    paddingVertical: spacing.xs,
-    borderLeftWidth: 3,
-    borderRadius: radius.sm,
-    backgroundColor: colors.surface,
-  },
-  quoteMine: {
-    borderLeftColor: colors.primary,
-  },
-  quoteTheirs: {
-    borderLeftColor: colors.textMuted,
-  },
-  quoteSender: {
-    color: colors.text,
-    fontSize: fontSize.sm - 1,
-    fontWeight: "700",
-  },
-  quoteText: {
-    color: colors.textMuted,
-    fontSize: fontSize.sm,
-  },
-  bubble: {
-    paddingHorizontal: spacing.md,
-    paddingVertical: spacing.sm,
-    borderRadius: radius.lg,
-  },
-  bubbleMine: {
-    backgroundColor: colors.primary,
-    borderBottomRightRadius: radius.sm,
-  },
-  bubbleTheirs: {
-    backgroundColor: colors.surfaceElevated,
-    borderBottomLeftRadius: radius.sm,
-  },
-  bodyLink: {
-    textDecorationLine: "underline",
-  },
-  body: {
-    color: colors.text,
-    fontSize: fontSize.md,
-    lineHeight: 21,
-  },
-  reactions: {
-    flexDirection: "row",
-    flexWrap: "wrap",
-    gap: spacing.xs,
-    marginTop: -spacing.xs,
-  },
-  reactionsMine: {
-    justifyContent: "flex-end",
-  },
-  chip: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 2,
-    paddingHorizontal: 6,
-    paddingVertical: 2,
-    borderRadius: radius.full,
-    backgroundColor: colors.surfaceElevated,
-    borderWidth: 1,
-    borderColor: colors.background,
-  },
-  chipMine: {
-    borderColor: colors.primary,
-  },
-  chipEmoji: {
-    fontSize: 14,
-  },
-  chipCount: {
-    color: colors.text,
-    fontSize: 11,
-    fontWeight: "700",
-  },
-  meta: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 3,
-    paddingHorizontal: spacing.xs,
-  },
-  time: {
-    color: colors.textMuted,
-    fontSize: 11,
-  },
-});
+const useStyles = makeStyles(({ colors }) =>
+  StyleSheet.create({
+    row: {
+      maxWidth: "80%",
+      gap: 2,
+      marginVertical: 3,
+      borderRadius: radius.lg,
+    },
+    rowMine: {
+      alignSelf: "flex-end",
+      alignItems: "flex-end",
+    },
+    rowTheirs: {
+      alignSelf: "flex-start",
+      alignItems: "flex-start",
+    },
+    pending: {
+      opacity: 0.6,
+    },
+    highlighted: {
+      backgroundColor: colors.accentSoft,
+    },
+    tagHeader: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: spacing.xs,
+      paddingHorizontal: spacing.xs,
+    },
+    tagHeaderMine: {
+      alignSelf: "flex-end",
+    },
+    tagText: {
+      color: colors.textSecondary,
+      fontSize: fontSize.sm,
+      fontWeight: "600",
+    },
+    storyCard: {
+      borderRadius: radius.lg,
+      overflow: "hidden",
+    },
+    storyImage: {
+      width: 140,
+      height: 224,
+      backgroundColor: colors.surfaceRaised,
+    },
+    storyGone: {
+      alignItems: "center",
+      justifyContent: "center",
+      padding: spacing.sm,
+    },
+    storyGoneText: {
+      color: colors.textSecondary,
+      fontSize: fontSize.sm,
+      textAlign: "center",
+    },
+    quote: {
+      maxWidth: "100%",
+      paddingHorizontal: spacing.sm,
+      paddingVertical: spacing.xs,
+      borderLeftWidth: 3,
+      borderRadius: radius.sm,
+      backgroundColor: colors.surface,
+    },
+    quoteMine: {
+      borderLeftColor: colors.accent,
+    },
+    quoteTheirs: {
+      borderLeftColor: colors.textSecondary,
+    },
+    quoteSender: {
+      color: colors.text,
+      fontSize: fontSize.sm - 1,
+      fontWeight: "700",
+    },
+    quoteText: {
+      color: colors.textSecondary,
+      fontSize: fontSize.sm,
+    },
+    bubble: {
+      paddingHorizontal: spacing.md,
+      paddingVertical: spacing.sm,
+      borderRadius: radius.lg,
+    },
+    bubbleMine: {
+      backgroundColor: colors.accent,
+      borderBottomRightRadius: radius.sm,
+    },
+    bubbleTheirs: {
+      backgroundColor: colors.surfaceRaised,
+      borderBottomLeftRadius: radius.sm,
+    },
+    bodyLink: {
+      textDecorationLine: "underline",
+    },
+    body: {
+      color: colors.text,
+      fontSize: fontSize.md,
+      lineHeight: 21,
+    },
+    bodyMine: {
+      color: colors.onAccent,
+    },
+    reactions: {
+      flexDirection: "row",
+      flexWrap: "wrap",
+      gap: spacing.xs,
+      marginTop: -spacing.xs,
+    },
+    reactionsMine: {
+      justifyContent: "flex-end",
+    },
+    chip: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 2,
+      paddingHorizontal: 6,
+      paddingVertical: 2,
+      borderRadius: radius.full,
+      backgroundColor: colors.surfaceRaised,
+      borderWidth: 1,
+      borderColor: colors.background,
+    },
+    chipMine: {
+      borderColor: colors.accent,
+    },
+    chipEmoji: {
+      fontSize: 14,
+    },
+    chipCount: {
+      color: colors.text,
+      fontSize: 11,
+      fontWeight: "700",
+    },
+    meta: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 3,
+      paddingHorizontal: spacing.xs,
+    },
+    time: {
+      color: colors.textSecondary,
+      fontSize: 11,
+    },
+  }),
+);

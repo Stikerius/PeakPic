@@ -1,7 +1,7 @@
 import { Image } from "expo-image";
 import { StyleSheet, Text, View } from "react-native";
 
-import { colors } from "@/constants/theme";
+import { makeStyles } from "@/lib/theme";
 
 type AvatarProps = {
   uri: string | null;
@@ -10,6 +10,7 @@ type AvatarProps = {
 };
 
 export function Avatar({ uri, username, size }: AvatarProps) {
+  const styles = useStyles();
   const dimensions = { width: size, height: size, borderRadius: size / 2 };
   if (uri !== null) {
     return (
@@ -31,17 +32,19 @@ export function Avatar({ uri, username, size }: AvatarProps) {
   );
 }
 
-const styles = StyleSheet.create({
-  image: {
-    backgroundColor: colors.surfaceElevated,
-  },
-  placeholder: {
-    alignItems: "center",
-    justifyContent: "center",
-    backgroundColor: colors.primaryMuted,
-  },
-  initial: {
-    color: colors.text,
-    fontWeight: "700",
-  },
-});
+const useStyles = makeStyles(({ colors }) =>
+  StyleSheet.create({
+    image: {
+      backgroundColor: colors.surfaceRaised,
+    },
+    placeholder: {
+      alignItems: "center",
+      justifyContent: "center",
+      backgroundColor: colors.accentSoft,
+    },
+    initial: {
+      color: colors.text,
+      fontWeight: "700",
+    },
+  }),
+);

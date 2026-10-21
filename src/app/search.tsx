@@ -5,13 +5,16 @@ import { ActivityIndicator, FlatList, StyleSheet, Text, TextInput, View } from "
 import { FollowButton } from "@/components/follow-button";
 import { ProfileRow } from "@/components/profile-row";
 import { useOpenProfile } from "@/hooks/use-open-profile";
-import { colors, fontSize, radius, spacing } from "@/constants/theme";
+import { fontSize, radius, spacing } from "@/constants/theme";
 import { getMyFollowStatuses, listFollowing, searchProfiles, type FollowStatus } from "@/lib/socialRepo";
+import { makeStyles, useTheme } from "@/lib/theme";
 import type { PublicProfile } from "@/types/social";
 
 const SEARCH_DEBOUNCE_MS = 300;
 
 export default function SearchScreen() {
+  const { colors, scheme } = useTheme();
+  const styles = useStyles();
   const [query, setQuery] = useState("");
   const [results, setResults] = useState<PublicProfile[]>([]);
   const [following, setFollowingProfiles] = useState<PublicProfile[]>([]);
@@ -76,12 +79,13 @@ export default function SearchScreen() {
   return (
     <View style={styles.screen}>
       <View style={styles.searchBar}>
-        <Ionicons name="search" size={18} color={colors.textMuted} />
+        <Ionicons name="search" size={18} color={colors.textSecondary} />
         <TextInput
+          keyboardAppearance={scheme}
           value={query}
           onChangeText={setQuery}
           placeholder="Username suchen"
-          placeholderTextColor={colors.textMuted}
+          placeholderTextColor={colors.textSecondary}
           autoCapitalize="none"
           autoCorrect={false}
           autoFocus
@@ -89,7 +93,7 @@ export default function SearchScreen() {
           style={styles.searchInput}
           accessibilityLabel="Username suchen"
         />
-        {searching && <ActivityIndicator size="small" color={colors.textMuted} />}
+        {searching && <ActivityIndicator size="small" color={colors.textSecondary} />}
       </View>
 
       {error !== null && <Text style={styles.error}>{error}</Text>}
@@ -131,44 +135,46 @@ export default function SearchScreen() {
   );
 }
 
-const styles = StyleSheet.create({
-  screen: {
-    flex: 1,
-    backgroundColor: colors.background,
-  },
-  searchBar: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: spacing.sm,
-    margin: spacing.md,
-    paddingHorizontal: spacing.md,
-    borderRadius: radius.md,
-    backgroundColor: colors.surface,
-    borderWidth: 1,
-    borderColor: colors.border,
-  },
-  searchInput: {
-    flex: 1,
-    minHeight: 44,
-    color: colors.text,
-    fontSize: fontSize.md,
-  },
-  sectionTitle: {
-    color: colors.textMuted,
-    fontSize: fontSize.sm,
-    fontWeight: "600",
-    paddingHorizontal: spacing.md,
-    paddingBottom: spacing.xs,
-  },
-  emptyText: {
-    color: colors.textMuted,
-    fontSize: fontSize.md,
-    textAlign: "center",
-    padding: spacing.xl,
-  },
-  error: {
-    color: colors.danger,
-    fontSize: fontSize.sm,
-    paddingHorizontal: spacing.md,
-  },
-});
+const useStyles = makeStyles(({ colors }) =>
+  StyleSheet.create({
+    screen: {
+      flex: 1,
+      backgroundColor: colors.background,
+    },
+    searchBar: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: spacing.sm,
+      margin: spacing.md,
+      paddingHorizontal: spacing.md,
+      borderRadius: radius.md,
+      backgroundColor: colors.surface,
+      borderWidth: 1,
+      borderColor: colors.border,
+    },
+    searchInput: {
+      flex: 1,
+      minHeight: 44,
+      color: colors.text,
+      fontSize: fontSize.md,
+    },
+    sectionTitle: {
+      color: colors.textSecondary,
+      fontSize: fontSize.sm,
+      fontWeight: "600",
+      paddingHorizontal: spacing.md,
+      paddingBottom: spacing.xs,
+    },
+    emptyText: {
+      color: colors.textSecondary,
+      fontSize: fontSize.md,
+      textAlign: "center",
+      padding: spacing.xl,
+    },
+    error: {
+      color: colors.danger,
+      fontSize: fontSize.sm,
+      paddingHorizontal: spacing.md,
+    },
+  }),
+);

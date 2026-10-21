@@ -23,7 +23,7 @@ import { HighlightPicker } from "@/components/stories/highlight-picker";
 import { StoryActivitySheet } from "@/components/stories/story-activity-sheet";
 import { useOpenProfile } from "@/hooks/use-open-profile";
 import { useSwipeToDismiss } from "@/hooks/use-swipe-to-dismiss";
-import { colors, fontSize, radius, spacing } from "@/constants/theme";
+import { fontSize, onPhoto, radius, spacing } from "@/constants/theme";
 import { describeError } from "@/lib/errors";
 import { emitAppEvent } from "@/lib/events";
 import { formatRelativeTime } from "@/lib/format";
@@ -37,6 +37,7 @@ import {
 import { fetchStoryActivity, fetchUserStoryGroup, type StoryActivity } from "@/lib/storyRepo";
 import { useSession } from "@/lib/session";
 import { deleteStory, markSeen, resortStories, toggleLike, useStories } from "@/lib/storyStore";
+import { DarkScheme, makeStyles, useTheme } from "@/lib/theme";
 import type { StoryGroup } from "@/types/social";
 
 const STORY_DURATION_MS = 5000;
@@ -73,6 +74,7 @@ function PageSlot({
   width: number;
   children: ReactNode;
 }) {
+  const styles = useStyles();
   const slotStyle = useAnimatedStyle(() => {
     const offset = index * width + pageX.value;
     return {
@@ -88,6 +90,7 @@ function PageSlot({
 
 /** Static preview of a neighbouring person, visible while swiping towards them. */
 function StoryPreview({ group, topInset }: { group: StoryGroup; topInset: number }) {
+  const styles = useStyles();
   const story = group.stories[entryIndex(group)];
   return (
     <View style={styles.flex}>
@@ -112,6 +115,7 @@ function StoryPreview({ group, topInset }: { group: StoryGroup; topInset: number
 }
 
 function ProgressSegment({ state, progress }: { state: "done" | "active" | "todo"; progress: SharedValue<number> }) {
+  const styles = useStyles();
   const fillStyle = useAnimatedStyle(() => ({
     width: `${(state === "done" ? 1 : state === "active" ? progress.value : 0) * 100}%`,
   }));
@@ -123,6 +127,16 @@ function ProgressSegment({ state, progress }: { state: "done" | "active" | "todo
 }
 
 export default function StoryViewerScreen() {
+  return (
+    <DarkScheme>
+      <StoryViewerScreenContent />
+    </DarkScheme>
+  );
+}
+
+function StoryViewerScreenContent() {
+  const { colors } = useTheme();
+  const styles = useStyles();
   // With highlightId: the stories of one highlight (also expired ones), no other people.
   // With only=1: just this person's active stories (e.g. opened from their profile).
   // With storyId (in those modes): start at exactly that story (links from chats/notifications).
@@ -358,7 +372,7 @@ export default function StoryViewerScreen() {
     return (
       <View style={[styles.screen, styles.missing, styles.gone]}>
         <StatusBar hidden />
-        <Ionicons name="time-outline" size={48} color={colors.textMuted} />
+        <Ionicons name="time-outline" size={48} color={colors.textSecondary} />
         <Text style={styles.goneTitle}>Diese Story ist nicht mehr verfügbar</Text>
         <Text style={styles.goneText}>Sie ist abgelaufen oder wurde gelöscht.</Text>
         <Pressable onPress={close} accessibilityRole="button" style={styles.goneButton}>
@@ -466,7 +480,7 @@ export default function StoryViewerScreen() {
                 />
               ) : (
                 <View style={[styles.flex, styles.missing]} onLayout={() => setLoadedId(story.id)}>
-                  <Ionicons name="image-outline" size={48} color={colors.textMuted} />
+                  <Ionicons name="image-outline" size={48} color={colors.textSecondary} />
                 </View>
               )}
             </View>
@@ -612,146 +626,148 @@ export default function StoryViewerScreen() {
   );
 }
 
-const styles = StyleSheet.create({
-  screen: {
-    flex: 1,
-    backgroundColor: "#000000",
-  },
-  slot: {
-    overflow: "hidden",
-    backgroundColor: "#000000",
-  },
-  flex: {
-    flex: 1,
-  },
-  missing: {
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  top: {
-    position: "absolute",
-    top: 0,
-    left: 0,
-    right: 0,
-    paddingHorizontal: spacing.sm,
-    gap: spacing.sm,
-  },
-  progressRow: {
-    flexDirection: "row",
-    gap: spacing.xs,
-  },
-  segment: {
-    flex: 1,
-    height: 3,
-    borderRadius: radius.full,
-    overflow: "hidden",
-    backgroundColor: "rgba(255, 255, 255, 0.35)",
-  },
-  segmentFill: {
-    height: "100%",
-    backgroundColor: colors.text,
-  },
-  header: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: spacing.sm,
-    paddingHorizontal: spacing.xs,
-  },
-  author: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: spacing.sm,
-  },
-  username: {
-    color: colors.text,
-    fontSize: fontSize.md,
-    fontWeight: "700",
-  },
-  time: {
-    color: "rgba(255, 255, 255, 0.75)",
-    fontSize: fontSize.sm,
-  },
-  bottom: {
-    position: "absolute",
-    left: 0,
-    right: 0,
-    bottom: 0,
-    flexDirection: "row",
-    alignItems: "flex-end",
-    gap: spacing.md,
-    paddingHorizontal: spacing.lg,
-  },
-  mentions: {
-    flex: 1,
-    flexDirection: "row",
-    flexWrap: "wrap",
-    gap: spacing.xs,
-  },
-  activityPill: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 4,
-    paddingHorizontal: spacing.sm,
-    paddingVertical: 6,
-    borderRadius: radius.full,
-    backgroundColor: "rgba(0, 0, 0, 0.5)",
-  },
-  activityText: {
-    color: colors.text,
-    fontSize: fontSize.sm,
-    fontWeight: "700",
-    marginRight: 4,
-  },
-  mentionChip: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 4,
-    paddingHorizontal: spacing.sm,
-    paddingVertical: 4,
-    borderRadius: radius.full,
-    backgroundColor: "rgba(255, 255, 255, 0.85)",
-  },
-  mentionText: {
-    color: colors.background,
-    fontSize: fontSize.sm,
-    fontWeight: "700",
-  },
-  gone: {
-    gap: spacing.md,
-    padding: spacing.xl,
-  },
-  goneTitle: {
-    color: colors.text,
-    fontSize: fontSize.lg,
-    fontWeight: "700",
-    textAlign: "center",
-  },
-  goneText: {
-    color: colors.textMuted,
-    fontSize: fontSize.md,
-    textAlign: "center",
-  },
-  goneButton: {
-    paddingHorizontal: spacing.lg,
-    paddingVertical: spacing.sm,
-    borderRadius: radius.full,
-    backgroundColor: colors.surfaceElevated,
-  },
-  goneButtonText: {
-    color: colors.text,
-    fontSize: fontSize.md,
-    fontWeight: "700",
-  },
-  ownActions: {
-    flexDirection: "row",
-    gap: spacing.sm,
-  },
-  roundButton: {
-    width: 52,
-    height: 52,
-    borderRadius: radius.full,
-    alignItems: "center",
-    justifyContent: "center",
-    backgroundColor: "rgba(0, 0, 0, 0.35)",
-  },
-});
+const useStyles = makeStyles(({ colors }) =>
+  StyleSheet.create({
+    screen: {
+      flex: 1,
+      backgroundColor: onPhoto.background,
+    },
+    slot: {
+      overflow: "hidden",
+      backgroundColor: onPhoto.background,
+    },
+    flex: {
+      flex: 1,
+    },
+    missing: {
+      alignItems: "center",
+      justifyContent: "center",
+    },
+    top: {
+      position: "absolute",
+      top: 0,
+      left: 0,
+      right: 0,
+      paddingHorizontal: spacing.sm,
+      gap: spacing.sm,
+    },
+    progressRow: {
+      flexDirection: "row",
+      gap: spacing.xs,
+    },
+    segment: {
+      flex: 1,
+      height: 3,
+      borderRadius: radius.full,
+      overflow: "hidden",
+      backgroundColor: onPhoto.fillStrong,
+    },
+    segmentFill: {
+      height: "100%",
+      backgroundColor: colors.text,
+    },
+    header: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: spacing.sm,
+      paddingHorizontal: spacing.xs,
+    },
+    author: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: spacing.sm,
+    },
+    username: {
+      color: colors.text,
+      fontSize: fontSize.md,
+      fontWeight: "700",
+    },
+    time: {
+      color: onPhoto.textSecondary,
+      fontSize: fontSize.sm,
+    },
+    bottom: {
+      position: "absolute",
+      left: 0,
+      right: 0,
+      bottom: 0,
+      flexDirection: "row",
+      alignItems: "flex-end",
+      gap: spacing.md,
+      paddingHorizontal: spacing.lg,
+    },
+    mentions: {
+      flex: 1,
+      flexDirection: "row",
+      flexWrap: "wrap",
+      gap: spacing.xs,
+    },
+    activityPill: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 4,
+      paddingHorizontal: spacing.sm,
+      paddingVertical: 6,
+      borderRadius: radius.full,
+      backgroundColor: onPhoto.scrim,
+    },
+    activityText: {
+      color: colors.text,
+      fontSize: fontSize.sm,
+      fontWeight: "700",
+      marginRight: 4,
+    },
+    mentionChip: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 4,
+      paddingHorizontal: spacing.sm,
+      paddingVertical: 4,
+      borderRadius: radius.full,
+      backgroundColor: onPhoto.fillProgress,
+    },
+    mentionText: {
+      color: colors.background,
+      fontSize: fontSize.sm,
+      fontWeight: "700",
+    },
+    gone: {
+      gap: spacing.md,
+      padding: spacing.xl,
+    },
+    goneTitle: {
+      color: colors.text,
+      fontSize: fontSize.lg,
+      fontWeight: "700",
+      textAlign: "center",
+    },
+    goneText: {
+      color: colors.textSecondary,
+      fontSize: fontSize.md,
+      textAlign: "center",
+    },
+    goneButton: {
+      paddingHorizontal: spacing.lg,
+      paddingVertical: spacing.sm,
+      borderRadius: radius.full,
+      backgroundColor: colors.surfaceRaised,
+    },
+    goneButtonText: {
+      color: colors.text,
+      fontSize: fontSize.md,
+      fontWeight: "700",
+    },
+    ownActions: {
+      flexDirection: "row",
+      gap: spacing.sm,
+    },
+    roundButton: {
+      width: 52,
+      height: 52,
+      borderRadius: radius.full,
+      alignItems: "center",
+      justifyContent: "center",
+      backgroundColor: onPhoto.scrimLight,
+    },
+  }),
+);

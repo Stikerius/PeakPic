@@ -1,14 +1,16 @@
 import { router, useIsFocused, useNavigation } from "expo-router";
+import { StatusBar } from "expo-status-bar";
 import { useEffect, useState } from "react";
 import { Alert, StyleSheet, Text, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { CameraCapture } from "@/components/camera/camera-capture";
 import { PhotoReview } from "@/components/camera/photo-review";
-import { colors, fontSize, radius, spacing } from "@/constants/theme";
+import { fontSize, radius, spacing } from "@/constants/theme";
 import { describeError } from "@/lib/errors";
 import { emitAppEvent } from "@/lib/events";
 import { createPost, getTodaysDayPostId } from "@/lib/postRepo";
+import { DarkScheme, makeStyles } from "@/lib/theme";
 import type { CapturedPhoto } from "@/types/photo";
 
 const NOTICE_DURATION_MS = 2500;
@@ -20,6 +22,18 @@ type TabScreenNavigation = {
 };
 
 export default function CameraScreen() {
+  // The camera is always dark; the tab stays mounted, so only claim the status bar while shown.
+  const isFocused = useIsFocused();
+  return (
+    <DarkScheme>
+      {isFocused && <StatusBar style="light" />}
+      <CameraScreenContent />
+    </DarkScheme>
+  );
+}
+
+function CameraScreenContent() {
+  const styles = useStyles();
   const isFocused = useIsFocused();
   const insets = useSafeAreaInsets();
   const navigation = useNavigation<TabScreenNavigation>();
@@ -141,18 +155,20 @@ export default function CameraScreen() {
   );
 }
 
-const styles = StyleSheet.create({
-  notice: {
-    position: "absolute",
-    alignSelf: "center",
-    paddingHorizontal: spacing.md,
-    paddingVertical: spacing.sm,
-    borderRadius: radius.full,
-    backgroundColor: colors.surfaceElevated,
-  },
-  noticeText: {
-    color: colors.text,
-    fontSize: fontSize.md,
-    fontWeight: "600",
-  },
-});
+const useStyles = makeStyles(({ colors }) =>
+  StyleSheet.create({
+    notice: {
+      position: "absolute",
+      alignSelf: "center",
+      paddingHorizontal: spacing.md,
+      paddingVertical: spacing.sm,
+      borderRadius: radius.full,
+      backgroundColor: colors.surfaceRaised,
+    },
+    noticeText: {
+      color: colors.text,
+      fontSize: fontSize.md,
+      fontWeight: "600",
+    },
+  }),
+);

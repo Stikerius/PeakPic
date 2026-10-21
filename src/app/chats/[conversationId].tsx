@@ -21,7 +21,7 @@ import { MessageBubble } from "@/components/chat/message-bubble";
 import { ReactionPicker } from "@/components/chat/reaction-picker";
 import { SwipeableMessage } from "@/components/chat/swipeable-message";
 import { TaggedTextInput } from "@/components/tagged-text-input";
-import { colors, fontSize, radius, spacing } from "@/constants/theme";
+import { fontSize, radius, spacing } from "@/constants/theme";
 import {
   MESSAGE_MAX_LENGTH,
   MESSAGE_PAGE_SIZE,
@@ -39,6 +39,7 @@ import {
 import { emitAppEvent } from "@/lib/events";
 import { getMyProfile } from "@/lib/profileRepo";
 import { useSession } from "@/lib/session";
+import { makeStyles, useTheme } from "@/lib/theme";
 import type { ChatMessage } from "@/types/chat";
 import type { PublicProfile } from "@/types/social";
 
@@ -67,6 +68,8 @@ function withReaction(message: ChatMessage, userId: string, emoji: string | null
 }
 
 export default function ChatScreen() {
+  const { colors } = useTheme();
+  const styles = useStyles();
   const { conversationId } = useLocalSearchParams<{ conversationId: string }>();
   const myId = useSession().session?.user.id;
   const headerHeight = useHeaderHeight();
@@ -328,7 +331,7 @@ export default function ChatScreen() {
               accessibilityLabel="Zur angehefteten Nachricht springen"
               style={styles.pinnedOpen}
             >
-              <Ionicons name="pin" size={18} color={colors.primary} />
+              <Ionicons name="pin" size={18} color={colors.accent} />
               <View style={styles.pinnedTextBox}>
                 <Text style={styles.pinnedLabel}>
                   Angeheftet{pinned.length > 1 ? ` · ${(pinnedIndex % pinned.length) + 1}/${pinned.length}` : ""}
@@ -344,7 +347,7 @@ export default function ChatScreen() {
               accessibilityLabel="Nachricht lösen"
               hitSlop={spacing.sm}
             >
-              <Ionicons name="close" size={20} color={colors.textMuted} />
+              <Ionicons name="close" size={20} color={colors.textSecondary} />
             </Pressable>
           </View>
         )}
@@ -354,7 +357,7 @@ export default function ChatScreen() {
             {error !== null ? (
               <Text style={styles.error}>{error}</Text>
             ) : (
-              <ActivityIndicator color={colors.primary} />
+              <ActivityIndicator color={colors.accent} />
             )}
           </View>
         ) : (
@@ -391,7 +394,7 @@ export default function ChatScreen() {
             }}
             onEndReached={() => void loadOlder()}
             onEndReachedThreshold={0.3}
-            ListFooterComponent={loadingOlder ? <ActivityIndicator color={colors.primary} /> : null}
+            ListFooterComponent={loadingOlder ? <ActivityIndicator color={colors.accent} /> : null}
             ListEmptyComponent={
               <View style={styles.empty}>
                 <Text style={styles.emptyText}>
@@ -421,7 +424,7 @@ export default function ChatScreen() {
               accessibilityLabel="Antworten abbrechen"
               hitSlop={spacing.sm}
             >
-              <Ionicons name="close" size={20} color={colors.textMuted} />
+              <Ionicons name="close" size={20} color={colors.textSecondary} />
             </Pressable>
           </View>
         )}
@@ -433,7 +436,7 @@ export default function ChatScreen() {
             onChangeText={setDraft}
             containerStyle={styles.inputBox}
             placeholder={replyTo !== null ? "Antwort…" : "Nachricht…"}
-            placeholderTextColor={colors.textMuted}
+            placeholderTextColor={colors.textSecondary}
             maxLength={MESSAGE_MAX_LENGTH}
             multiline
             style={styles.input}
@@ -446,7 +449,7 @@ export default function ChatScreen() {
             accessibilityLabel="Senden"
             style={[styles.sendButton, !canSend && styles.sendDisabled]}
           >
-            <Ionicons name="arrow-up" size={20} color={colors.text} />
+            <Ionicons name="arrow-up" size={20} color={colors.onAccent} />
           </Pressable>
         </View>
       </KeyboardAvoidingView>
@@ -463,142 +466,144 @@ export default function ChatScreen() {
   );
 }
 
-const styles = StyleSheet.create({
-  screen: {
-    flex: 1,
-    backgroundColor: colors.background,
-  },
-  centered: {
-    flex: 1,
-    alignItems: "center",
-    justifyContent: "center",
-    padding: spacing.lg,
-  },
-  headerTitle: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: spacing.sm,
-  },
-  headerName: {
-    color: colors.text,
-    fontSize: fontSize.md,
-    fontWeight: "700",
-  },
-  pinnedBanner: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: spacing.md,
-    paddingHorizontal: spacing.md,
-    paddingVertical: spacing.sm,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: colors.border,
-    backgroundColor: colors.surface,
-  },
-  pinnedOpen: {
-    flex: 1,
-    flexDirection: "row",
-    alignItems: "center",
-    gap: spacing.sm,
-  },
-  pinnedTextBox: {
-    flex: 1,
-  },
-  pinnedLabel: {
-    color: colors.primary,
-    fontSize: fontSize.sm - 1,
-    fontWeight: "700",
-  },
-  pinnedText: {
-    color: colors.text,
-    fontSize: fontSize.sm,
-  },
-  list: {
-    paddingHorizontal: spacing.md,
-    paddingVertical: spacing.sm,
-    flexGrow: 1,
-  },
-  empty: {
-    flex: 1,
-    alignItems: "center",
-    justifyContent: "center",
-    // The list is inverted, so flip the empty state back.
-    transform: [{ scaleY: -1 }],
-  },
-  emptyText: {
-    color: colors.textMuted,
-    fontSize: fontSize.md,
-  },
-  error: {
-    color: colors.danger,
-    fontSize: fontSize.md,
-    textAlign: "center",
-  },
-  inlineError: {
-    color: colors.danger,
-    fontSize: fontSize.sm,
-    paddingHorizontal: spacing.md,
-  },
-  replyBanner: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: spacing.sm,
-    paddingHorizontal: spacing.md,
-    paddingVertical: spacing.sm,
-    borderTopWidth: StyleSheet.hairlineWidth,
-    borderTopColor: colors.border,
-    backgroundColor: colors.surface,
-  },
-  replyAccent: {
-    width: 3,
-    alignSelf: "stretch",
-    borderRadius: radius.full,
-    backgroundColor: colors.primary,
-  },
-  replyTextBox: {
-    flex: 1,
-  },
-  replyLabel: {
-    color: colors.text,
-    fontSize: fontSize.sm - 1,
-    fontWeight: "700",
-  },
-  replyText: {
-    color: colors.textMuted,
-    fontSize: fontSize.sm,
-  },
-  inputBar: {
-    flexDirection: "row",
-    alignItems: "flex-end",
-    gap: spacing.sm,
-    paddingHorizontal: spacing.md,
-    paddingTop: spacing.sm,
-    borderTopWidth: StyleSheet.hairlineWidth,
-    borderTopColor: colors.border,
-    backgroundColor: colors.surface,
-  },
-  inputBox: {
-    flex: 1,
-  },
-  input: {
-    minHeight: 40,
-    maxHeight: 120,
-    paddingHorizontal: spacing.md,
-    paddingTop: 10,
-    paddingBottom: 10,
-    borderRadius: radius.lg,
-    backgroundColor: colors.surfaceElevated,
-    color: colors.text,
-    fontSize: fontSize.md,
-  },
-  sendButton: {
-    width: 40,
-    height: 40,
-    borderRadius: radius.full,
-    alignItems: "center",
-    justifyContent: "center",
-    backgroundColor: colors.primary,
-  },
-  sendDisabled: {
-    opacity: 0.4,
-  },
-});
+const useStyles = makeStyles(({ colors }) =>
+  StyleSheet.create({
+    screen: {
+      flex: 1,
+      backgroundColor: colors.background,
+    },
+    centered: {
+      flex: 1,
+      alignItems: "center",
+      justifyContent: "center",
+      padding: spacing.lg,
+    },
+    headerTitle: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: spacing.sm,
+    },
+    headerName: {
+      color: colors.text,
+      fontSize: fontSize.md,
+      fontWeight: "700",
+    },
+    pinnedBanner: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: spacing.md,
+      paddingHorizontal: spacing.md,
+      paddingVertical: spacing.sm,
+      borderBottomWidth: StyleSheet.hairlineWidth,
+      borderBottomColor: colors.border,
+      backgroundColor: colors.surface,
+    },
+    pinnedOpen: {
+      flex: 1,
+      flexDirection: "row",
+      alignItems: "center",
+      gap: spacing.sm,
+    },
+    pinnedTextBox: {
+      flex: 1,
+    },
+    pinnedLabel: {
+      color: colors.accent,
+      fontSize: fontSize.sm - 1,
+      fontWeight: "700",
+    },
+    pinnedText: {
+      color: colors.text,
+      fontSize: fontSize.sm,
+    },
+    list: {
+      paddingHorizontal: spacing.md,
+      paddingVertical: spacing.sm,
+      flexGrow: 1,
+    },
+    empty: {
+      flex: 1,
+      alignItems: "center",
+      justifyContent: "center",
+      // The list is inverted, so flip the empty state back.
+      transform: [{ scaleY: -1 }],
+    },
+    emptyText: {
+      color: colors.textSecondary,
+      fontSize: fontSize.md,
+    },
+    error: {
+      color: colors.danger,
+      fontSize: fontSize.md,
+      textAlign: "center",
+    },
+    inlineError: {
+      color: colors.danger,
+      fontSize: fontSize.sm,
+      paddingHorizontal: spacing.md,
+    },
+    replyBanner: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: spacing.sm,
+      paddingHorizontal: spacing.md,
+      paddingVertical: spacing.sm,
+      borderTopWidth: StyleSheet.hairlineWidth,
+      borderTopColor: colors.border,
+      backgroundColor: colors.surface,
+    },
+    replyAccent: {
+      width: 3,
+      alignSelf: "stretch",
+      borderRadius: radius.full,
+      backgroundColor: colors.accent,
+    },
+    replyTextBox: {
+      flex: 1,
+    },
+    replyLabel: {
+      color: colors.text,
+      fontSize: fontSize.sm - 1,
+      fontWeight: "700",
+    },
+    replyText: {
+      color: colors.textSecondary,
+      fontSize: fontSize.sm,
+    },
+    inputBar: {
+      flexDirection: "row",
+      alignItems: "flex-end",
+      gap: spacing.sm,
+      paddingHorizontal: spacing.md,
+      paddingTop: spacing.sm,
+      borderTopWidth: StyleSheet.hairlineWidth,
+      borderTopColor: colors.border,
+      backgroundColor: colors.surface,
+    },
+    inputBox: {
+      flex: 1,
+    },
+    input: {
+      minHeight: 40,
+      maxHeight: 120,
+      paddingHorizontal: spacing.md,
+      paddingTop: 10,
+      paddingBottom: 10,
+      borderRadius: radius.lg,
+      backgroundColor: colors.surfaceRaised,
+      color: colors.text,
+      fontSize: fontSize.md,
+    },
+    sendButton: {
+      width: 40,
+      height: 40,
+      borderRadius: radius.full,
+      alignItems: "center",
+      justifyContent: "center",
+      backgroundColor: colors.accent,
+    },
+    sendDisabled: {
+      opacity: 0.4,
+    },
+  }),
+);

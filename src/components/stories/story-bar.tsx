@@ -5,9 +5,10 @@ import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, View } from
 
 import { Avatar } from "@/components/avatar";
 import { STORY_RING_INSET, StoryRing } from "@/components/stories/story-ring";
-import { colors, fontSize, radius, spacing } from "@/constants/theme";
+import { fontSize, radius, spacing } from "@/constants/theme";
 import { getMyProfile, type Profile } from "@/lib/profileRepo";
 import { refreshStories, useStories } from "@/lib/storyStore";
+import { makeStyles, useTheme } from "@/lib/theme";
 import type { StoryGroup } from "@/types/social";
 
 const AVATAR_SIZE = 62;
@@ -18,6 +19,8 @@ function openViewer(group: StoryGroup) {
 }
 
 export function StoryBar() {
+  const { colors } = useTheme();
+  const styles = useStyles();
   const { groups, uploading } = useStories();
   const [me, setMe] = useState<Profile | null>(null);
   const myGroup = groups.find((g) => g.isMine);
@@ -63,9 +66,9 @@ export function StoryBar() {
           style={styles.addBadge}
         >
           {uploading ? (
-            <ActivityIndicator size="small" color={colors.text} />
+            <ActivityIndicator size="small" color={colors.onAccent} />
           ) : (
-            <Ionicons name="add" size={16} color={colors.text} />
+            <Ionicons name="add" size={16} color={colors.onAccent} />
           )}
         </Pressable>
         <Text style={styles.label} numberOfLines={1}>
@@ -93,41 +96,43 @@ export function StoryBar() {
   );
 }
 
-const styles = StyleSheet.create({
-  container: {
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: colors.border,
-  },
-  bar: {
-    gap: spacing.md,
-    paddingHorizontal: spacing.md,
-    paddingVertical: spacing.sm,
-  },
-  item: {
-    width: ITEM_SIZE,
-    alignItems: "center",
-    gap: spacing.xs,
-  },
-  addBadge: {
-    position: "absolute",
-    top: ITEM_SIZE - 24,
-    right: 0,
-    width: 24,
-    height: 24,
-    borderRadius: radius.full,
-    alignItems: "center",
-    justifyContent: "center",
-    backgroundColor: colors.primary,
-    borderWidth: 2,
-    borderColor: colors.background,
-  },
-  label: {
-    width: ITEM_SIZE + spacing.sm,
-    color: colors.text,
-    fontSize: fontSize.sm - 1,
-    textAlign: "center",
-  },
-  labelSeen: {
-    color: colors.textMuted,
-  },
-});
+const useStyles = makeStyles(({ colors }) =>
+  StyleSheet.create({
+    container: {
+      borderBottomWidth: StyleSheet.hairlineWidth,
+      borderBottomColor: colors.border,
+    },
+    bar: {
+      gap: spacing.md,
+      paddingHorizontal: spacing.md,
+      paddingVertical: spacing.sm,
+    },
+    item: {
+      width: ITEM_SIZE,
+      alignItems: "center",
+      gap: spacing.xs,
+    },
+    addBadge: {
+      position: "absolute",
+      top: ITEM_SIZE - 24,
+      right: 0,
+      width: 24,
+      height: 24,
+      borderRadius: radius.full,
+      alignItems: "center",
+      justifyContent: "center",
+      backgroundColor: colors.accent,
+      borderWidth: 2,
+      borderColor: colors.background,
+    },
+    label: {
+      width: ITEM_SIZE + spacing.sm,
+      color: colors.text,
+      fontSize: fontSize.sm - 1,
+      textAlign: "center",
+    },
+    labelSeen: {
+      color: colors.textSecondary,
+    },
+  }),
+);

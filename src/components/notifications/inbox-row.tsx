@@ -6,12 +6,13 @@ import { Alert, Pressable, StyleSheet, Text, View } from "react-native";
 
 import { Avatar } from "@/components/avatar";
 import { Button } from "@/components/button";
-import { colors, fontSize, radius, spacing } from "@/constants/theme";
+import { fontSize, radius, spacing } from "@/constants/theme";
 import { describeError } from "@/lib/errors";
 import { emitAppEvent } from "@/lib/events";
 import { formatRelativeTime } from "@/lib/format";
 import type { InboxItem } from "@/lib/inboxRepo";
 import { acceptFollowRequest, declineFollowRequest } from "@/lib/socialRepo";
+import { makeStyles, useTheme } from "@/lib/theme";
 import { answerWorkoutLink } from "@/lib/workoutLinkRepo";
 
 type InboxRowProps = {
@@ -37,6 +38,8 @@ function sentence(item: InboxItem): string {
 
 /** One stored notification with its preview and actions (confirm, accept, repost …). */
 export function InboxRow({ item, onChanged }: InboxRowProps) {
+  const { colors } = useTheme();
+  const styles = useStyles();
   const [busy, setBusy] = useState(false);
 
   async function run(action: () => Promise<void>) {
@@ -132,63 +135,65 @@ export function InboxRow({ item, onChanged }: InboxRowProps) {
         <Image source={{ uri: item.photoUrl }} style={styles.thumb} contentFit="cover" />
       ) : item.type === "workout_tag_request" || item.type === "workout_tag_accepted" ? (
         <View style={[styles.thumb, styles.thumbIcon]}>
-          <Ionicons name="link" size={20} color={colors.primary} />
+          <Ionicons name="link" size={20} color={colors.accent} />
         </View>
       ) : null}
     </Pressable>
   );
 }
 
-const styles = StyleSheet.create({
-  row: {
-    flexDirection: "row",
-    alignItems: "flex-start",
-    gap: spacing.md,
-    paddingHorizontal: spacing.md,
-    paddingVertical: spacing.sm + 2,
-  },
-  unread: {
-    backgroundColor: colors.surface,
-  },
-  pressed: {
-    opacity: 0.7,
-  },
-  body: {
-    flex: 1,
-    gap: 2,
-  },
-  sentence: {
-    color: colors.text,
-    fontSize: fontSize.md,
-    lineHeight: 21,
-  },
-  name: {
-    fontWeight: "700",
-  },
-  time: {
-    color: colors.textMuted,
-    fontSize: fontSize.sm,
-  },
-  actions: {
-    flexDirection: "row",
-    alignItems: "center",
-    flexWrap: "wrap",
-    gap: spacing.sm,
-    marginTop: spacing.xs,
-  },
-  status: {
-    color: colors.textMuted,
-    fontSize: fontSize.sm,
-    fontWeight: "600",
-  },
-  thumb: {
-    width: 48,
-    height: 60,
-    borderRadius: radius.sm,
-    backgroundColor: colors.surfaceElevated,
-  },
-  thumbIcon: {
-    alignItems: "center",
-    justifyContent: "center",
-  },
-});
+const useStyles = makeStyles(({ colors }) =>
+  StyleSheet.create({
+    row: {
+      flexDirection: "row",
+      alignItems: "flex-start",
+      gap: spacing.md,
+      paddingHorizontal: spacing.md,
+      paddingVertical: spacing.sm + 2,
+    },
+    unread: {
+      backgroundColor: colors.surface,
+    },
+    pressed: {
+      opacity: 0.7,
+    },
+    body: {
+      flex: 1,
+      gap: 2,
+    },
+    sentence: {
+      color: colors.text,
+      fontSize: fontSize.md,
+      lineHeight: 21,
+    },
+    name: {
+      fontWeight: "700",
+    },
+    time: {
+      color: colors.textSecondary,
+      fontSize: fontSize.sm,
+    },
+    actions: {
+      flexDirection: "row",
+      alignItems: "center",
+      flexWrap: "wrap",
+      gap: spacing.sm,
+      marginTop: spacing.xs,
+    },
+    status: {
+      color: colors.textSecondary,
+      fontSize: fontSize.sm,
+      fontWeight: "600",
+    },
+    thumb: {
+      width: 48,
+      height: 60,
+      borderRadius: radius.sm,
+      backgroundColor: colors.surfaceRaised,
+    },
+    thumbIcon: {
+      alignItems: "center",
+      justifyContent: "center",
+    },
+  }),
+);

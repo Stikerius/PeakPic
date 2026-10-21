@@ -2,7 +2,8 @@ import { Canvas, Circle, LinearGradient, vec } from "@shopify/react-native-skia"
 import type { ReactNode } from "react";
 import { StyleSheet, View } from "react-native";
 
-import { colors, storyRingGradient } from "@/constants/theme";
+import { storyRingGradient } from "@/constants/theme";
+import { makeStyles, useTheme } from "@/lib/theme";
 
 export type StoryRingState = "unseen" | "seen" | "none";
 
@@ -22,6 +23,8 @@ type StoryRingProps = {
 
 /** Accent gradient ring for unseen stories, a thin grey one once everything has been seen. */
 export function StoryRing({ size, state, children }: StoryRingProps) {
+  const { colors } = useTheme();
+  const styles = useStyles();
   const strokeWidth = state === "unseen" ? UNSEEN_WIDTH : SEEN_WIDTH;
   const center = size / 2;
   // Both rings share their outer edge, so the avatar doesn't jump when the state changes.
@@ -50,9 +53,11 @@ export function StoryRing({ size, state, children }: StoryRingProps) {
   );
 }
 
-const styles = StyleSheet.create({
-  ring: {
-    alignItems: "center",
-    justifyContent: "center",
-  },
-});
+const useStyles = makeStyles(({ colors }) =>
+  StyleSheet.create({
+    ring: {
+      alignItems: "center",
+      justifyContent: "center",
+    },
+  }),
+);

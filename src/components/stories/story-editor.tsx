@@ -4,9 +4,10 @@ import { Pressable, StyleSheet, Text, View } from "react-native";
 
 import { MediaEditor } from "@/components/media-editor/media-editor";
 import { HighlightPicker } from "@/components/stories/highlight-picker";
-import { colors, fontSize, radius, spacing } from "@/constants/theme";
+import { fontSize, onPhoto, radius, spacing } from "@/constants/theme";
 import type { HighlightChoice } from "@/lib/highlightRepo";
 import { addStory } from "@/lib/storyStore";
+import { makeStyles, useTheme } from "@/lib/theme";
 
 type StoryEditorProps = {
   photoUri: string;
@@ -16,6 +17,8 @@ type StoryEditorProps = {
 
 /** Story flow's editor: the shared media editor in its full-screen story layout. */
 export function StoryEditor({ photoUri, onBack, onShared }: StoryEditorProps) {
+  const { colors } = useTheme();
+  const styles = useStyles();
   const [highlight, setHighlight] = useState<HighlightChoice | null>(null);
   const [pickerOpen, setPickerOpen] = useState(false);
 
@@ -83,24 +86,26 @@ export function StoryEditor({ photoUri, onBack, onShared }: StoryEditorProps) {
   );
 }
 
-const styles = StyleSheet.create({
-  extras: {
-    flexDirection: "row",
-    gap: spacing.sm,
-    paddingHorizontal: spacing.md,
-  },
-  chip: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: spacing.xs,
-    paddingHorizontal: spacing.md,
-    paddingVertical: spacing.sm,
-    borderRadius: radius.full,
-    backgroundColor: "rgba(0, 0, 0, 0.45)",
-  },
-  chipLabel: {
-    color: colors.text,
-    fontSize: fontSize.sm,
-    fontWeight: "600",
-  },
-});
+const useStyles = makeStyles(({ colors }) =>
+  StyleSheet.create({
+    extras: {
+      flexDirection: "row",
+      gap: spacing.sm,
+      paddingHorizontal: spacing.md,
+    },
+    chip: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: spacing.xs,
+      paddingHorizontal: spacing.md,
+      paddingVertical: spacing.sm,
+      borderRadius: radius.full,
+      backgroundColor: onPhoto.scrim,
+    },
+    chipLabel: {
+      color: colors.text,
+      fontSize: fontSize.sm,
+      fontWeight: "600",
+    },
+  }),
+);

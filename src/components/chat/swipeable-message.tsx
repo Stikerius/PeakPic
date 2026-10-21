@@ -5,7 +5,8 @@ import { Gesture, GestureDetector } from "react-native-gesture-handler";
 import Animated, { interpolate, useAnimatedStyle, useSharedValue, withSpring } from "react-native-reanimated";
 import { scheduleOnRN } from "react-native-worklets";
 
-import { colors, radius } from "@/constants/theme";
+import { radius } from "@/constants/theme";
+import { makeStyles, useTheme } from "@/lib/theme";
 
 /** Drag distance (px) that triggers the action, and how far the message follows the finger. */
 const TRIGGER = 60;
@@ -32,6 +33,8 @@ type SwipeableMessageProps = {
  * keeps scrolling normally.
  */
 export function SwipeableMessage({ mine, pinned, onReply, onTogglePin, onLongPress, children }: SwipeableMessageProps) {
+  const { colors } = useTheme();
+  const styles = useStyles();
   const translateX = useSharedValue(0);
 
   const pan = Gesture.Pan()
@@ -83,22 +86,24 @@ export function SwipeableMessage({ mine, pinned, onReply, onTogglePin, onLongPre
   );
 }
 
-const styles = StyleSheet.create({
-  icon: {
-    position: "absolute",
-    top: "50%",
-    marginTop: -ICON_SIZE / 2,
-    width: ICON_SIZE,
-    height: ICON_SIZE,
-    borderRadius: radius.full,
-    alignItems: "center",
-    justifyContent: "center",
-    backgroundColor: colors.surfaceElevated,
-  },
-  iconLeft: {
-    left: 0,
-  },
-  iconRight: {
-    right: 0,
-  },
-});
+const useStyles = makeStyles(({ colors }) =>
+  StyleSheet.create({
+    icon: {
+      position: "absolute",
+      top: "50%",
+      marginTop: -ICON_SIZE / 2,
+      width: ICON_SIZE,
+      height: ICON_SIZE,
+      borderRadius: radius.full,
+      alignItems: "center",
+      justifyContent: "center",
+      backgroundColor: colors.surfaceRaised,
+    },
+    iconLeft: {
+      left: 0,
+    },
+    iconRight: {
+      right: 0,
+    },
+  }),
+);

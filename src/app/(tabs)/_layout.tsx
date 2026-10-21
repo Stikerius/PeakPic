@@ -5,9 +5,10 @@ import { Pressable, StyleSheet, View, type ColorValue } from "react-native";
 
 import { NewChatButton } from "@/components/chat/new-chat-button";
 import { NotificationBell } from "@/components/notification-bell";
-import { colors, spacing } from "@/constants/theme";
+import { spacing } from "@/constants/theme";
 import { useFollowRequestCount } from "@/hooks/use-follow-requests";
 import { useUnreadChatCount } from "@/hooks/use-unread-chats";
+import { makeStyles, useTheme } from "@/lib/theme";
 
 type IoniconName = ComponentProps<typeof Ionicons>["name"];
 
@@ -26,6 +27,8 @@ function tabIcon(active: IoniconName, inactive: IoniconName) {
 }
 
 function SettingsButton() {
+  const { colors } = useTheme();
+  const styles = useStyles();
   return (
     <Link href="/settings" asChild>
       <Pressable
@@ -41,6 +44,8 @@ function SettingsButton() {
 }
 
 function FeedHeaderActions() {
+  const { colors } = useTheme();
+  const styles = useStyles();
   return (
     <View style={styles.headerActions}>
       <Link href="/search" asChild>
@@ -54,6 +59,7 @@ function FeedHeaderActions() {
 }
 
 function HomeHeaderActions() {
+  const styles = useStyles();
   return (
     <View style={styles.headerActions}>
       <NotificationBell />
@@ -62,6 +68,7 @@ function HomeHeaderActions() {
 }
 
 export default function TabLayout() {
+  const { colors } = useTheme();
   const unreadChats = useUnreadChatCount();
   const followRequests = useFollowRequestCount();
   return (
@@ -73,8 +80,8 @@ export default function TabLayout() {
           backgroundColor: colors.surface,
           borderTopColor: colors.border,
         },
-        tabBarActiveTintColor: colors.primary,
-        tabBarInactiveTintColor: colors.textMuted,
+        tabBarActiveTintColor: colors.accent,
+        tabBarInactiveTintColor: colors.textSecondary,
       }}
     >
       <Tabs.Screen
@@ -82,7 +89,7 @@ export default function TabLayout() {
         options={{
           title: "Home",
           tabBarIcon: tabIcon("home", "home-outline"),
-          headerRight: HomeHeaderActions,
+          headerRight: () => <HomeHeaderActions />,
         }}
       />
       <Tabs.Screen
@@ -90,7 +97,7 @@ export default function TabLayout() {
         options={{
           title: "Feed",
           tabBarIcon: tabIcon("people", "people-outline"),
-          headerRight: FeedHeaderActions,
+          headerRight: () => <FeedHeaderActions />,
         }}
       />
       <Tabs.Screen
@@ -107,8 +114,8 @@ export default function TabLayout() {
           title: "Chats",
           tabBarIcon: tabIcon("chatbubbles", "chatbubbles-outline"),
           tabBarBadge: unreadChats > 0 ? unreadChats : undefined,
-          tabBarBadgeStyle: { backgroundColor: colors.primary, color: colors.text },
-          headerRight: NewChatButton,
+          tabBarBadgeStyle: { backgroundColor: colors.accent, color: colors.onAccent },
+          headerRight: () => <NewChatButton />,
         }}
       />
       <Tabs.Screen
@@ -117,19 +124,21 @@ export default function TabLayout() {
           title: "Profil",
           tabBarIcon: tabIcon("person", "person-outline"),
           tabBarBadge: followRequests > 0 ? followRequests : undefined,
-          tabBarBadgeStyle: { backgroundColor: colors.primary, color: colors.text },
-          headerRight: SettingsButton,
+          tabBarBadgeStyle: { backgroundColor: colors.accent, color: colors.onAccent },
+          headerRight: () => <SettingsButton />,
         }}
       />
     </Tabs>
   );
 }
 
-const styles = StyleSheet.create({
-  headerActions: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: spacing.lg,
-    paddingHorizontal: spacing.md,
-  },
-});
+const useStyles = makeStyles(({ colors }) =>
+  StyleSheet.create({
+    headerActions: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: spacing.lg,
+      paddingHorizontal: spacing.md,
+    },
+  }),
+);

@@ -15,7 +15,7 @@ import {
 } from "react-native";
 
 import { Button } from "@/components/button";
-import { colors, fontSize, radius, spacing } from "@/constants/theme";
+import { fontSize, onPhoto, radius, spacing } from "@/constants/theme";
 import { describeError } from "@/lib/errors";
 import { emitAppEvent } from "@/lib/events";
 import {
@@ -27,6 +27,7 @@ import {
   updateHighlight,
   type Highlight,
 } from "@/lib/highlightRepo";
+import { makeStyles, useTheme } from "@/lib/theme";
 import type { Story } from "@/types/social";
 
 const COLUMNS = 3;
@@ -34,6 +35,8 @@ const GAP = spacing.sm;
 
 /** Edit one of my highlights: name, cover, which stories it contains, or delete it. */
 export default function HighlightEditScreen() {
+  const { colors, scheme } = useTheme();
+  const styles = useStyles();
   const { highlightId } = useLocalSearchParams<{ highlightId: string }>();
   const { width } = useWindowDimensions();
   const [highlight, setHighlight] = useState<Highlight | null>(null);
@@ -125,7 +128,7 @@ export default function HighlightEditScreen() {
   if (highlight === null) {
     return (
       <View style={styles.centered}>
-        {error !== null ? <Text style={styles.error}>{error}</Text> : <ActivityIndicator color={colors.primary} />}
+        {error !== null ? <Text style={styles.error}>{error}</Text> : <ActivityIndicator color={colors.accent} />}
       </View>
     );
   }
@@ -136,11 +139,12 @@ export default function HighlightEditScreen() {
 
       <Text style={styles.label}>Name</Text>
       <TextInput
+        keyboardAppearance={scheme}
         value={title}
         onChangeText={setTitle}
         maxLength={HIGHLIGHT_TITLE_MAX_LENGTH}
         placeholder="Name des Highlights"
-        placeholderTextColor={colors.textMuted}
+        placeholderTextColor={colors.textSecondary}
         style={styles.input}
         accessibilityLabel="Name des Highlights"
       />
@@ -166,7 +170,7 @@ export default function HighlightEditScreen() {
               )}
               {isCover && (
                 <View style={styles.coverBadge}>
-                  <Ionicons name="checkmark" size={14} color={colors.text} />
+                  <Ionicons name="checkmark" size={14} color={colors.onAccent} />
                 </View>
               )}
               <Pressable
@@ -176,7 +180,7 @@ export default function HighlightEditScreen() {
                 hitSlop={spacing.xs}
                 style={styles.removeButton}
               >
-                <Ionicons name="close" size={14} color={colors.text} />
+                <Ionicons name="close" size={14} color={onPhoto.text} />
               </Pressable>
             </Pressable>
           );
@@ -191,86 +195,88 @@ export default function HighlightEditScreen() {
   );
 }
 
-const styles = StyleSheet.create({
-  screen: {
-    flex: 1,
-    backgroundColor: colors.background,
-  },
-  content: {
-    padding: spacing.md,
-    gap: spacing.md,
-  },
-  centered: {
-    flex: 1,
-    alignItems: "center",
-    justifyContent: "center",
-    padding: spacing.xl,
-    backgroundColor: colors.background,
-  },
-  label: {
-    color: colors.text,
-    fontSize: fontSize.md,
-    fontWeight: "700",
-  },
-  hint: {
-    color: colors.textMuted,
-    fontSize: fontSize.sm,
-    marginTop: -spacing.sm,
-  },
-  input: {
-    minHeight: 48,
-    paddingHorizontal: spacing.md,
-    borderRadius: radius.md,
-    backgroundColor: colors.surface,
-    borderWidth: 1,
-    borderColor: colors.border,
-    color: colors.text,
-    fontSize: fontSize.md,
-  },
-  grid: {
-    flexDirection: "row",
-    flexWrap: "wrap",
-    gap: GAP,
-  },
-  tile: {
-    borderRadius: radius.md,
-    overflow: "hidden",
-    borderWidth: 2,
-    borderColor: "transparent",
-  },
-  tileCover: {
-    borderColor: colors.primary,
-  },
-  tileImage: {
-    width: "100%",
-    height: "100%",
-    backgroundColor: colors.surfaceElevated,
-  },
-  coverBadge: {
-    position: "absolute",
-    left: spacing.xs,
-    top: spacing.xs,
-    width: 22,
-    height: 22,
-    borderRadius: radius.full,
-    alignItems: "center",
-    justifyContent: "center",
-    backgroundColor: colors.primary,
-  },
-  removeButton: {
-    position: "absolute",
-    right: spacing.xs,
-    top: spacing.xs,
-    width: 22,
-    height: 22,
-    borderRadius: radius.full,
-    alignItems: "center",
-    justifyContent: "center",
-    backgroundColor: "rgba(0, 0, 0, 0.6)",
-  },
-  error: {
-    color: colors.danger,
-    fontSize: fontSize.sm,
-    textAlign: "center",
-  },
-});
+const useStyles = makeStyles(({ colors }) =>
+  StyleSheet.create({
+    screen: {
+      flex: 1,
+      backgroundColor: colors.background,
+    },
+    content: {
+      padding: spacing.md,
+      gap: spacing.md,
+    },
+    centered: {
+      flex: 1,
+      alignItems: "center",
+      justifyContent: "center",
+      padding: spacing.xl,
+      backgroundColor: colors.background,
+    },
+    label: {
+      color: colors.text,
+      fontSize: fontSize.md,
+      fontWeight: "700",
+    },
+    hint: {
+      color: colors.textSecondary,
+      fontSize: fontSize.sm,
+      marginTop: -spacing.sm,
+    },
+    input: {
+      minHeight: 48,
+      paddingHorizontal: spacing.md,
+      borderRadius: radius.md,
+      backgroundColor: colors.surface,
+      borderWidth: 1,
+      borderColor: colors.border,
+      color: colors.text,
+      fontSize: fontSize.md,
+    },
+    grid: {
+      flexDirection: "row",
+      flexWrap: "wrap",
+      gap: GAP,
+    },
+    tile: {
+      borderRadius: radius.md,
+      overflow: "hidden",
+      borderWidth: 2,
+      borderColor: "transparent",
+    },
+    tileCover: {
+      borderColor: colors.accent,
+    },
+    tileImage: {
+      width: "100%",
+      height: "100%",
+      backgroundColor: colors.surfaceRaised,
+    },
+    coverBadge: {
+      position: "absolute",
+      left: spacing.xs,
+      top: spacing.xs,
+      width: 22,
+      height: 22,
+      borderRadius: radius.full,
+      alignItems: "center",
+      justifyContent: "center",
+      backgroundColor: colors.accent,
+    },
+    removeButton: {
+      position: "absolute",
+      right: spacing.xs,
+      top: spacing.xs,
+      width: 22,
+      height: 22,
+      borderRadius: radius.full,
+      alignItems: "center",
+      justifyContent: "center",
+      backgroundColor: onPhoto.scrimStrong,
+    },
+    error: {
+      color: colors.danger,
+      fontSize: fontSize.sm,
+      textAlign: "center",
+    },
+  }),
+);

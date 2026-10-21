@@ -14,11 +14,12 @@ import { Avatar } from "@/components/avatar";
 import { Button } from "@/components/button";
 import { PhotoCarousel } from "@/components/feed/photo-carousel";
 import { TaggedTextInput } from "@/components/tagged-text-input";
-import { colors, fontSize, radius, spacing } from "@/constants/theme";
+import { fontSize, radius, spacing } from "@/constants/theme";
 import { describeError } from "@/lib/errors";
 import { emitAppEvent } from "@/lib/events";
 import { fetchPost } from "@/lib/feedRepo";
 import { REPOST_CAPTION_MAX_LENGTH, createRepost } from "@/lib/repostRepo";
+import { makeStyles, useTheme } from "@/lib/theme";
 import type { FeedPost } from "@/types/social";
 
 /**
@@ -27,6 +28,8 @@ import type { FeedPost } from "@/types/social";
  * database checks both). The repost points at the original; no photos are copied.
  */
 export default function RepostScreen() {
+  const { colors } = useTheme();
+  const styles = useStyles();
   const { postId } = useLocalSearchParams<{ postId: string }>();
   const [post, setPost] = useState<FeedPost | null | undefined>(undefined);
   const [caption, setCaption] = useState("");
@@ -56,7 +59,7 @@ export default function RepostScreen() {
   if (post === undefined) {
     return (
       <View style={styles.centered}>
-        <ActivityIndicator color={colors.primary} />
+        <ActivityIndicator color={colors.accent} />
       </View>
     );
   }
@@ -83,7 +86,7 @@ export default function RepostScreen() {
           onChangeText={setCaption}
           suggestionsPlacement="below"
           placeholder="Eigene Beschriftung (optional)"
-          placeholderTextColor={colors.textMuted}
+          placeholderTextColor={colors.textSecondary}
           maxLength={REPOST_CAPTION_MAX_LENGTH}
           multiline
           style={styles.input}
@@ -100,56 +103,58 @@ export default function RepostScreen() {
   );
 }
 
-const styles = StyleSheet.create({
-  screen: {
-    flex: 1,
-    backgroundColor: colors.background,
-  },
-  content: {
-    padding: spacing.md,
-    gap: spacing.md,
-  },
-  centered: {
-    flex: 1,
-    alignItems: "center",
-    justifyContent: "center",
-    padding: spacing.xl,
-    backgroundColor: colors.background,
-  },
-  original: {
-    borderRadius: radius.lg,
-    overflow: "hidden",
-    backgroundColor: colors.surface,
-  },
-  originalHeader: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: spacing.sm,
-    padding: spacing.sm,
-  },
-  originalLabel: {
-    color: colors.text,
-    fontSize: fontSize.md,
-    fontWeight: "700",
-  },
-  input: {
-    minHeight: 80,
-    padding: spacing.md,
-    borderRadius: radius.md,
-    backgroundColor: colors.surface,
-    borderWidth: 1,
-    borderColor: colors.border,
-    color: colors.text,
-    fontSize: fontSize.md,
-    textAlignVertical: "top",
-  },
-  muted: {
-    color: colors.textMuted,
-    fontSize: fontSize.sm,
-    lineHeight: 19,
-  },
-  error: {
-    color: colors.danger,
-    fontSize: fontSize.sm,
-  },
-});
+const useStyles = makeStyles(({ colors }) =>
+  StyleSheet.create({
+    screen: {
+      flex: 1,
+      backgroundColor: colors.background,
+    },
+    content: {
+      padding: spacing.md,
+      gap: spacing.md,
+    },
+    centered: {
+      flex: 1,
+      alignItems: "center",
+      justifyContent: "center",
+      padding: spacing.xl,
+      backgroundColor: colors.background,
+    },
+    original: {
+      borderRadius: radius.lg,
+      overflow: "hidden",
+      backgroundColor: colors.surface,
+    },
+    originalHeader: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: spacing.sm,
+      padding: spacing.sm,
+    },
+    originalLabel: {
+      color: colors.text,
+      fontSize: fontSize.md,
+      fontWeight: "700",
+    },
+    input: {
+      minHeight: 80,
+      padding: spacing.md,
+      borderRadius: radius.md,
+      backgroundColor: colors.surface,
+      borderWidth: 1,
+      borderColor: colors.border,
+      color: colors.text,
+      fontSize: fontSize.md,
+      textAlignVertical: "top",
+    },
+    muted: {
+      color: colors.textSecondary,
+      fontSize: fontSize.sm,
+      lineHeight: 19,
+    },
+    error: {
+      color: colors.danger,
+      fontSize: fontSize.sm,
+    },
+  }),
+);

@@ -3,14 +3,17 @@ import { ActivityIndicator, FlatList, StyleSheet, Text, View } from "react-nativ
 
 import { Button } from "@/components/button";
 import { ProfileRow } from "@/components/profile-row";
-import { colors, fontSize, spacing } from "@/constants/theme";
+import { fontSize, spacing } from "@/constants/theme";
 import { useOpenProfile } from "@/hooks/use-open-profile";
 import { describeError } from "@/lib/errors";
 import { emitAppEvent } from "@/lib/events";
 import { acceptFollowRequest, declineFollowRequest, listFollowRequests, type FollowRequest } from "@/lib/socialRepo";
+import { makeStyles, useTheme } from "@/lib/theme";
 
 /** Open requests to follow my private profile: confirm or decline. */
 export default function FollowRequestsScreen() {
+  const { colors } = useTheme();
+  const styles = useStyles();
   const openProfile = useOpenProfile();
   const [requests, setRequests] = useState<FollowRequest[] | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
@@ -40,7 +43,7 @@ export default function FollowRequestsScreen() {
   if (requests === null) {
     return (
       <View style={styles.centered}>
-        {error !== null ? <Text style={styles.error}>{error}</Text> : <ActivityIndicator color={colors.primary} />}
+        {error !== null ? <Text style={styles.error}>{error}</Text> : <ActivityIndicator color={colors.accent} />}
       </View>
     );
   }
@@ -80,33 +83,35 @@ export default function FollowRequestsScreen() {
   );
 }
 
-const styles = StyleSheet.create({
-  screen: {
-    flex: 1,
-    backgroundColor: colors.background,
-  },
-  centered: {
-    flex: 1,
-    alignItems: "center",
-    justifyContent: "center",
-    padding: spacing.xl,
-    backgroundColor: colors.background,
-  },
-  actions: {
-    flexDirection: "row",
-    gap: spacing.xs,
-  },
-  muted: {
-    color: colors.textMuted,
-    fontSize: fontSize.md,
-    textAlign: "center",
-  },
-  padded: {
-    padding: spacing.lg,
-  },
-  error: {
-    color: colors.danger,
-    fontSize: fontSize.sm,
-    textAlign: "center",
-  },
-});
+const useStyles = makeStyles(({ colors }) =>
+  StyleSheet.create({
+    screen: {
+      flex: 1,
+      backgroundColor: colors.background,
+    },
+    centered: {
+      flex: 1,
+      alignItems: "center",
+      justifyContent: "center",
+      padding: spacing.xl,
+      backgroundColor: colors.background,
+    },
+    actions: {
+      flexDirection: "row",
+      gap: spacing.xs,
+    },
+    muted: {
+      color: colors.textSecondary,
+      fontSize: fontSize.md,
+      textAlign: "center",
+    },
+    padded: {
+      padding: spacing.lg,
+    },
+    error: {
+      color: colors.danger,
+      fontSize: fontSize.sm,
+      textAlign: "center",
+    },
+  }),
+);

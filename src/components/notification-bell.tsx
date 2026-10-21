@@ -3,11 +3,12 @@ import { router } from "expo-router";
 import { useEffect, useState } from "react";
 import { Pressable, StyleSheet, Text, View } from "react-native";
 
-import { colors, radius, spacing } from "@/constants/theme";
+import { radius, spacing } from "@/constants/theme";
 import { onAppEvent } from "@/lib/events";
 import { countUnreadInbox, subscribeToInbox } from "@/lib/inboxRepo";
 import { countUnreadNotifications } from "@/lib/notificationRepo";
 import { useSession } from "@/lib/session";
+import { makeStyles, useTheme } from "@/lib/theme";
 
 const REFRESH_INTERVAL_MS = 60_000;
 
@@ -18,6 +19,8 @@ const REFRESH_INTERVAL_MS = 60_000;
  * the screen's navigation context).
  */
 export function NotificationBell() {
+  const { colors } = useTheme();
+  const styles = useStyles();
   const [unread, setUnread] = useState(0);
   const myId = useSession().session?.user.id;
 
@@ -61,24 +64,26 @@ export function NotificationBell() {
   );
 }
 
-const styles = StyleSheet.create({
-  badge: {
-    position: "absolute",
-    top: -5,
-    right: -7,
-    minWidth: 18,
-    height: 18,
-    paddingHorizontal: 4,
-    borderRadius: radius.full,
-    alignItems: "center",
-    justifyContent: "center",
-    backgroundColor: colors.danger,
-    borderWidth: 2,
-    borderColor: colors.surface,
-  },
-  badgeText: {
-    color: colors.text,
-    fontSize: 10,
-    fontWeight: "800",
-  },
-});
+const useStyles = makeStyles(({ colors }) =>
+  StyleSheet.create({
+    badge: {
+      position: "absolute",
+      top: -5,
+      right: -7,
+      minWidth: 18,
+      height: 18,
+      paddingHorizontal: 4,
+      borderRadius: radius.full,
+      alignItems: "center",
+      justifyContent: "center",
+      backgroundColor: colors.danger,
+      borderWidth: 2,
+      borderColor: colors.surface,
+    },
+    badgeText: {
+      color: colors.text,
+      fontSize: 10,
+      fontWeight: "800",
+    },
+  }),
+);

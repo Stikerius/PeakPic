@@ -15,9 +15,10 @@ import {
 } from "react-native";
 
 import { Avatar } from "@/components/avatar";
-import { colors, fontSize, radius, spacing } from "@/constants/theme";
+import { fontSize, onPhoto, radius, spacing } from "@/constants/theme";
 import { suggestHashtags, suggestPeople, type HashtagSuggestion } from "@/lib/tagSuggestRepo";
 import { activeToken, applySuggestion, normalizeHashtag, type ActiveToken } from "@/lib/taggedText";
+import { makeStyles, useTheme } from "@/lib/theme";
 import type { PublicProfile } from "@/types/social";
 
 const SUGGEST_DEBOUNCE_MS = 200;
@@ -45,6 +46,8 @@ export const TaggedTextInput = forwardRef<TextInput, TaggedTextInputProps>(funct
   { value, onChangeText, suggestionsPlacement = "above", containerStyle, tone = "default", onSelectionChange, ...inputProps },
   ref,
 ) {
+  const { colors, scheme } = useTheme();
+  const styles = useStyles();
   const [cursor, setCursor] = useState(value.length);
   // Set once after inserting a suggestion, so the cursor lands behind it.
   const [forcedSelection, setForcedSelection] = useState<{ start: number; end: number } | undefined>(undefined);
@@ -122,7 +125,7 @@ export const TaggedTextInput = forwardRef<TextInput, TaggedTextInputProps>(funct
                     accessibilityLabel={`Neuen Hashtag ${suggestions.fresh} verwenden`}
                     style={({ pressed }) => [styles.row, pressed && styles.pressed]}
                   >
-                    <Ionicons name="add-circle-outline" size={22} color={colors.primary} />
+                    <Ionicons name="add-circle-outline" size={22} color={colors.accent} />
                     <Text style={[styles.rowText, dark && styles.rowTextDark]}>#{suggestions.fresh}</Text>
                     <Text style={styles.count}>neu</Text>
                   </Pressable>,
@@ -136,7 +139,7 @@ export const TaggedTextInput = forwardRef<TextInput, TaggedTextInputProps>(funct
                 accessibilityLabel={`#${tag.tag}, ${tag.useCount} mal verwendet`}
                 style={({ pressed }) => [styles.row, pressed && styles.pressed]}
               >
-                <Ionicons name="pricetag-outline" size={20} color={colors.textMuted} />
+                <Ionicons name="pricetag-outline" size={20} color={colors.textSecondary} />
                 <Text style={[styles.rowText, dark && styles.rowTextDark]}>#{tag.tag}</Text>
                 <Text style={styles.count}>· {tag.useCount}</Text>
               </Pressable>
@@ -161,6 +164,7 @@ export const TaggedTextInput = forwardRef<TextInput, TaggedTextInputProps>(funct
   return (
     <View style={[styles.container, containerStyle]}>
       <TextInput
+        keyboardAppearance={scheme}
         ref={ref}
         {...inputProps}
         value={value}
@@ -176,54 +180,56 @@ export const TaggedTextInput = forwardRef<TextInput, TaggedTextInputProps>(funct
   );
 });
 
-const styles = StyleSheet.create({
-  container: {
-    zIndex: 10,
-  },
-  list: {
-    position: "absolute",
-    left: 0,
-    right: 0,
-    maxHeight: 220,
-    borderRadius: radius.md,
-    backgroundColor: colors.surfaceElevated,
-    borderWidth: 1,
-    borderColor: colors.border,
-    overflow: "hidden",
-    zIndex: 20,
-  },
-  listDark: {
-    backgroundColor: "rgba(20, 20, 26, 0.95)",
-  },
-  above: {
-    bottom: "100%",
-    marginBottom: spacing.xs,
-  },
-  below: {
-    top: "100%",
-    marginTop: spacing.xs,
-  },
-  row: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: spacing.sm,
-    paddingHorizontal: spacing.md,
-    paddingVertical: spacing.sm,
-  },
-  pressed: {
-    backgroundColor: colors.border,
-  },
-  rowText: {
-    flex: 1,
-    color: colors.text,
-    fontSize: fontSize.md,
-    fontWeight: "600",
-  },
-  rowTextDark: {
-    color: "#FFFFFF",
-  },
-  count: {
-    color: colors.textMuted,
-    fontSize: fontSize.sm,
-  },
-});
+const useStyles = makeStyles(({ colors }) =>
+  StyleSheet.create({
+    container: {
+      zIndex: 10,
+    },
+    list: {
+      position: "absolute",
+      left: 0,
+      right: 0,
+      maxHeight: 220,
+      borderRadius: radius.md,
+      backgroundColor: colors.surfaceRaised,
+      borderWidth: 1,
+      borderColor: colors.border,
+      overflow: "hidden",
+      zIndex: 20,
+    },
+    listDark: {
+      backgroundColor: onPhoto.panel,
+    },
+    above: {
+      bottom: "100%",
+      marginBottom: spacing.xs,
+    },
+    below: {
+      top: "100%",
+      marginTop: spacing.xs,
+    },
+    row: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: spacing.sm,
+      paddingHorizontal: spacing.md,
+      paddingVertical: spacing.sm,
+    },
+    pressed: {
+      backgroundColor: colors.border,
+    },
+    rowText: {
+      flex: 1,
+      color: colors.text,
+      fontSize: fontSize.md,
+      fontWeight: "600",
+    },
+    rowTextDark: {
+      color: onPhoto.text,
+    },
+    count: {
+      color: colors.textSecondary,
+      fontSize: fontSize.sm,
+    },
+  }),
+);

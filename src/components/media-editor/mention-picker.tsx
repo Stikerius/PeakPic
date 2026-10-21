@@ -12,8 +12,9 @@ import {
 } from "react-native";
 
 import { ProfileRow } from "@/components/profile-row";
-import { colors, fontSize, radius, spacing } from "@/constants/theme";
+import { fontSize, radius, spacing } from "@/constants/theme";
 import { listConnections } from "@/lib/socialRepo";
+import { makeStyles, useTheme } from "@/lib/theme";
 import type { PublicProfile } from "@/types/social";
 
 type MentionPickerProps = {
@@ -25,6 +26,8 @@ type MentionPickerProps = {
 
 /** Sheet to pick someone to tag: people I follow or who follow me (the database decides the rest). */
 export function MentionPicker({ visible, excludeIds, onSelect, onClose }: MentionPickerProps) {
+  const { colors, scheme } = useTheme();
+  const styles = useStyles();
   const [people, setPeople] = useState<PublicProfile[] | null>(null);
   const [query, setQuery] = useState("");
   const [failed, setFailed] = useState(false);
@@ -51,17 +54,18 @@ export function MentionPicker({ visible, excludeIds, onSelect, onClose }: Mentio
           </Pressable>
         </View>
         <TextInput
+          keyboardAppearance={scheme}
           value={query}
           onChangeText={setQuery}
           placeholder="Suchen"
-          placeholderTextColor={colors.textMuted}
+          placeholderTextColor={colors.textSecondary}
           autoCapitalize="none"
           autoCorrect={false}
           style={styles.search}
           accessibilityLabel="Personen suchen"
         />
         {people === null && !failed ? (
-          <ActivityIndicator style={styles.loader} color={colors.primary} />
+          <ActivityIndicator style={styles.loader} color={colors.accent} />
         ) : (
           <FlatList
             data={visiblePeople}
@@ -93,42 +97,44 @@ export function MentionPicker({ visible, excludeIds, onSelect, onClose }: Mentio
   );
 }
 
-const styles = StyleSheet.create({
-  sheet: {
-    flex: 1,
-    backgroundColor: colors.background,
-    paddingTop: spacing.md,
-  },
-  header: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-    paddingHorizontal: spacing.md,
-  },
-  title: {
-    color: colors.text,
-    fontSize: fontSize.lg,
-    fontWeight: "700",
-  },
-  search: {
-    margin: spacing.md,
-    minHeight: 44,
-    paddingHorizontal: spacing.md,
-    borderRadius: radius.md,
-    backgroundColor: colors.surface,
-    color: colors.text,
-    fontSize: fontSize.md,
-  },
-  loader: {
-    marginTop: spacing.xl,
-  },
-  pressed: {
-    opacity: 0.6,
-  },
-  empty: {
-    color: colors.textMuted,
-    fontSize: fontSize.md,
-    textAlign: "center",
-    padding: spacing.xl,
-  },
-});
+const useStyles = makeStyles(({ colors }) =>
+  StyleSheet.create({
+    sheet: {
+      flex: 1,
+      backgroundColor: colors.background,
+      paddingTop: spacing.md,
+    },
+    header: {
+      flexDirection: "row",
+      alignItems: "center",
+      justifyContent: "space-between",
+      paddingHorizontal: spacing.md,
+    },
+    title: {
+      color: colors.text,
+      fontSize: fontSize.lg,
+      fontWeight: "700",
+    },
+    search: {
+      margin: spacing.md,
+      minHeight: 44,
+      paddingHorizontal: spacing.md,
+      borderRadius: radius.md,
+      backgroundColor: colors.surface,
+      color: colors.text,
+      fontSize: fontSize.md,
+    },
+    loader: {
+      marginTop: spacing.xl,
+    },
+    pressed: {
+      opacity: 0.6,
+    },
+    empty: {
+      color: colors.textSecondary,
+      fontSize: fontSize.md,
+      textAlign: "center",
+      padding: spacing.xl,
+    },
+  }),
+);

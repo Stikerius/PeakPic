@@ -3,8 +3,9 @@ import { useEffect, useState } from "react";
 import { ActivityIndicator, FlatList, StyleSheet, Switch, Text, TextInput, View } from "react-native";
 
 import { ProfileRow } from "@/components/profile-row";
-import { colors, fontSize, radius, spacing } from "@/constants/theme";
+import { fontSize, radius, spacing } from "@/constants/theme";
 import { listFollowers, listHiddenUserIds, setHiddenFrom } from "@/lib/privacyRepo";
+import { makeStyles, useTheme } from "@/lib/theme";
 import type { AudienceScope } from "@/types/database";
 import type { PublicProfile } from "@/types/social";
 
@@ -15,6 +16,8 @@ const TITLES: Record<AudienceScope, string> = {
 
 /** Followers with a switch each: on = this person can't see my stories / posts. */
 export default function HiddenAudienceScreen() {
+  const { colors, scheme } = useTheme();
+  const styles = useStyles();
   const params = useLocalSearchParams<{ scope: string }>();
   const scope: AudienceScope = params.scope === "posts" ? "posts" : "stories";
 
@@ -57,10 +60,11 @@ export default function HiddenAudienceScreen() {
     <View style={styles.screen}>
       <Stack.Screen options={{ title: TITLES[scope] }} />
       <TextInput
+        keyboardAppearance={scheme}
         value={query}
         onChangeText={setQuery}
         placeholder="Follower suchen"
-        placeholderTextColor={colors.textMuted}
+        placeholderTextColor={colors.textSecondary}
         autoCapitalize="none"
         autoCorrect={false}
         style={styles.search}
@@ -68,7 +72,7 @@ export default function HiddenAudienceScreen() {
       />
       {error !== null && <Text style={styles.error}>{error}</Text>}
       {followers === null && error === null ? (
-        <ActivityIndicator style={styles.loader} color={colors.primary} />
+        <ActivityIndicator style={styles.loader} color={colors.accent} />
       ) : (
         <FlatList
           data={visible}
@@ -88,7 +92,7 @@ export default function HiddenAudienceScreen() {
                 <Switch
                   value={hidden.has(item.id)}
                   onValueChange={(value) => void toggle(item, value)}
-                  trackColor={{ true: colors.primary, false: colors.surfaceElevated }}
+                  trackColor={{ true: colors.accent, false: colors.surfaceRaised }}
                   accessibilityLabel={`Vor @${item.username} verbergen`}
                 />
               }
@@ -105,38 +109,40 @@ export default function HiddenAudienceScreen() {
   );
 }
 
-const styles = StyleSheet.create({
-  screen: {
-    flex: 1,
-    backgroundColor: colors.background,
-  },
-  search: {
-    margin: spacing.md,
-    minHeight: 44,
-    paddingHorizontal: spacing.md,
-    borderRadius: radius.md,
-    backgroundColor: colors.surface,
-    color: colors.text,
-    fontSize: fontSize.md,
-  },
-  loader: {
-    marginTop: spacing.xl,
-  },
-  hint: {
-    color: colors.textMuted,
-    fontSize: fontSize.sm,
-    paddingHorizontal: spacing.md,
-    paddingBottom: spacing.sm,
-  },
-  empty: {
-    color: colors.textMuted,
-    fontSize: fontSize.md,
-    textAlign: "center",
-    padding: spacing.xl,
-  },
-  error: {
-    color: colors.danger,
-    fontSize: fontSize.sm,
-    paddingHorizontal: spacing.md,
-  },
-});
+const useStyles = makeStyles(({ colors }) =>
+  StyleSheet.create({
+    screen: {
+      flex: 1,
+      backgroundColor: colors.background,
+    },
+    search: {
+      margin: spacing.md,
+      minHeight: 44,
+      paddingHorizontal: spacing.md,
+      borderRadius: radius.md,
+      backgroundColor: colors.surface,
+      color: colors.text,
+      fontSize: fontSize.md,
+    },
+    loader: {
+      marginTop: spacing.xl,
+    },
+    hint: {
+      color: colors.textSecondary,
+      fontSize: fontSize.sm,
+      paddingHorizontal: spacing.md,
+      paddingBottom: spacing.sm,
+    },
+    empty: {
+      color: colors.textSecondary,
+      fontSize: fontSize.md,
+      textAlign: "center",
+      padding: spacing.xl,
+    },
+    error: {
+      color: colors.danger,
+      fontSize: fontSize.sm,
+      paddingHorizontal: spacing.md,
+    },
+  }),
+);

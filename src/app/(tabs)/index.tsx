@@ -4,7 +4,7 @@ import { ActivityIndicator, ScrollView, StyleSheet, Text, View } from "react-nat
 
 import { MonthCalendar } from "@/components/streak/month-calendar";
 import { StreakSummary } from "@/components/streak/streak-summary";
-import { colors, fontSize, spacing } from "@/constants/theme";
+import { fontSize, spacing } from "@/constants/theme";
 import { useWorkoutDays } from "@/hooks/use-workout-days";
 import {
   addMonths,
@@ -13,8 +13,11 @@ import {
   runLengthByDay,
   toDayKey,
 } from "@/lib/streak";
+import { makeStyles, useTheme } from "@/lib/theme";
 
 export default function HomeScreen() {
+  const { colors } = useTheme();
+  const styles = useStyles();
   const { days, sharedDays, loading, error } = useWorkoutDays();
 
   const today = toDayKey(new Date());
@@ -32,7 +35,7 @@ export default function HomeScreen() {
   if (loading) {
     return (
       <View style={styles.centered}>
-        <ActivityIndicator color={colors.primary} />
+        <ActivityIndicator color={colors.accent} />
       </View>
     );
   }
@@ -60,24 +63,26 @@ export default function HomeScreen() {
   );
 }
 
-const styles = StyleSheet.create({
-  screen: {
-    flex: 1,
-    backgroundColor: colors.background,
-  },
-  content: {
-    padding: spacing.md,
-    gap: spacing.md,
-  },
-  centered: {
-    flex: 1,
-    alignItems: "center",
-    justifyContent: "center",
-    backgroundColor: colors.background,
-  },
-  error: {
-    color: colors.danger,
-    fontSize: fontSize.md,
-    textAlign: "center",
-  },
-});
+const useStyles = makeStyles(({ colors }) =>
+  StyleSheet.create({
+    screen: {
+      flex: 1,
+      backgroundColor: colors.background,
+    },
+    content: {
+      padding: spacing.md,
+      gap: spacing.md,
+    },
+    centered: {
+      flex: 1,
+      alignItems: "center",
+      justifyContent: "center",
+      backgroundColor: colors.background,
+    },
+    error: {
+      color: colors.danger,
+      fontSize: fontSize.md,
+      textAlign: "center",
+    },
+  }),
+);

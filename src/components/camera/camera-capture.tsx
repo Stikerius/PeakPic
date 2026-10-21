@@ -6,7 +6,8 @@ import { ActivityIndicator, Pressable, StyleSheet, View } from "react-native";
 import { Gesture, GestureDetector } from "react-native-gesture-handler";
 
 import { CameraPermissionPrompt } from "@/components/camera/camera-permission-prompt";
-import { colors, radius, spacing } from "@/constants/theme";
+import { onPhoto, radius, spacing } from "@/constants/theme";
+import { makeStyles, useTheme } from "@/lib/theme";
 import type { CapturedPhoto } from "@/types/photo";
 
 const PHOTO_QUALITY = 0.8;
@@ -36,6 +37,8 @@ export function CameraCapture({
   overlay,
   bottomInset = 0,
 }: CameraCaptureProps) {
+  const { colors } = useTheme();
+  const styles = useStyles();
   const [permission, requestPermission] = useCameraPermissions();
   const cameraRef = useRef<CameraView>(null);
   const [facing, setFacing] = useState<CameraType>(lastFacing);
@@ -89,7 +92,7 @@ export function CameraCapture({
   if (permission === null) {
     return (
       <View style={styles.centered}>
-        <ActivityIndicator color={colors.primary} />
+        <ActivityIndicator color={colors.accent} />
         {overlay}
       </View>
     );
@@ -169,52 +172,54 @@ export function CameraCapture({
 const SHUTTER_SIZE = 76;
 const ICON_BUTTON_SIZE = 52;
 
-const styles = StyleSheet.create({
-  flex: {
-    flex: 1,
-  },
-  container: {
-    flex: 1,
-    backgroundColor: "#000000",
-  },
-  centered: {
-    flex: 1,
-    alignItems: "center",
-    justifyContent: "center",
-    backgroundColor: colors.background,
-  },
-  controls: {
-    position: "absolute",
-    left: 0,
-    right: 0,
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-evenly",
-  },
-  iconButton: {
-    width: ICON_BUTTON_SIZE,
-    height: ICON_BUTTON_SIZE,
-    borderRadius: radius.full,
-    alignItems: "center",
-    justifyContent: "center",
-    backgroundColor: "rgba(0, 0, 0, 0.45)",
-  },
-  shutter: {
-    width: SHUTTER_SIZE,
-    height: SHUTTER_SIZE,
-    borderRadius: radius.full,
-    borderWidth: 4,
-    borderColor: colors.text,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  shutterPressed: {
-    opacity: 0.6,
-  },
-  shutterInner: {
-    width: SHUTTER_SIZE - 16,
-    height: SHUTTER_SIZE - 16,
-    borderRadius: radius.full,
-    backgroundColor: colors.text,
-  },
-});
+const useStyles = makeStyles(({ colors }) =>
+  StyleSheet.create({
+    flex: {
+      flex: 1,
+    },
+    container: {
+      flex: 1,
+      backgroundColor: onPhoto.background,
+    },
+    centered: {
+      flex: 1,
+      alignItems: "center",
+      justifyContent: "center",
+      backgroundColor: colors.background,
+    },
+    controls: {
+      position: "absolute",
+      left: 0,
+      right: 0,
+      flexDirection: "row",
+      alignItems: "center",
+      justifyContent: "space-evenly",
+    },
+    iconButton: {
+      width: ICON_BUTTON_SIZE,
+      height: ICON_BUTTON_SIZE,
+      borderRadius: radius.full,
+      alignItems: "center",
+      justifyContent: "center",
+      backgroundColor: onPhoto.scrim,
+    },
+    shutter: {
+      width: SHUTTER_SIZE,
+      height: SHUTTER_SIZE,
+      borderRadius: radius.full,
+      borderWidth: 4,
+      borderColor: colors.text,
+      alignItems: "center",
+      justifyContent: "center",
+    },
+    shutterPressed: {
+      opacity: 0.6,
+    },
+    shutterInner: {
+      width: SHUTTER_SIZE - 16,
+      height: SHUTTER_SIZE - 16,
+      borderRadius: radius.full,
+      backgroundColor: colors.text,
+    },
+  }),
+);

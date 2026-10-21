@@ -4,11 +4,12 @@ import { ActivityIndicator, Alert, ScrollView, StyleSheet, Text, View } from "re
 
 import { Button } from "@/components/button";
 import { ProfileRow } from "@/components/profile-row";
-import { colors, fontSize, spacing } from "@/constants/theme";
+import { fontSize, spacing } from "@/constants/theme";
 import { useOpenProfile } from "@/hooks/use-open-profile";
 import { describeError } from "@/lib/errors";
 import { formatRelativeTime } from "@/lib/format";
 import { listReposts, type Repost } from "@/lib/repostRepo";
+import { makeStyles, useTheme } from "@/lib/theme";
 import { listWorkoutLinks, withdrawWorkoutLink, type WorkoutLink } from "@/lib/workoutLinkRepo";
 import type { WorkoutShareStatus } from "@/types/database";
 
@@ -23,6 +24,8 @@ const STATUS_LABELS: Record<WorkoutShareStatus, string> = {
  * only be viewed here; only the reposter can delete them.
  */
 export default function PostLinksScreen() {
+  const { colors } = useTheme();
+  const styles = useStyles();
   const { postId } = useLocalSearchParams<{ postId: string }>();
   const openProfile = useOpenProfile();
   const [links, setLinks] = useState<WorkoutLink[] | null>(null);
@@ -56,7 +59,7 @@ export default function PostLinksScreen() {
   if (links === null) {
     return (
       <View style={styles.centered}>
-        {error !== null ? <Text style={styles.error}>{error}</Text> : <ActivityIndicator color={colors.primary} />}
+        {error !== null ? <Text style={styles.error}>{error}</Text> : <ActivityIndicator color={colors.accent} />}
       </View>
     );
   }
@@ -107,53 +110,55 @@ export default function PostLinksScreen() {
   );
 }
 
-const styles = StyleSheet.create({
-  screen: {
-    flex: 1,
-    backgroundColor: colors.background,
-  },
-  content: {
-    paddingVertical: spacing.md,
-    gap: spacing.xs,
-  },
-  centered: {
-    flex: 1,
-    alignItems: "center",
-    justifyContent: "center",
-    padding: spacing.xl,
-    backgroundColor: colors.background,
-  },
-  sectionTitle: {
-    color: colors.text,
-    fontSize: fontSize.lg,
-    fontWeight: "700",
-    paddingHorizontal: spacing.md,
-  },
-  spaced: {
-    marginTop: spacing.lg,
-  },
-  accessory: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: spacing.sm,
-  },
-  status: {
-    color: colors.textMuted,
-    fontSize: fontSize.sm,
-    fontWeight: "600",
-  },
-  accepted: {
-    color: colors.success,
-  },
-  muted: {
-    color: colors.textMuted,
-    fontSize: fontSize.sm,
-    paddingHorizontal: spacing.md,
-    lineHeight: 19,
-  },
-  error: {
-    color: colors.danger,
-    fontSize: fontSize.md,
-    textAlign: "center",
-  },
-});
+const useStyles = makeStyles(({ colors }) =>
+  StyleSheet.create({
+    screen: {
+      flex: 1,
+      backgroundColor: colors.background,
+    },
+    content: {
+      paddingVertical: spacing.md,
+      gap: spacing.xs,
+    },
+    centered: {
+      flex: 1,
+      alignItems: "center",
+      justifyContent: "center",
+      padding: spacing.xl,
+      backgroundColor: colors.background,
+    },
+    sectionTitle: {
+      color: colors.text,
+      fontSize: fontSize.lg,
+      fontWeight: "700",
+      paddingHorizontal: spacing.md,
+    },
+    spaced: {
+      marginTop: spacing.lg,
+    },
+    accessory: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: spacing.sm,
+    },
+    status: {
+      color: colors.textSecondary,
+      fontSize: fontSize.sm,
+      fontWeight: "600",
+    },
+    accepted: {
+      color: colors.success,
+    },
+    muted: {
+      color: colors.textSecondary,
+      fontSize: fontSize.sm,
+      paddingHorizontal: spacing.md,
+      lineHeight: 19,
+    },
+    error: {
+      color: colors.danger,
+      fontSize: fontSize.md,
+      textAlign: "center",
+    },
+  }),
+);

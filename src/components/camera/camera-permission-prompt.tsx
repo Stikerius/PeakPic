@@ -2,7 +2,8 @@ import Ionicons from "@expo/vector-icons/Ionicons";
 import { Linking, StyleSheet, Text, View } from "react-native";
 
 import { Button } from "@/components/button";
-import { colors, fontSize, spacing } from "@/constants/theme";
+import { fontSize, spacing } from "@/constants/theme";
+import { makeStyles, useTheme } from "@/lib/theme";
 
 type CameraPermissionPromptProps = {
   /** False once the user has denied the system dialog; iOS won't show it again. */
@@ -16,12 +17,14 @@ export function CameraPermissionPrompt({
   onRequest,
   onPickFromGallery,
 }: CameraPermissionPromptProps) {
+  const { colors } = useTheme();
+  const styles = useStyles();
   return (
     <View style={styles.container}>
       <Ionicons
         name="camera-outline"
         size={64}
-        color={colors.primary}
+        color={colors.accent}
         style={styles.icon}
       />
       <Text style={styles.title}>Kamerazugriff benötigt</Text>
@@ -47,29 +50,31 @@ export function CameraPermissionPrompt({
   );
 }
 
-const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    justifyContent: "center",
-    alignItems: "stretch",
-    gap: spacing.md,
-    padding: spacing.xl,
-    backgroundColor: colors.background,
-  },
-  icon: {
-    alignSelf: "center",
-  },
-  title: {
-    color: colors.text,
-    fontSize: fontSize.xl,
-    fontWeight: "700",
-    textAlign: "center",
-  },
-  body: {
-    color: colors.textMuted,
-    fontSize: fontSize.md,
-    lineHeight: 22,
-    textAlign: "center",
-    marginBottom: spacing.md,
-  },
-});
+const useStyles = makeStyles(({ colors }) =>
+  StyleSheet.create({
+    container: {
+      flex: 1,
+      justifyContent: "center",
+      alignItems: "stretch",
+      gap: spacing.md,
+      padding: spacing.xl,
+      backgroundColor: colors.background,
+    },
+    icon: {
+      alignSelf: "center",
+    },
+    title: {
+      color: colors.text,
+      fontSize: fontSize.xl,
+      fontWeight: "700",
+      textAlign: "center",
+    },
+    body: {
+      color: colors.textSecondary,
+      fontSize: fontSize.md,
+      lineHeight: 22,
+      textAlign: "center",
+      marginBottom: spacing.md,
+    },
+  }),
+);

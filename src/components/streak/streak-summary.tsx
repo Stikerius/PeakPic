@@ -2,8 +2,9 @@ import Ionicons from "@expo/vector-icons/Ionicons";
 import { StyleSheet, Text, View } from "react-native";
 
 import { FlameIcon } from "@/components/streak/flame-icon";
-import { colors, fontSize, radius, spacing } from "@/constants/theme";
+import { fontSize, radius, spacing } from "@/constants/theme";
 import { flameTier } from "@/lib/streak";
+import { makeStyles, useTheme } from "@/lib/theme";
 
 type StreakSummaryProps = {
   current: number;
@@ -22,6 +23,8 @@ function hint(current: number, trainedToday: boolean): string {
 }
 
 export function StreakSummary({ current, longest, trainedToday }: StreakSummaryProps) {
+  const { colors } = useTheme();
+  const styles = useStyles();
   return (
     <View style={styles.container}>
       <View style={styles.current}>
@@ -29,7 +32,7 @@ export function StreakSummary({ current, longest, trainedToday }: StreakSummaryP
           {current > 0 ? (
             <FlameIcon tier={flameTier(current)} baseSize={56} />
           ) : (
-            <Ionicons name="flame-outline" size={56} color={colors.textMuted} />
+            <Ionicons name="flame-outline" size={56} color={colors.textSecondary} />
           )}
         </View>
         <Text style={styles.currentValue} accessibilityLabel={`Aktueller Streak: ${current} ${dayLabel(current)}`}>
@@ -50,54 +53,56 @@ export function StreakSummary({ current, longest, trainedToday }: StreakSummaryP
   );
 }
 
-const styles = StyleSheet.create({
-  container: {
-    gap: spacing.md,
-  },
-  current: {
-    alignItems: "center",
-    paddingVertical: spacing.lg,
-    paddingHorizontal: spacing.md,
-    borderRadius: radius.lg,
-    backgroundColor: colors.surface,
-  },
-  flame: {
-    height: 90,
-    justifyContent: "flex-end",
-  },
-  currentValue: {
-    color: colors.text,
-    fontSize: 64,
-    fontWeight: "800",
-    lineHeight: 72,
-  },
-  currentLabel: {
-    color: colors.textMuted,
-    fontSize: fontSize.lg,
-    fontWeight: "600",
-  },
-  hint: {
-    marginTop: spacing.sm,
-    color: colors.textMuted,
-    fontSize: fontSize.sm,
-    textAlign: "center",
-  },
-  longest: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: spacing.sm,
-    padding: spacing.md,
-    borderRadius: radius.lg,
-    backgroundColor: colors.surface,
-  },
-  longestLabel: {
-    flex: 1,
-    color: colors.text,
-    fontSize: fontSize.md,
-  },
-  longestValue: {
-    color: colors.text,
-    fontSize: fontSize.lg,
-    fontWeight: "700",
-  },
-});
+const useStyles = makeStyles(({ colors }) =>
+  StyleSheet.create({
+    container: {
+      gap: spacing.md,
+    },
+    current: {
+      alignItems: "center",
+      paddingVertical: spacing.lg,
+      paddingHorizontal: spacing.md,
+      borderRadius: radius.lg,
+      backgroundColor: colors.surface,
+    },
+    flame: {
+      height: 90,
+      justifyContent: "flex-end",
+    },
+    currentValue: {
+      color: colors.text,
+      fontSize: 64,
+      fontWeight: "800",
+      lineHeight: 72,
+    },
+    currentLabel: {
+      color: colors.textSecondary,
+      fontSize: fontSize.lg,
+      fontWeight: "600",
+    },
+    hint: {
+      marginTop: spacing.sm,
+      color: colors.textSecondary,
+      fontSize: fontSize.sm,
+      textAlign: "center",
+    },
+    longest: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: spacing.sm,
+      padding: spacing.md,
+      borderRadius: radius.lg,
+      backgroundColor: colors.surface,
+    },
+    longestLabel: {
+      flex: 1,
+      color: colors.text,
+      fontSize: fontSize.md,
+    },
+    longestValue: {
+      color: colors.text,
+      fontSize: fontSize.lg,
+      fontWeight: "700",
+    },
+  }),
+);

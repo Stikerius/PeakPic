@@ -3,8 +3,9 @@ import { useEffect, useState } from "react";
 import { Modal, Pressable, ScrollView, StyleSheet, Text, View, useWindowDimensions } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
-import { colors, fontSize, radius, spacing } from "@/constants/theme";
+import { fontSize, radius, spacing } from "@/constants/theme";
 import { EMOJI_SECTIONS, QUICK_REACTIONS } from "@/lib/emoji";
+import { makeStyles, useTheme } from "@/lib/theme";
 
 const BAR_HEIGHT = 56;
 const EMOJI_CELL = 44;
@@ -19,6 +20,7 @@ type ReactionPickerProps = {
 };
 
 function EmojiButton({ emoji, selected, onPick }: { emoji: string; selected: boolean; onPick: (emoji: string) => void }) {
+  const styles = useStyles();
   return (
     <Pressable
       onPress={() => onPick(emoji)}
@@ -37,6 +39,8 @@ function EmojiButton({ emoji, selected, onPick }: { emoji: string; selected: boo
  * Tapping any emoji reacts right away.
  */
 export function ReactionPicker({ anchorY, current, onPick, onClose }: ReactionPickerProps) {
+  const { colors } = useTheme();
+  const styles = useStyles();
   const insets = useSafeAreaInsets();
   const { height } = useWindowDimensions();
   const [showAll, setShowAll] = useState(false);
@@ -98,83 +102,85 @@ export function ReactionPicker({ anchorY, current, onPick, onClose }: ReactionPi
   );
 }
 
-const styles = StyleSheet.create({
-  backdrop: {
-    position: "absolute",
-    top: 0,
-    right: 0,
-    bottom: 0,
-    left: 0,
-    backgroundColor: "rgba(0, 0, 0, 0.35)",
-  },
-  panel: {
-    position: "absolute",
-    left: spacing.md,
-    right: spacing.md,
-    alignItems: "center",
-  },
-  bar: {
-    height: BAR_HEIGHT,
-    flexDirection: "row",
-    alignItems: "center",
-    gap: spacing.xs,
-    paddingHorizontal: spacing.sm,
-    borderRadius: radius.full,
-    backgroundColor: colors.surfaceElevated,
-    borderWidth: 1,
-    borderColor: colors.border,
-  },
-  emojiButton: {
-    width: EMOJI_CELL,
-    height: EMOJI_CELL,
-    borderRadius: radius.full,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  emojiSelected: {
-    backgroundColor: colors.border,
-  },
-  emoji: {
-    fontSize: 26,
-  },
-  sheet: {
-    position: "absolute",
-    left: 0,
-    right: 0,
-    bottom: 0,
-    borderTopLeftRadius: radius.lg,
-    borderTopRightRadius: radius.lg,
-    backgroundColor: colors.surface,
-  },
-  sheetHeader: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-    paddingHorizontal: spacing.md,
-    paddingVertical: spacing.md,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: colors.border,
-  },
-  sheetTitle: {
-    color: colors.text,
-    fontSize: fontSize.md,
-    fontWeight: "700",
-  },
-  sheetContent: {
-    padding: spacing.sm,
-    gap: spacing.md,
-  },
-  section: {
-    gap: spacing.xs,
-  },
-  sectionTitle: {
-    color: colors.textMuted,
-    fontSize: fontSize.sm,
-    fontWeight: "700",
-    paddingHorizontal: spacing.xs,
-  },
-  grid: {
-    flexDirection: "row",
-    flexWrap: "wrap",
-  },
-});
+const useStyles = makeStyles(({ colors }) =>
+  StyleSheet.create({
+    backdrop: {
+      position: "absolute",
+      top: 0,
+      right: 0,
+      bottom: 0,
+      left: 0,
+      backgroundColor: colors.backdrop,
+    },
+    panel: {
+      position: "absolute",
+      left: spacing.md,
+      right: spacing.md,
+      alignItems: "center",
+    },
+    bar: {
+      height: BAR_HEIGHT,
+      flexDirection: "row",
+      alignItems: "center",
+      gap: spacing.xs,
+      paddingHorizontal: spacing.sm,
+      borderRadius: radius.full,
+      backgroundColor: colors.surfaceRaised,
+      borderWidth: 1,
+      borderColor: colors.border,
+    },
+    emojiButton: {
+      width: EMOJI_CELL,
+      height: EMOJI_CELL,
+      borderRadius: radius.full,
+      alignItems: "center",
+      justifyContent: "center",
+    },
+    emojiSelected: {
+      backgroundColor: colors.border,
+    },
+    emoji: {
+      fontSize: 26,
+    },
+    sheet: {
+      position: "absolute",
+      left: 0,
+      right: 0,
+      bottom: 0,
+      borderTopLeftRadius: radius.lg,
+      borderTopRightRadius: radius.lg,
+      backgroundColor: colors.surface,
+    },
+    sheetHeader: {
+      flexDirection: "row",
+      alignItems: "center",
+      justifyContent: "space-between",
+      paddingHorizontal: spacing.md,
+      paddingVertical: spacing.md,
+      borderBottomWidth: StyleSheet.hairlineWidth,
+      borderBottomColor: colors.border,
+    },
+    sheetTitle: {
+      color: colors.text,
+      fontSize: fontSize.md,
+      fontWeight: "700",
+    },
+    sheetContent: {
+      padding: spacing.sm,
+      gap: spacing.md,
+    },
+    section: {
+      gap: spacing.xs,
+    },
+    sectionTitle: {
+      color: colors.textSecondary,
+      fontSize: fontSize.sm,
+      fontWeight: "700",
+      paddingHorizontal: spacing.xs,
+    },
+    grid: {
+      flexDirection: "row",
+      flexWrap: "wrap",
+    },
+  }),
+);

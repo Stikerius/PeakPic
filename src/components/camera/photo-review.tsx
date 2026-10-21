@@ -7,8 +7,9 @@ import Animated from "react-native-reanimated";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { Button } from "@/components/button";
-import { colors, fontSize, radius, spacing } from "@/constants/theme";
+import { fontSize, onPhoto, radius, spacing } from "@/constants/theme";
 import { useSwipeToDismiss } from "@/hooks/use-swipe-to-dismiss";
+import { makeStyles } from "@/lib/theme";
 import type { CapturedPhoto } from "@/types/photo";
 
 type PhotoReviewProps = {
@@ -28,6 +29,7 @@ export function PhotoReview({
   onRetake,
   onUse,
 }: PhotoReviewProps) {
+  const styles = useStyles();
   const [fullscreen, setFullscreen] = useState(false);
   const insets = useSafeAreaInsets();
   const swipeDown = useSwipeToDismiss({ onDismiss: onRetake, enabled: !saving, fadeTo: 0.4 });
@@ -101,50 +103,52 @@ export function PhotoReview({
   );
 }
 
-const styles = StyleSheet.create({
-  backdrop: {
-    flex: 1,
-    backgroundColor: "#000000",
-  },
-  flex: {
-    flex: 1,
-  },
-  container: {
-    flex: 1,
-    backgroundColor: colors.background,
-  },
-  grabberArea: {
-    alignItems: "center",
-    gap: spacing.xs,
-    paddingBottom: spacing.sm,
-  },
-  grabber: {
-    width: 40,
-    height: 5,
-    borderRadius: radius.full,
-    backgroundColor: colors.border,
-  },
-  hint: {
-    color: colors.textMuted,
-    fontSize: fontSize.sm,
-  },
-  controls: {
-    gap: spacing.md,
-    padding: spacing.md,
-  },
-  error: {
-    color: colors.danger,
-    fontSize: fontSize.sm,
-  },
-  actions: {
-    flexDirection: "row",
-    gap: spacing.md,
-  },
-  action: {
-    flex: 1,
-  },
-  fullscreen: {
-    flex: 1,
-    backgroundColor: "#000000",
-  },
-});
+const useStyles = makeStyles(({ colors }) =>
+  StyleSheet.create({
+    backdrop: {
+      flex: 1,
+      backgroundColor: onPhoto.background,
+    },
+    flex: {
+      flex: 1,
+    },
+    container: {
+      flex: 1,
+      backgroundColor: colors.background,
+    },
+    grabberArea: {
+      alignItems: "center",
+      gap: spacing.xs,
+      paddingBottom: spacing.sm,
+    },
+    grabber: {
+      width: 40,
+      height: 5,
+      borderRadius: radius.full,
+      backgroundColor: colors.border,
+    },
+    hint: {
+      color: colors.textSecondary,
+      fontSize: fontSize.sm,
+    },
+    controls: {
+      gap: spacing.md,
+      padding: spacing.md,
+    },
+    error: {
+      color: colors.danger,
+      fontSize: fontSize.sm,
+    },
+    actions: {
+      flexDirection: "row",
+      gap: spacing.md,
+    },
+    action: {
+      flex: 1,
+    },
+    fullscreen: {
+      flex: 1,
+      backgroundColor: onPhoto.background,
+    },
+  }),
+);

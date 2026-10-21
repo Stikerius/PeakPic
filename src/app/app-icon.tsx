@@ -12,9 +12,10 @@ import {
 } from "react-native";
 
 import { APP_ICONS, appIconForNativeName, type AppIconOption } from "@/constants/appIcons";
-import { colors, fontSize, radius, spacing } from "@/constants/theme";
+import { fontSize, onPhoto, radius, spacing } from "@/constants/theme";
 import { loadAppIconLibrary } from "@/lib/appIcon";
 import { describeError } from "@/lib/errors";
+import { makeStyles, useTheme } from "@/lib/theme";
 
 const COLUMNS = 3;
 /** iOS-like corner radius relative to the icon size. */
@@ -29,6 +30,8 @@ type State =
   | { status: "ready"; library: IconLibrary; current: string | null };
 
 export default function AppIconScreen() {
+  const { colors } = useTheme();
+  const styles = useStyles();
   const { width } = useWindowDimensions();
   const [state, setState] = useState<State>({ status: "loading" });
   const [changingTo, setChangingTo] = useState<string | null>(null);
@@ -69,7 +72,7 @@ export default function AppIconScreen() {
   if (state.status === "loading") {
     return (
       <View style={styles.centered}>
-        <ActivityIndicator color={colors.primary} />
+        <ActivityIndicator color={colors.accent} />
       </View>
     );
   }
@@ -77,7 +80,7 @@ export default function AppIconScreen() {
   if (state.status !== "ready") {
     return (
       <View style={styles.centered}>
-        <Ionicons name="apps-outline" size={48} color={colors.textMuted} />
+        <Ionicons name="apps-outline" size={48} color={colors.textSecondary} />
         <Text style={styles.hintTitle}>App-Icon nicht änderbar</Text>
         <Text style={styles.hint}>
           {state.status === "no-native-module"
@@ -123,13 +126,13 @@ export default function AppIconScreen() {
                 />
                 {changingTo === icon.id && (
                   <View style={[styles.busy, { borderRadius: iconSize * ICON_CORNER_RATIO }]}>
-                    <ActivityIndicator color={colors.text} />
+                    <ActivityIndicator color={colors.onAccent} />
                   </View>
                 )}
               </View>
               {isSelected && (
                 <View style={styles.check}>
-                  <Ionicons name="checkmark" size={14} color={colors.text} />
+                  <Ionicons name="checkmark" size={14} color={colors.onAccent} />
                 </View>
               )}
               <Text style={[styles.label, isSelected && styles.labelSelected]} numberOfLines={1}>
@@ -143,91 +146,93 @@ export default function AppIconScreen() {
   );
 }
 
-const styles = StyleSheet.create({
-  screen: {
-    flex: 1,
-    backgroundColor: colors.background,
-  },
-  content: {
-    padding: spacing.md,
-    gap: spacing.md,
-  },
-  centered: {
-    flex: 1,
-    alignItems: "center",
-    justifyContent: "center",
-    gap: spacing.md,
-    padding: spacing.xl,
-    backgroundColor: colors.background,
-  },
-  hintTitle: {
-    color: colors.text,
-    fontSize: fontSize.lg,
-    fontWeight: "700",
-  },
-  hint: {
-    color: colors.textMuted,
-    fontSize: fontSize.md,
-    lineHeight: 22,
-    textAlign: "center",
-  },
-  intro: {
-    color: colors.textMuted,
-    fontSize: fontSize.md,
-  },
-  grid: {
-    flexDirection: "row",
-    flexWrap: "wrap",
-    gap: spacing.md,
-  },
-  tile: {
-    alignItems: "center",
-    gap: spacing.xs,
-  },
-  pressed: {
-    opacity: 0.7,
-  },
-  iconFrame: {
-    padding: 4,
-    borderWidth: 2,
-    borderColor: "transparent",
-  },
-  iconFrameSelected: {
-    borderColor: colors.primary,
-  },
-  busy: {
-    position: "absolute",
-    top: 4,
-    left: 4,
-    right: 4,
-    bottom: 4,
-    alignItems: "center",
-    justifyContent: "center",
-    backgroundColor: "rgba(0, 0, 0, 0.5)",
-  },
-  check: {
-    position: "absolute",
-    top: -4,
-    right: 0,
-    width: 22,
-    height: 22,
-    borderRadius: radius.full,
-    alignItems: "center",
-    justifyContent: "center",
-    backgroundColor: colors.primary,
-    borderWidth: 2,
-    borderColor: colors.background,
-  },
-  label: {
-    color: colors.textMuted,
-    fontSize: fontSize.sm,
-  },
-  labelSelected: {
-    color: colors.text,
-    fontWeight: "700",
-  },
-  error: {
-    color: colors.danger,
-    fontSize: fontSize.sm,
-  },
-});
+const useStyles = makeStyles(({ colors }) =>
+  StyleSheet.create({
+    screen: {
+      flex: 1,
+      backgroundColor: colors.background,
+    },
+    content: {
+      padding: spacing.md,
+      gap: spacing.md,
+    },
+    centered: {
+      flex: 1,
+      alignItems: "center",
+      justifyContent: "center",
+      gap: spacing.md,
+      padding: spacing.xl,
+      backgroundColor: colors.background,
+    },
+    hintTitle: {
+      color: colors.text,
+      fontSize: fontSize.lg,
+      fontWeight: "700",
+    },
+    hint: {
+      color: colors.textSecondary,
+      fontSize: fontSize.md,
+      lineHeight: 22,
+      textAlign: "center",
+    },
+    intro: {
+      color: colors.textSecondary,
+      fontSize: fontSize.md,
+    },
+    grid: {
+      flexDirection: "row",
+      flexWrap: "wrap",
+      gap: spacing.md,
+    },
+    tile: {
+      alignItems: "center",
+      gap: spacing.xs,
+    },
+    pressed: {
+      opacity: 0.7,
+    },
+    iconFrame: {
+      padding: 4,
+      borderWidth: 2,
+      borderColor: "transparent",
+    },
+    iconFrameSelected: {
+      borderColor: colors.accent,
+    },
+    busy: {
+      position: "absolute",
+      top: 4,
+      left: 4,
+      right: 4,
+      bottom: 4,
+      alignItems: "center",
+      justifyContent: "center",
+      backgroundColor: onPhoto.scrim,
+    },
+    check: {
+      position: "absolute",
+      top: -4,
+      right: 0,
+      width: 22,
+      height: 22,
+      borderRadius: radius.full,
+      alignItems: "center",
+      justifyContent: "center",
+      backgroundColor: colors.accent,
+      borderWidth: 2,
+      borderColor: colors.background,
+    },
+    label: {
+      color: colors.textSecondary,
+      fontSize: fontSize.sm,
+    },
+    labelSelected: {
+      color: colors.text,
+      fontWeight: "700",
+    },
+    error: {
+      color: colors.danger,
+      fontSize: fontSize.sm,
+    },
+  }),
+);

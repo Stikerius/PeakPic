@@ -1,29 +1,51 @@
-import { SplashScreen, Stack, ThemeProvider } from "expo-router";
+import { ThemeProvider as NavigationThemeProvider, SplashScreen, Stack } from "expo-router";
 import { StatusBar } from "expo-status-bar";
-import { useEffect } from "react";
+import * as SystemUI from "expo-system-ui";
+import { useEffect, type ReactNode } from "react";
 import { StyleSheet } from "react-native";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
 
-import { colors, navigationTheme } from "@/constants/theme";
+import { navigationThemeFor } from "@/constants/theme";
 import { SessionProvider, useSession } from "@/lib/session";
+import { ThemeProvider, makeStyles, useTheme } from "@/lib/theme";
 
 // Keep the splash screen up until the stored session has been restored.
 void SplashScreen.preventAutoHideAsync();
 
 export default function RootLayout() {
   return (
-    <GestureHandlerRootView style={styles.root}>
-      <SessionProvider>
-        <ThemeProvider value={navigationTheme}>
-          <StatusBar style="light" />
+    <ThemeProvider>
+      <ThemedRoot>
+        <SessionProvider>
           <RootNavigator />
-        </ThemeProvider>
-      </SessionProvider>
+        </SessionProvider>
+      </ThemedRoot>
+    </ThemeProvider>
+  );
+}
+
+/** Hands the active scheme to the navigator, status bar and native root view. */
+function ThemedRoot({ children }: { children: ReactNode }) {
+  const { scheme, colors } = useTheme();
+  const styles = useStyles();
+
+  useEffect(() => {
+    // Root view colour behind screens, visible during transitions and modals.
+    void SystemUI.setBackgroundColorAsync(colors.background);
+  }, [colors.background]);
+
+  return (
+    <GestureHandlerRootView style={styles.root}>
+      <NavigationThemeProvider value={navigationThemeFor(scheme)}>
+        <StatusBar style={scheme === "dark" ? "light" : "dark"} />
+        {children}
+      </NavigationThemeProvider>
     </GestureHandlerRootView>
   );
 }
 
 function RootNavigator() {
+  const { colors } = useTheme();
   const { session, loading } = useSession();
 
   useEffect(() => {
@@ -92,8 +114,11 @@ function RootNavigator() {
   );
 }
 
-const styles = StyleSheet.create({
-  root: {
-    flex: 1,
-  },
-});
+const useStyles = makeStyles(({ colors }) =>
+  StyleSheet.create({
+    root: {
+      flex: 1,
+      backgroundColor: colors.background,
+    },
+  }),
+);

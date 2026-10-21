@@ -3,14 +3,17 @@ import { useEffect, useState } from "react";
 import { ActivityIndicator, FlatList, Pressable, StyleSheet, Text, TextInput, View } from "react-native";
 
 import { ProfileRow } from "@/components/profile-row";
-import { colors, fontSize, radius, spacing } from "@/constants/theme";
+import { fontSize, radius, spacing } from "@/constants/theme";
 import { getOrCreateDirectConversation } from "@/lib/chatRepo";
 import { describeError } from "@/lib/errors";
 import { listFollowing } from "@/lib/socialRepo";
+import { makeStyles, useTheme } from "@/lib/theme";
 import type { PublicProfile } from "@/types/social";
 
 /** Start a chat with someone you follow (or open the existing one). */
 export default function NewChatScreen() {
+  const { colors, scheme } = useTheme();
+  const styles = useStyles();
   const [people, setPeople] = useState<PublicProfile[] | null>(null);
   const [query, setQuery] = useState("");
   const [openingId, setOpeningId] = useState<string | null>(null);
@@ -42,10 +45,11 @@ export default function NewChatScreen() {
   return (
     <View style={styles.screen}>
       <TextInput
+        keyboardAppearance={scheme}
         value={query}
         onChangeText={setQuery}
         placeholder="Suchen"
-        placeholderTextColor={colors.textMuted}
+        placeholderTextColor={colors.textSecondary}
         autoCapitalize="none"
         autoCorrect={false}
         style={styles.search}
@@ -53,7 +57,7 @@ export default function NewChatScreen() {
       />
       {error !== null && <Text style={styles.error}>{error}</Text>}
       {people === null && error === null ? (
-        <ActivityIndicator style={styles.loader} color={colors.primary} />
+        <ActivityIndicator style={styles.loader} color={colors.accent} />
       ) : (
         <FlatList
           data={visiblePeople}
@@ -69,7 +73,7 @@ export default function NewChatScreen() {
             >
               <ProfileRow
                 profile={item}
-                accessory={openingId === item.id ? <ActivityIndicator color={colors.primary} /> : null}
+                accessory={openingId === item.id ? <ActivityIndicator color={colors.accent} /> : null}
               />
             </Pressable>
           )}
@@ -86,35 +90,37 @@ export default function NewChatScreen() {
   );
 }
 
-const styles = StyleSheet.create({
-  screen: {
-    flex: 1,
-    backgroundColor: colors.background,
-  },
-  search: {
-    margin: spacing.md,
-    minHeight: 44,
-    paddingHorizontal: spacing.md,
-    borderRadius: radius.md,
-    backgroundColor: colors.surface,
-    color: colors.text,
-    fontSize: fontSize.md,
-  },
-  loader: {
-    marginTop: spacing.xl,
-  },
-  pressed: {
-    opacity: 0.6,
-  },
-  empty: {
-    color: colors.textMuted,
-    fontSize: fontSize.md,
-    textAlign: "center",
-    padding: spacing.xl,
-  },
-  error: {
-    color: colors.danger,
-    fontSize: fontSize.sm,
-    paddingHorizontal: spacing.md,
-  },
-});
+const useStyles = makeStyles(({ colors }) =>
+  StyleSheet.create({
+    screen: {
+      flex: 1,
+      backgroundColor: colors.background,
+    },
+    search: {
+      margin: spacing.md,
+      minHeight: 44,
+      paddingHorizontal: spacing.md,
+      borderRadius: radius.md,
+      backgroundColor: colors.surface,
+      color: colors.text,
+      fontSize: fontSize.md,
+    },
+    loader: {
+      marginTop: spacing.xl,
+    },
+    pressed: {
+      opacity: 0.6,
+    },
+    empty: {
+      color: colors.textSecondary,
+      fontSize: fontSize.md,
+      textAlign: "center",
+      padding: spacing.xl,
+    },
+    error: {
+      color: colors.danger,
+      fontSize: fontSize.sm,
+      paddingHorizontal: spacing.md,
+    },
+  }),
+);

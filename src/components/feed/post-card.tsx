@@ -4,8 +4,9 @@ import { Pressable, StyleSheet, Text, View } from "react-native";
 import { Avatar } from "@/components/avatar";
 import { PhotoCarousel } from "@/components/feed/photo-carousel";
 import { TaggedText } from "@/components/tagged-text";
-import { colors, fontSize, spacing } from "@/constants/theme";
+import { fontSize, spacing } from "@/constants/theme";
 import { formatRelativeTime } from "@/lib/format";
+import { makeStyles, useTheme } from "@/lib/theme";
 import type { FeedPost } from "@/types/social";
 
 type PostCardProps = {
@@ -19,6 +20,8 @@ type PostCardProps = {
 };
 
 export function PostCard({ post, onToggleLike, onOpenComments, onShare, onOpenProfile, onMore }: PostCardProps) {
+  const { colors } = useTheme();
+  const styles = useStyles();
   const repost = post.repost;
   return (
     <View style={styles.card}>
@@ -30,7 +33,7 @@ export function PostCard({ post, onToggleLike, onOpenComments, onShare, onOpenPr
             accessibilityLabel={`Profil von ${repost.reposter.username}`}
             style={styles.repostLine}
           >
-            <Ionicons name="repeat" size={16} color={colors.textMuted} />
+            <Ionicons name="repeat" size={16} color={colors.textSecondary} />
             <Text style={styles.repostText}>
               <Text style={styles.repostName}>@{repost.reposter.username}</Text> hat repostet
             </Text>
@@ -114,7 +117,7 @@ export function PostCard({ post, onToggleLike, onOpenComments, onShare, onOpenPr
 
       {post.tags.length > 0 && (
         <View style={styles.tags}>
-          <Ionicons name="people-outline" size={16} color={colors.textMuted} />
+          <Ionicons name="people-outline" size={16} color={colors.textSecondary} />
           <Text style={styles.tagsText}>
             Mit{" "}
             {post.tags.map((person, index) => (
@@ -143,99 +146,101 @@ export function PostCard({ post, onToggleLike, onOpenComments, onShare, onOpenPr
   );
 }
 
-const styles = StyleSheet.create({
-  card: {
-    paddingBottom: spacing.lg,
-  },
-  repostBox: {
-    gap: spacing.xs,
-    paddingHorizontal: spacing.md,
-    paddingTop: spacing.sm,
-  },
-  repostLine: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: spacing.xs,
-  },
-  repostText: {
-    color: colors.textMuted,
-    fontSize: fontSize.sm,
-  },
-  repostName: {
-    color: colors.text,
-    fontWeight: "700",
-  },
-  repostCaption: {
-    color: colors.text,
-    fontSize: fontSize.md,
-    lineHeight: 21,
-  },
-  headerRow: {
-    flexDirection: "row",
-    alignItems: "center",
-  },
-  header: {
-    flex: 1,
-    flexDirection: "row",
-    alignItems: "center",
-    gap: spacing.sm,
-    paddingHorizontal: spacing.md,
-    paddingVertical: spacing.sm,
-  },
-  more: {
-    paddingHorizontal: spacing.md,
-    paddingVertical: spacing.sm,
-  },
-  headerText: {
-    flex: 1,
-  },
-  username: {
-    color: colors.text,
-    fontSize: fontSize.md,
-    fontWeight: "700",
-  },
-  meta: {
-    color: colors.textMuted,
-    fontSize: fontSize.sm,
-  },
-  actions: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: spacing.lg,
-    paddingHorizontal: spacing.md,
-    paddingTop: spacing.sm,
-  },
-  action: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: spacing.xs,
-  },
-  count: {
-    color: colors.text,
-    fontSize: fontSize.md,
-    fontWeight: "600",
-  },
-  tags: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: spacing.xs,
-    paddingHorizontal: spacing.md,
-    paddingTop: spacing.sm,
-  },
-  tagsText: {
-    flex: 1,
-    color: colors.textMuted,
-    fontSize: fontSize.sm,
-  },
-  tagName: {
-    color: colors.text,
-    fontWeight: "700",
-  },
-  caption: {
-    color: colors.text,
-    fontSize: fontSize.md,
-    lineHeight: 21,
-    paddingHorizontal: spacing.md,
-    paddingTop: spacing.sm,
-  },
-});
+const useStyles = makeStyles(({ colors }) =>
+  StyleSheet.create({
+    card: {
+      paddingBottom: spacing.lg,
+    },
+    repostBox: {
+      gap: spacing.xs,
+      paddingHorizontal: spacing.md,
+      paddingTop: spacing.sm,
+    },
+    repostLine: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: spacing.xs,
+    },
+    repostText: {
+      color: colors.textSecondary,
+      fontSize: fontSize.sm,
+    },
+    repostName: {
+      color: colors.text,
+      fontWeight: "700",
+    },
+    repostCaption: {
+      color: colors.text,
+      fontSize: fontSize.md,
+      lineHeight: 21,
+    },
+    headerRow: {
+      flexDirection: "row",
+      alignItems: "center",
+    },
+    header: {
+      flex: 1,
+      flexDirection: "row",
+      alignItems: "center",
+      gap: spacing.sm,
+      paddingHorizontal: spacing.md,
+      paddingVertical: spacing.sm,
+    },
+    more: {
+      paddingHorizontal: spacing.md,
+      paddingVertical: spacing.sm,
+    },
+    headerText: {
+      flex: 1,
+    },
+    username: {
+      color: colors.text,
+      fontSize: fontSize.md,
+      fontWeight: "700",
+    },
+    meta: {
+      color: colors.textSecondary,
+      fontSize: fontSize.sm,
+    },
+    actions: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: spacing.lg,
+      paddingHorizontal: spacing.md,
+      paddingTop: spacing.sm,
+    },
+    action: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: spacing.xs,
+    },
+    count: {
+      color: colors.text,
+      fontSize: fontSize.md,
+      fontWeight: "600",
+    },
+    tags: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: spacing.xs,
+      paddingHorizontal: spacing.md,
+      paddingTop: spacing.sm,
+    },
+    tagsText: {
+      flex: 1,
+      color: colors.textSecondary,
+      fontSize: fontSize.sm,
+    },
+    tagName: {
+      color: colors.text,
+      fontWeight: "700",
+    },
+    caption: {
+      color: colors.text,
+      fontSize: fontSize.md,
+      lineHeight: 21,
+      paddingHorizontal: spacing.md,
+      paddingTop: spacing.sm,
+    },
+  }),
+);

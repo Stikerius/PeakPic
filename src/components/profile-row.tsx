@@ -2,7 +2,8 @@ import type { ReactNode } from "react";
 import { Pressable, StyleSheet, Text, View } from "react-native";
 
 import { Avatar } from "@/components/avatar";
-import { colors, fontSize, spacing } from "@/constants/theme";
+import { fontSize, spacing } from "@/constants/theme";
+import { makeStyles } from "@/lib/theme";
 import type { PublicProfile } from "@/types/social";
 
 type ProfileRowProps = {
@@ -14,6 +15,7 @@ type ProfileRowProps = {
 };
 
 export function ProfileRow({ profile, accessory, onPress }: ProfileRowProps) {
+  const styles = useStyles();
   const identity = (
     <>
       <Avatar uri={profile.avatarUrl} username={profile.username} size={44} />
@@ -41,24 +43,26 @@ export function ProfileRow({ profile, accessory, onPress }: ProfileRowProps) {
   );
 }
 
-const styles = StyleSheet.create({
-  row: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: spacing.md,
-    paddingHorizontal: spacing.md,
-    paddingVertical: spacing.sm,
-  },
-  identity: {
-    flex: 1,
-    flexDirection: "row",
-    alignItems: "center",
-    gap: spacing.md,
-  },
-  username: {
-    flex: 1,
-    color: colors.text,
-    fontSize: fontSize.md,
-    fontWeight: "600",
-  },
-});
+const useStyles = makeStyles(({ colors }) =>
+  StyleSheet.create({
+    row: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: spacing.md,
+      paddingHorizontal: spacing.md,
+      paddingVertical: spacing.sm,
+    },
+    identity: {
+      flex: 1,
+      flexDirection: "row",
+      alignItems: "center",
+      gap: spacing.md,
+    },
+    username: {
+      flex: 1,
+      color: colors.text,
+      fontSize: fontSize.md,
+      fontWeight: "600",
+    },
+  }),
+);

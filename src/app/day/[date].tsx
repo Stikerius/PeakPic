@@ -14,12 +14,13 @@ import {
 import { Avatar } from "@/components/avatar";
 import { PhotoCarousel } from "@/components/feed/photo-carousel";
 import { PhotoViewer } from "@/components/photo-viewer";
-import { colors, fontSize, radius, spacing } from "@/constants/theme";
+import { fontSize, radius, spacing } from "@/constants/theme";
 import { describeError } from "@/lib/errors";
 import { emitAppEvent, onAppEvent } from "@/lib/events";
 import { formatDayTitle, formatTime } from "@/lib/format";
 import { fetchPost } from "@/lib/feedRepo";
 import { useSession } from "@/lib/session";
+import { makeStyles, useTheme } from "@/lib/theme";
 import { fetchWorkoutDays } from "@/lib/workoutDaysRepo";
 import { fetchUserPostsOnDay } from "@/lib/userProfileRepo";
 import { workoutRepo } from "@/lib/workoutRepo";
@@ -27,6 +28,8 @@ import type { FeedPost } from "@/types/social";
 import type { WorkoutWithPhoto } from "@/types/workout";
 
 export default function DayScreen() {
+  const { colors } = useTheme();
+  const styles = useStyles();
   // Without userId (or with your own) this is your day and photos can be deleted.
   const { date, userId } = useLocalSearchParams<{ date: string; userId?: string }>();
   const myId = useSession().session?.user.id;
@@ -109,7 +112,7 @@ export default function DayScreen() {
           {error !== null ? (
             <Text style={styles.error}>{error}</Text>
           ) : (
-            <ActivityIndicator color={colors.primary} />
+            <ActivityIndicator color={colors.accent} />
           )}
         </View>
       ) : (
@@ -126,7 +129,7 @@ export default function DayScreen() {
               <View style={styles.linkedHeader}>
                 <Avatar uri={post.author.avatarUrl} username={post.author.username} size={28} />
                 <Text style={styles.linkedTitle}>Mit @{post.author.username}</Text>
-                <Ionicons name="link" size={16} color={colors.primary} />
+                <Ionicons name="link" size={16} color={colors.accent} />
               </View>
               <PhotoCarousel photoUrls={post.photoUrls} label={`Workout von ${post.author.username}`} />
             </Pressable>
@@ -167,9 +170,9 @@ export default function DayScreen() {
                     <Ionicons
                       name={workout.inFeed ? "create-outline" : "paper-plane-outline"}
                       size={18}
-                      color={colors.text}
+                      color={workout.inFeed ? colors.text : colors.onAccent}
                     />
-                    <Text style={styles.editLabel}>{workout.inFeed ? "Bearbeiten" : "Im Feed posten"}</Text>
+                    <Text style={[styles.editLabel, !workout.inFeed && styles.publishLabel]}>{workout.inFeed ? "Bearbeiten" : "Im Feed posten"}</Text>
                   </Pressable>
                 )}
                 {isMine && (
@@ -202,93 +205,98 @@ export default function DayScreen() {
   );
 }
 
-const styles = StyleSheet.create({
-  screen: {
-    flex: 1,
-    backgroundColor: colors.background,
-  },
-  content: {
-    padding: spacing.md,
-    gap: spacing.lg,
-  },
-  centered: {
-    flex: 1,
-    alignItems: "center",
-    justifyContent: "center",
-    padding: spacing.lg,
-    backgroundColor: colors.background,
-  },
-  card: {
-    borderRadius: radius.lg,
-    overflow: "hidden",
-    backgroundColor: colors.surface,
-  },
-  footer: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: spacing.md,
-    padding: spacing.md,
-  },
-  footerText: {
-    flex: 1,
-    gap: spacing.xs,
-  },
-  time: {
-    color: colors.textMuted,
-    fontSize: fontSize.sm,
-  },
-  caption: {
-    color: colors.text,
-    fontSize: fontSize.md,
-  },
-  linkedHeader: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: spacing.sm,
-    padding: spacing.md,
-  },
-  linkedTitle: {
-    flex: 1,
-    color: colors.text,
-    fontSize: fontSize.md,
-    fontWeight: "700",
-  },
-  editButton: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: spacing.xs,
-    minHeight: 44,
-    paddingHorizontal: spacing.md,
-    borderRadius: radius.full,
-    backgroundColor: colors.surfaceElevated,
-  },
-  publishButton: {
-    backgroundColor: colors.primary,
-  },
-  editLabel: {
-    color: colors.text,
-    fontSize: fontSize.sm,
-    fontWeight: "700",
-  },
-  deleteButton: {
-    width: 44,
-    height: 44,
-    borderRadius: radius.full,
-    alignItems: "center",
-    justifyContent: "center",
-    backgroundColor: colors.surfaceElevated,
-  },
-  pressed: {
-    opacity: 0.6,
-  },
-  empty: {
-    color: colors.textMuted,
-    fontSize: fontSize.md,
-    textAlign: "center",
-  },
-  error: {
-    color: colors.danger,
-    fontSize: fontSize.md,
-    textAlign: "center",
-  },
-});
+const useStyles = makeStyles(({ colors }) =>
+  StyleSheet.create({
+    screen: {
+      flex: 1,
+      backgroundColor: colors.background,
+    },
+    content: {
+      padding: spacing.md,
+      gap: spacing.lg,
+    },
+    centered: {
+      flex: 1,
+      alignItems: "center",
+      justifyContent: "center",
+      padding: spacing.lg,
+      backgroundColor: colors.background,
+    },
+    card: {
+      borderRadius: radius.lg,
+      overflow: "hidden",
+      backgroundColor: colors.surface,
+    },
+    footer: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: spacing.md,
+      padding: spacing.md,
+    },
+    footerText: {
+      flex: 1,
+      gap: spacing.xs,
+    },
+    time: {
+      color: colors.textSecondary,
+      fontSize: fontSize.sm,
+    },
+    caption: {
+      color: colors.text,
+      fontSize: fontSize.md,
+    },
+    linkedHeader: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: spacing.sm,
+      padding: spacing.md,
+    },
+    linkedTitle: {
+      flex: 1,
+      color: colors.text,
+      fontSize: fontSize.md,
+      fontWeight: "700",
+    },
+    editButton: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: spacing.xs,
+      minHeight: 44,
+      paddingHorizontal: spacing.md,
+      borderRadius: radius.full,
+      backgroundColor: colors.surfaceRaised,
+    },
+    publishButton: {
+      backgroundColor: colors.accent,
+    },
+    editLabel: {
+      color: colors.text,
+      fontSize: fontSize.sm,
+      fontWeight: "700",
+    },
+    publishLabel: {
+      color: colors.onAccent,
+    },
+    deleteButton: {
+      width: 44,
+      height: 44,
+      borderRadius: radius.full,
+      alignItems: "center",
+      justifyContent: "center",
+      backgroundColor: colors.surfaceRaised,
+    },
+    pressed: {
+      opacity: 0.6,
+    },
+    empty: {
+      color: colors.textSecondary,
+      fontSize: fontSize.md,
+      textAlign: "center",
+    },
+    error: {
+      color: colors.danger,
+      fontSize: fontSize.md,
+      textAlign: "center",
+    },
+  }),
+);

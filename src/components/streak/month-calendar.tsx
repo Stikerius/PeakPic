@@ -2,8 +2,9 @@ import Ionicons from "@expo/vector-icons/Ionicons";
 import { Pressable, StyleSheet, Text, View } from "react-native";
 
 import { FlameIcon } from "@/components/streak/flame-icon";
-import { colors, fontSize, radius, spacing } from "@/constants/theme";
+import { fontSize, radius, spacing } from "@/constants/theme";
 import { flameTier, monthGrid, parseDayKey, type DayKey } from "@/lib/streak";
+import { makeStyles, useTheme } from "@/lib/theme";
 
 const MONTH_NAMES = [
   "Januar", "Februar", "März", "April", "Mai", "Juni",
@@ -39,6 +40,8 @@ export function MonthCalendar({
   onNext,
   onSelectDay,
 }: MonthCalendarProps) {
+  const { colors } = useTheme();
+  const styles = useStyles();
   const weeks = monthGrid(year, month);
   const monthName = MONTH_NAMES[month - 1] ?? "";
   const trainedThisMonth = weeks
@@ -103,7 +106,7 @@ export function MonthCalendar({
                 {run !== undefined && <FlameIcon tier={flameTier(run)} baseSize={16} />}
                 {shared && (
                   <View style={styles.sharedMark}>
-                    <Ionicons name="link" size={9} color={colors.text} />
+                    <Ionicons name="link" size={9} color={colors.onAccent} />
                   </View>
                 )}
               </>
@@ -144,90 +147,92 @@ export function MonthCalendar({
   );
 }
 
-const styles = StyleSheet.create({
-  container: {
-    padding: spacing.md,
-    borderRadius: radius.lg,
-    backgroundColor: colors.surface,
-    gap: spacing.xs,
-  },
-  header: {
-    flexDirection: "row",
-    alignItems: "center",
-    marginBottom: spacing.sm,
-  },
-  navButton: {
-    width: 40,
-    height: 40,
-    borderRadius: radius.full,
-    alignItems: "center",
-    justifyContent: "center",
-    backgroundColor: colors.surfaceElevated,
-  },
-  disabled: {
-    opacity: 0.3,
-  },
-  titleBox: {
-    flex: 1,
-    alignItems: "center",
-  },
-  title: {
-    color: colors.text,
-    fontSize: fontSize.lg,
-    fontWeight: "700",
-  },
-  subtitle: {
-    color: colors.textMuted,
-    fontSize: fontSize.sm,
-  },
-  row: {
-    flexDirection: "row",
-  },
-  weekday: {
-    flex: 1,
-    textAlign: "center",
-    color: colors.textMuted,
-    fontSize: fontSize.sm,
-    fontWeight: "600",
-    paddingVertical: spacing.xs,
-  },
-  cell: {
-    flex: 1,
-    aspectRatio: 0.8,
-    alignItems: "center",
-    justifyContent: "flex-start",
-    paddingTop: spacing.xs,
-    borderRadius: radius.md,
-    borderWidth: 1,
-    borderColor: "transparent",
-  },
-  trainedCell: {
-    backgroundColor: colors.surfaceElevated,
-  },
-  pressedCell: {
-    opacity: 0.6,
-  },
-  sharedMark: {
-    position: "absolute",
-    top: 2,
-    right: 2,
-    width: 13,
-    height: 13,
-    borderRadius: radius.full,
-    alignItems: "center",
-    justifyContent: "center",
-    backgroundColor: colors.primary,
-  },
-  today: {
-    borderColor: colors.primary,
-  },
-  dayNumber: {
-    color: colors.text,
-    fontSize: fontSize.sm,
-    fontWeight: "500",
-  },
-  future: {
-    color: colors.textMuted,
-    opacity: 0.5,
-  },
-});
+const useStyles = makeStyles(({ colors }) =>
+  StyleSheet.create({
+    container: {
+      padding: spacing.md,
+      borderRadius: radius.lg,
+      backgroundColor: colors.surface,
+      gap: spacing.xs,
+    },
+    header: {
+      flexDirection: "row",
+      alignItems: "center",
+      marginBottom: spacing.sm,
+    },
+    navButton: {
+      width: 40,
+      height: 40,
+      borderRadius: radius.full,
+      alignItems: "center",
+      justifyContent: "center",
+      backgroundColor: colors.surfaceRaised,
+    },
+    disabled: {
+      opacity: 0.3,
+    },
+    titleBox: {
+      flex: 1,
+      alignItems: "center",
+    },
+    title: {
+      color: colors.text,
+      fontSize: fontSize.lg,
+      fontWeight: "700",
+    },
+    subtitle: {
+      color: colors.textSecondary,
+      fontSize: fontSize.sm,
+    },
+    row: {
+      flexDirection: "row",
+    },
+    weekday: {
+      flex: 1,
+      textAlign: "center",
+      color: colors.textSecondary,
+      fontSize: fontSize.sm,
+      fontWeight: "600",
+      paddingVertical: spacing.xs,
+    },
+    cell: {
+      flex: 1,
+      aspectRatio: 0.8,
+      alignItems: "center",
+      justifyContent: "flex-start",
+      paddingTop: spacing.xs,
+      borderRadius: radius.md,
+      borderWidth: 1,
+      borderColor: "transparent",
+    },
+    trainedCell: {
+      backgroundColor: colors.surfaceRaised,
+    },
+    pressedCell: {
+      opacity: 0.6,
+    },
+    sharedMark: {
+      position: "absolute",
+      top: 2,
+      right: 2,
+      width: 13,
+      height: 13,
+      borderRadius: radius.full,
+      alignItems: "center",
+      justifyContent: "center",
+      backgroundColor: colors.accent,
+    },
+    today: {
+      borderColor: colors.accent,
+    },
+    dayNumber: {
+      color: colors.text,
+      fontSize: fontSize.sm,
+      fontWeight: "500",
+    },
+    future: {
+      color: colors.textSecondary,
+      opacity: 0.5,
+    },
+  }),
+);

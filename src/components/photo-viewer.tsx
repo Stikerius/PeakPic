@@ -8,8 +8,9 @@ import Animated, { useAnimatedStyle, useSharedValue, withTiming } from "react-na
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { scheduleOnRN } from "react-native-worklets";
 
-import { colors, fontSize, radius, spacing } from "@/constants/theme";
+import { fontSize, onPhoto, radius, spacing } from "@/constants/theme";
 import { useSwipeToDismiss } from "@/hooks/use-swipe-to-dismiss";
+import { DarkScheme, makeStyles, useTheme } from "@/lib/theme";
 
 const MAX_ZOOM = 4;
 const DOUBLE_TAP_ZOOM = 2.5;
@@ -107,7 +108,17 @@ type PhotoViewerProps = {
 };
 
 /** Full-screen photos: swipe sideways between them, zoom, swipe down to close. */
-export function PhotoViewer({ photoUrls, initialIndex, onClose }: PhotoViewerProps) {
+export function PhotoViewer(props: PhotoViewerProps) {
+  return (
+    <DarkScheme>
+      <PhotoViewerContent {...props} />
+    </DarkScheme>
+  );
+}
+
+function PhotoViewerContent({ photoUrls, initialIndex, onClose }: PhotoViewerProps) {
+  const { colors } = useTheme();
+  const styles = useStyles();
   const { width, height } = useWindowDimensions();
   const insets = useSafeAreaInsets();
   const [page, setPage] = useState(0);
@@ -180,36 +191,38 @@ export function PhotoViewer({ photoUrls, initialIndex, onClose }: PhotoViewerPro
   );
 }
 
-const styles = StyleSheet.create({
-  root: {
-    flex: 1,
-    backgroundColor: "#000000",
-  },
-  top: {
-    position: "absolute",
-    left: spacing.md,
-    right: spacing.md,
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-  },
-  counter: {
-    paddingHorizontal: spacing.sm,
-    paddingVertical: 2,
-    borderRadius: radius.full,
-    backgroundColor: "rgba(255, 255, 255, 0.15)",
-  },
-  counterText: {
-    color: colors.text,
-    fontSize: fontSize.sm,
-    fontWeight: "700",
-  },
-  close: {
-    width: 40,
-    height: 40,
-    borderRadius: radius.full,
-    alignItems: "center",
-    justifyContent: "center",
-    backgroundColor: "rgba(255, 255, 255, 0.15)",
-  },
-});
+const useStyles = makeStyles(({ colors }) =>
+  StyleSheet.create({
+    root: {
+      flex: 1,
+      backgroundColor: onPhoto.background,
+    },
+    top: {
+      position: "absolute",
+      left: spacing.md,
+      right: spacing.md,
+      flexDirection: "row",
+      alignItems: "center",
+      justifyContent: "space-between",
+    },
+    counter: {
+      paddingHorizontal: spacing.sm,
+      paddingVertical: 2,
+      borderRadius: radius.full,
+      backgroundColor: onPhoto.fill,
+    },
+    counterText: {
+      color: colors.text,
+      fontSize: fontSize.sm,
+      fontWeight: "700",
+    },
+    close: {
+      width: 40,
+      height: 40,
+      borderRadius: radius.full,
+      alignItems: "center",
+      justifyContent: "center",
+      backgroundColor: onPhoto.fill,
+    },
+  }),
+);

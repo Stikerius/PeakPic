@@ -5,7 +5,7 @@ import { ActivityIndicator, Alert, ScrollView, StyleSheet, Text, View } from "re
 
 import { Button } from "@/components/button";
 import { PostCard } from "@/components/feed/post-card";
-import { colors, fontSize, spacing } from "@/constants/theme";
+import { fontSize, spacing } from "@/constants/theme";
 import { useOpenProfile } from "@/hooks/use-open-profile";
 import { usePostActions } from "@/hooks/use-post-actions";
 import { useSession } from "@/lib/session";
@@ -14,6 +14,7 @@ import { describeError } from "@/lib/errors";
 import { fetchPost, setPostLiked } from "@/lib/feedRepo";
 import { getMyRepost } from "@/lib/repostRepo";
 import { toDayKey } from "@/lib/streak";
+import { makeStyles, useTheme } from "@/lib/theme";
 import { isWorkoutLinkExpired } from "@/lib/workoutLinks";
 import { answerWorkoutLink, getMyWorkoutLink } from "@/lib/workoutLinkRepo";
 import type { WorkoutShareStatus } from "@/types/database";
@@ -23,6 +24,8 @@ type LoadState = { status: "loading" } | { status: "missing" } | { status: "erro
 
 /** A single post, e.g. opened from a shared post in a chat. */
 export default function PostScreen() {
+  const { colors } = useTheme();
+  const styles = useStyles();
   const { postId } = useLocalSearchParams<{ postId: string }>();
   const [state, setState] = useState<LoadState>({ status: "loading" });
   const [liking, setLiking] = useState(false);
@@ -107,10 +110,10 @@ export default function PostScreen() {
     return (
       <View style={styles.centered}>
         {state.status === "loading" ? (
-          <ActivityIndicator color={colors.primary} />
+          <ActivityIndicator color={colors.accent} />
         ) : (
           <>
-            <Ionicons name="image-outline" size={48} color={colors.textMuted} />
+            <Ionicons name="image-outline" size={48} color={colors.textSecondary} />
             <Text style={styles.message}>
               {state.status === "missing"
                 ? "Dieser Post ist nicht mehr verfügbar."
@@ -162,37 +165,39 @@ export default function PostScreen() {
   );
 }
 
-const styles = StyleSheet.create({
-  screen: {
-    flex: 1,
-    backgroundColor: colors.background,
-  },
-  linkBanner: {
-    gap: spacing.sm,
-    margin: spacing.md,
-    padding: spacing.md,
-    borderRadius: 12,
-    backgroundColor: colors.surface,
-  },
-  linkText: {
-    color: colors.text,
-    fontSize: fontSize.md,
-  },
-  linkActions: {
-    flexDirection: "row",
-    gap: spacing.sm,
-  },
-  centered: {
-    flex: 1,
-    alignItems: "center",
-    justifyContent: "center",
-    gap: spacing.md,
-    padding: spacing.xl,
-    backgroundColor: colors.background,
-  },
-  message: {
-    color: colors.textMuted,
-    fontSize: fontSize.md,
-    textAlign: "center",
-  },
-});
+const useStyles = makeStyles(({ colors }) =>
+  StyleSheet.create({
+    screen: {
+      flex: 1,
+      backgroundColor: colors.background,
+    },
+    linkBanner: {
+      gap: spacing.sm,
+      margin: spacing.md,
+      padding: spacing.md,
+      borderRadius: 12,
+      backgroundColor: colors.surface,
+    },
+    linkText: {
+      color: colors.text,
+      fontSize: fontSize.md,
+    },
+    linkActions: {
+      flexDirection: "row",
+      gap: spacing.sm,
+    },
+    centered: {
+      flex: 1,
+      alignItems: "center",
+      justifyContent: "center",
+      gap: spacing.md,
+      padding: spacing.xl,
+      backgroundColor: colors.background,
+    },
+    message: {
+      color: colors.textSecondary,
+      fontSize: fontSize.md,
+      textAlign: "center",
+    },
+  }),
+);

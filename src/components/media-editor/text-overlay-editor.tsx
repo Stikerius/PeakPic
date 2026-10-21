@@ -12,17 +12,10 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { contrastColor } from "@/components/media-editor/overlay";
 import { TaggedTextInput } from "@/components/tagged-text-input";
-import { colors, fontSize, radius, spacing } from "@/constants/theme";
+import { fontSize, onPhoto, photoTextColors, radius, spacing } from "@/constants/theme";
+import { makeStyles, useTheme } from "@/lib/theme";
 
-export const TEXT_COLORS = [
-  "#FFFFFF",
-  "#000000",
-  colors.primary,
-  "#FFD60A",
-  "#34C759",
-  "#0A84FF",
-  "#FF375F",
-] as const;
+export const TEXT_COLORS = photoTextColors;
 
 const MAX_LENGTH = 60;
 
@@ -36,6 +29,8 @@ type TextOverlayEditorProps = {
 
 /** Full-screen text input with colour and background options, like Instagram's text tool. */
 export function TextOverlayEditor({ initial, onDone }: TextOverlayEditorProps) {
+  const { colors } = useTheme();
+  const styles = useStyles();
   const insets = useSafeAreaInsets();
   const [value, setValue] = useState(initial);
 
@@ -69,7 +64,7 @@ export function TextOverlayEditor({ initial, onDone }: TextOverlayEditorProps) {
           autoFocus
           maxLength={MAX_LENGTH}
           placeholder="Text eingeben…"
-          placeholderTextColor="rgba(255, 255, 255, 0.6)"
+          placeholderTextColor={onPhoto.textTertiary}
           textAlign="center"
           returnKeyType="done"
           submitBehavior="blurAndSubmit"
@@ -99,72 +94,74 @@ export function TextOverlayEditor({ initial, onDone }: TextOverlayEditorProps) {
   );
 }
 
-const styles = StyleSheet.create({
-  backdrop: {
-    position: "absolute",
-    top: 0,
-    right: 0,
-    bottom: 0,
-    left: 0,
-    backgroundColor: "rgba(0, 0, 0, 0.6)",
-  },
-  topBar: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-    paddingHorizontal: spacing.md,
-  },
-  toolButton: {
-    width: 40,
-    height: 40,
-    borderRadius: radius.md,
-    alignItems: "center",
-    justifyContent: "center",
-    borderWidth: 1.5,
-    borderColor: colors.text,
-  },
-  toolButtonActive: {
-    backgroundColor: colors.text,
-  },
-  done: {
-    color: colors.text,
-    fontSize: fontSize.lg,
-    fontWeight: "700",
-  },
-  center: {
-    flex: 1,
-    justifyContent: "center",
-    paddingHorizontal: spacing.lg,
-  },
-  inputBox: {
-    alignSelf: "stretch",
-    paddingHorizontal: spacing.lg,
-  },
-  input: {
-    alignSelf: "center",
-    minWidth: 120,
-    paddingHorizontal: 14,
-    paddingVertical: 8,
-    borderRadius: 10,
-    fontSize: 30,
-    fontWeight: "700",
-  },
-  swatches: {
-    flexDirection: "row",
-    justifyContent: "center",
-    gap: spacing.md,
-    paddingVertical: spacing.md,
-  },
-  swatch: {
-    width: 30,
-    height: 30,
-    borderRadius: radius.full,
-    borderWidth: 2,
-    borderColor: "rgba(255, 255, 255, 0.6)",
-  },
-  swatchSelected: {
-    borderWidth: 3,
-    borderColor: colors.text,
-    transform: [{ scale: 1.15 }],
-  },
-});
+const useStyles = makeStyles(({ colors }) =>
+  StyleSheet.create({
+    backdrop: {
+      position: "absolute",
+      top: 0,
+      right: 0,
+      bottom: 0,
+      left: 0,
+      backgroundColor: onPhoto.scrimStrong,
+    },
+    topBar: {
+      flexDirection: "row",
+      alignItems: "center",
+      justifyContent: "space-between",
+      paddingHorizontal: spacing.md,
+    },
+    toolButton: {
+      width: 40,
+      height: 40,
+      borderRadius: radius.md,
+      alignItems: "center",
+      justifyContent: "center",
+      borderWidth: 1.5,
+      borderColor: colors.text,
+    },
+    toolButtonActive: {
+      backgroundColor: colors.text,
+    },
+    done: {
+      color: colors.text,
+      fontSize: fontSize.lg,
+      fontWeight: "700",
+    },
+    center: {
+      flex: 1,
+      justifyContent: "center",
+      paddingHorizontal: spacing.lg,
+    },
+    inputBox: {
+      alignSelf: "stretch",
+      paddingHorizontal: spacing.lg,
+    },
+    input: {
+      alignSelf: "center",
+      minWidth: 120,
+      paddingHorizontal: 14,
+      paddingVertical: 8,
+      borderRadius: 10,
+      fontSize: 30,
+      fontWeight: "700",
+    },
+    swatches: {
+      flexDirection: "row",
+      justifyContent: "center",
+      gap: spacing.md,
+      paddingVertical: spacing.md,
+    },
+    swatch: {
+      width: 30,
+      height: 30,
+      borderRadius: radius.full,
+      borderWidth: 2,
+      borderColor: onPhoto.outline,
+    },
+    swatchSelected: {
+      borderWidth: 3,
+      borderColor: colors.text,
+      transform: [{ scale: 1.15 }],
+    },
+  }),
+);

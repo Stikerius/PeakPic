@@ -3,7 +3,8 @@ import { Image } from "expo-image";
 import { router } from "expo-router";
 import { Pressable, StyleSheet, Text, View, useWindowDimensions } from "react-native";
 
-import { colors, fontSize, spacing } from "@/constants/theme";
+import { fontSize, onPhoto, spacing } from "@/constants/theme";
+import { makeStyles } from "@/lib/theme";
 import type { PostThumbnail } from "@/lib/userProfileRepo";
 
 const COLUMNS = 3;
@@ -19,6 +20,7 @@ type PostGridProps = {
  * Tap opens the post (for reposts the original).
  */
 export function PostGrid({ posts, emptyText }: PostGridProps) {
+  const styles = useStyles();
   const { width } = useWindowDimensions();
   const tileWidth = (width - GAP * (COLUMNS - 1)) / COLUMNS;
 
@@ -47,7 +49,7 @@ export function PostGrid({ posts, emptyText }: PostGridProps) {
           )}
           {(post.isRepost || post.photoCount > 1) && (
             <View style={styles.badge} pointerEvents="none">
-              <Ionicons name={post.isRepost ? "repeat" : "copy"} size={16} color={colors.text} />
+              <Ionicons name={post.isRepost ? "repeat" : "copy"} size={16} color={onPhoto.text} />
             </View>
           )}
         </Pressable>
@@ -56,33 +58,35 @@ export function PostGrid({ posts, emptyText }: PostGridProps) {
   );
 }
 
-const styles = StyleSheet.create({
-  grid: {
-    flexDirection: "row",
-    flexWrap: "wrap",
-    gap: GAP,
-  },
-  tile: {
-    width: "100%",
-    height: "100%",
-    backgroundColor: colors.surface,
-  },
-  missing: {
-    backgroundColor: colors.surfaceElevated,
-  },
-  badge: {
-    position: "absolute",
-    top: 6,
-    right: 6,
-    shadowColor: "#000000",
-    shadowOpacity: 0.5,
-    shadowRadius: 3,
-    shadowOffset: { width: 0, height: 1 },
-  },
-  empty: {
-    color: colors.textMuted,
-    fontSize: fontSize.md,
-    textAlign: "center",
-    paddingHorizontal: spacing.md,
-  },
-});
+const useStyles = makeStyles(({ colors }) =>
+  StyleSheet.create({
+    grid: {
+      flexDirection: "row",
+      flexWrap: "wrap",
+      gap: GAP,
+    },
+    tile: {
+      width: "100%",
+      height: "100%",
+      backgroundColor: colors.surface,
+    },
+    missing: {
+      backgroundColor: colors.surfaceRaised,
+    },
+    badge: {
+      position: "absolute",
+      top: 6,
+      right: 6,
+      shadowColor: onPhoto.background,
+      shadowOpacity: 0.5,
+      shadowRadius: 3,
+      shadowOffset: { width: 0, height: 1 },
+    },
+    empty: {
+      color: colors.textSecondary,
+      fontSize: fontSize.md,
+      textAlign: "center",
+      paddingHorizontal: spacing.md,
+    },
+  }),
+);

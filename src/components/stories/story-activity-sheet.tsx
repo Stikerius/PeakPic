@@ -2,9 +2,10 @@ import Ionicons from "@expo/vector-icons/Ionicons";
 import { FlatList, Modal, Pressable, StyleSheet, Text, View } from "react-native";
 
 import { ProfileRow } from "@/components/profile-row";
-import { colors, fontSize, spacing } from "@/constants/theme";
+import { fontSize, spacing } from "@/constants/theme";
 import { formatRelativeTime } from "@/lib/format";
 import type { StoryActivity } from "@/lib/storyRepo";
+import { makeStyles, useTheme } from "@/lib/theme";
 
 type StoryActivitySheetProps = {
   activity: StoryActivity | null;
@@ -15,6 +16,8 @@ type StoryActivitySheetProps = {
 
 /** Viewers and likes of one of my stories. */
 export function StoryActivitySheet({ activity, visible, onClose, onOpenProfile }: StoryActivitySheetProps) {
+  const { colors } = useTheme();
+  const styles = useStyles();
   return (
     <Modal visible={visible} animationType="slide" presentationStyle="pageSheet" onRequestClose={onClose}>
       <View style={styles.sheet}>
@@ -53,47 +56,49 @@ export function StoryActivitySheet({ activity, visible, onClose, onOpenProfile }
   );
 }
 
-const styles = StyleSheet.create({
-  sheet: {
-    flex: 1,
-    backgroundColor: colors.background,
-    paddingTop: spacing.md,
-  },
-  header: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-    paddingHorizontal: spacing.md,
-    paddingBottom: spacing.md,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: colors.border,
-  },
-  counts: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: spacing.xs,
-  },
-  count: {
-    color: colors.text,
-    fontSize: fontSize.lg,
-    fontWeight: "700",
-  },
-  heartIcon: {
-    marginLeft: spacing.md,
-  },
-  accessory: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: spacing.sm,
-  },
-  time: {
-    color: colors.textMuted,
-    fontSize: fontSize.sm,
-  },
-  empty: {
-    color: colors.textMuted,
-    fontSize: fontSize.md,
-    textAlign: "center",
-    padding: spacing.xl,
-  },
-});
+const useStyles = makeStyles(({ colors }) =>
+  StyleSheet.create({
+    sheet: {
+      flex: 1,
+      backgroundColor: colors.background,
+      paddingTop: spacing.md,
+    },
+    header: {
+      flexDirection: "row",
+      alignItems: "center",
+      justifyContent: "space-between",
+      paddingHorizontal: spacing.md,
+      paddingBottom: spacing.md,
+      borderBottomWidth: StyleSheet.hairlineWidth,
+      borderBottomColor: colors.border,
+    },
+    counts: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: spacing.xs,
+    },
+    count: {
+      color: colors.text,
+      fontSize: fontSize.lg,
+      fontWeight: "700",
+    },
+    heartIcon: {
+      marginLeft: spacing.md,
+    },
+    accessory: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: spacing.sm,
+    },
+    time: {
+      color: colors.textSecondary,
+      fontSize: fontSize.sm,
+    },
+    empty: {
+      color: colors.textSecondary,
+      fontSize: fontSize.md,
+      textAlign: "center",
+      padding: spacing.xl,
+    },
+  }),
+);

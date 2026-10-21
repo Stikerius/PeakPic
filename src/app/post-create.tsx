@@ -5,7 +5,7 @@ import { ActivityIndicator, Alert, StyleSheet, Text, View } from "react-native";
 
 import { Button } from "@/components/button";
 import { MediaEditor, type MediaEditorResult } from "@/components/media-editor/media-editor";
-import { colors, fontSize, spacing } from "@/constants/theme";
+import { fontSize, onPhoto, spacing } from "@/constants/theme";
 import { describeError } from "@/lib/errors";
 import { emitAppEvent } from "@/lib/events";
 import {
@@ -16,6 +16,7 @@ import {
   type EditablePost,
   type PostPhotoInput,
 } from "@/lib/postRepo";
+import { DarkScheme, makeStyles, useTheme } from "@/lib/theme";
 import { requestWorkoutLinks } from "@/lib/workoutLinkRepo";
 
 /** Photos per post (carousel). */
@@ -46,6 +47,16 @@ async function linkWorkouts(postId: string, userIds: string[]): Promise<void> {
 }
 
 export default function PostCreateScreen() {
+  return (
+    <DarkScheme>
+      <PostCreateScreenContent />
+    </DarkScheme>
+  );
+}
+
+function PostCreateScreenContent() {
+  const { colors } = useTheme();
+  const styles = useStyles();
   const { mode, photoUri, postId, publish } = useLocalSearchParams<Params>();
   const publishing = publish === "1";
   const [existing, setExisting] = useState<EditablePost | null>(null);
@@ -122,7 +133,7 @@ export default function PostCreateScreen() {
               <Button label="Zurück" variant="secondary" onPress={() => router.back()} />
             </>
           ) : (
-            <ActivityIndicator color={colors.primary} />
+            <ActivityIndicator color={colors.accent} />
           )}
         </View>
       );
@@ -165,18 +176,20 @@ export default function PostCreateScreen() {
   );
 }
 
-const styles = StyleSheet.create({
-  centered: {
-    flex: 1,
-    alignItems: "center",
-    justifyContent: "center",
-    gap: spacing.md,
-    padding: spacing.xl,
-    backgroundColor: "#000000",
-  },
-  error: {
-    color: colors.danger,
-    fontSize: fontSize.md,
-    textAlign: "center",
-  },
-});
+const useStyles = makeStyles(({ colors }) =>
+  StyleSheet.create({
+    centered: {
+      flex: 1,
+      alignItems: "center",
+      justifyContent: "center",
+      gap: spacing.md,
+      padding: spacing.xl,
+      backgroundColor: onPhoto.background,
+    },
+    error: {
+      color: colors.danger,
+      fontSize: fontSize.md,
+      textAlign: "center",
+    },
+  }),
+);
