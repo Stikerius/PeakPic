@@ -4,6 +4,7 @@ import type { ComponentProps } from "react";
 import { useEffect, useState } from "react";
 import { ActivityIndicator, FlatList, Pressable, RefreshControl, StyleSheet, Text, View } from "react-native";
 
+import { ModerationNotices } from "@/components/moderation/moderation-notices";
 import { InboxRow } from "@/components/notifications/inbox-row";
 import { Avatar } from "@/components/ui/avatar";
 import { fontSize, radius, spacing, type ColorName } from "@/constants/theme";
@@ -118,15 +119,18 @@ export default function NotificationsScreen() {
       keyExtractor={(group) => group.key}
       contentContainerStyle={feed.groups.length === 0 && inbox.length === 0 ? styles.emptyContainer : undefined}
       ListHeaderComponent={
-        inbox.length > 0 ? (
-          <View>
-            <Text style={styles.sectionTitle}>Für dich</Text>
-            {inbox.map((item) => (
-              <InboxRow key={item.id} item={item} onChanged={() => void load()} />
-            ))}
-            {feed.groups.length > 0 && <Text style={styles.sectionTitle}>Aktivität</Text>}
-          </View>
-        ) : null
+        <View>
+          <ModerationNotices />
+          {inbox.length > 0 && (
+            <>
+              <Text style={styles.sectionTitle}>Für dich</Text>
+              {inbox.map((item) => (
+                <InboxRow key={item.id} item={item} onChanged={() => void load()} />
+              ))}
+              {feed.groups.length > 0 && <Text style={styles.sectionTitle}>Aktivität</Text>}
+            </>
+          )}
+        </View>
       }
       refreshControl={
         <RefreshControl

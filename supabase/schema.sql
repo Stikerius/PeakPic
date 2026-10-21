@@ -70,6 +70,14 @@
 --                   20 per day, one per target); reporters read their own status through
 --                   get_my_reports(). Reported messages are copied with up to 5 messages of
 --                   context before and after into report_snapshots (no client access).
+--   * staff         admin_roles ('moderator' | 'admin', set by hand, see admin-setup.sql) has no
+--                   client access at all. is_moderator() / is_admin() also need a two-factor
+--                   session (JWT aal = 'aal2'). All moderation goes through mod_* / admin_*
+--                   functions; each action and each look at private content writes an entry
+--                   into moderation_actions (append-only, not even admins can change it).
+--   * moderation    posts, stories, comments and messages can be 'removed' or 'quarantined'
+--                   (moderation_state): hidden from everyone including the owner, never
+--                   deleted, files stay. Moderators see chats only through report_snapshots.
 --   * storage       bucket "photos" (private), objects live under {user_id}/{kind}/...;
 --                   a photo is readable exactly when its post/story is (avatars: everyone)
 -- =============================================================================
@@ -614,6 +622,64 @@ create table if not exists public.report_snapshots (
 );
 create index if not exists report_snapshots_report_idx on public.report_snapshots (report_id, sent_at);
 
+-- Staff roles. No client access at all (not even reading); set by hand (supabase/admin-setup.sql).
+create table if not exists public.admin_roles (
+  user_id    uuid primary key references public.profiles (id) on delete cascade,
+  role       text not null check (role in ('moderator', 'admin')),
+  created_at timestamptz not null default now()
+);
+
+-- Append-only log of every moderation action and every look at private content. Ids are plain
+-- uuids without foreign keys, so deleting an account never touches or blocks the log.
+create table if not exists public.moderation_actions (
+  id             uuid primary key default gen_random_uuid(),
+  actor_id       uuid,
+  action         text not null,
+  target_type    text,
+  target_id      uuid,
+  target_user_id uuid,
+  report_id      uuid,
+  reason         text not null check (char_length(btrim(reason)) >= 10),
+  user_message   text check (char_length(user_message) <= 1000),
+  details        jsonb not null default '{}',
+  created_at     timestamptz not null default now()
+);
+create index if not exists moderation_actions_created_idx on public.moderation_actions (created_at desc);
+create index if not exists moderation_actions_target_user_idx on public.moderation_actions (target_user_id, created_at desc);
+
+-- Messages from the moderation team the affected person may read (warnings, removals).
+create table if not exists public.moderation_notices (
+  id         uuid primary key default gen_random_uuid(),
+  user_id    uuid not null references public.profiles (id) on delete cascade,
+  action_id  uuid,
+  kind       text not null check (kind in ('warning', 'removal', 'suspension', 'ban', 'info')),
+  message    text not null check (char_length(message) between 1 and 1000),
+  created_at timestamptz not null default now(),
+  read_at    timestamptz
+);
+create index if not exists moderation_notices_user_idx on public.moderation_notices (user_id, created_at desc);
+
+-- Removed instead of deleted: content stays as evidence, files stay in storage.
+-- moderation_state: null = visible, 'removed' or 'quarantined' (possibly illegal, admins only).
+do $$
+declare
+  t text;
+begin
+  foreach t in array array['posts', 'stories', 'comments', 'messages'] loop
+    execute format('alter table public.%I add column if not exists moderation_state text', t);
+    execute format('alter table public.%I add column if not exists removed_at timestamptz', t);
+    execute format('alter table public.%I add column if not exists removed_by uuid', t);
+    execute format('alter table public.%I add column if not exists removed_reason text', t);
+    if not exists (select 1 from pg_constraint where conname = t || '_moderation_state_check') then
+      execute format(
+        'alter table public.%I add constraint %I check (moderation_state in (''removed'', ''quarantined''))',
+        t, t || '_moderation_state_check'
+      );
+    end if;
+  end loop;
+end;
+$$;
+
 
 -- -----------------------------------------------------------------------------
 -- Helper functions
@@ -667,13 +733,18 @@ as $$
 $$;
 
 -- Does `target` exist for the caller at all? Not for accounts that aren't active and not
--- across a block in either direction. The caller always sees themself.
+-- across a block in either direction. The caller always sees themself; a caller whose own
+-- account isn't active sees nobody else (so the session of a banned account is useless).
 create or replace function public.can_see_account(target uuid)
 returns boolean
 language sql stable security definer set search_path = ''
 as $$
   select target = (select auth.uid())
-    or (public.account_is_active(target) and not public.is_blocked_between((select auth.uid()), target));
+    or (
+      public.is_account_active()
+      and public.account_is_active(target)
+      and not public.is_blocked_between((select auth.uid()), target)
+    );
 $$;
 
 -- True if `owner`'s posts or active stories ('posts' / 'stories') are open to every
@@ -835,6 +906,7 @@ as $$
   select exists (
     select 1 from public.posts p
     where p.id = post
+      and p.moderation_state is null
       and (
         p.user_id = (select auth.uid())
         or (
@@ -860,7 +932,8 @@ language sql stable security definer set search_path = ''
 as $$
   select exists (
     select 1 from public.comments c
-    where c.id = comment and public.can_view_post(c.post_id) and public.can_see_account(c.user_id)
+    where c.id = comment and c.moderation_state is null
+      and public.can_view_post(c.post_id) and public.can_see_account(c.user_id)
   );
 $$;
 
@@ -935,6 +1008,7 @@ as $$
   select exists (
     select 1 from public.stories s
     where s.id = story
+      and s.moderation_state is null
       and (
         s.user_id = (select auth.uid())
         or (
@@ -1100,12 +1174,14 @@ $$;
 
 -- ---------------------------------------------------------------- workouts
 -- THE place that decides whether a post counts as a training proof (for its owner and for
--- linked people). Today every post counts; a later automatic check plugs in here.
+-- linked people). Every post that wasn't removed by moderation counts; a later automatic
+-- check plugs in here.
 create or replace function public.post_counts_as_workout(post uuid)
 returns boolean
 language sql stable security definer set search_path = ''
 as $$
-  select exists (select 1 from public.posts p where p.id = post);
+  -- Removed or quarantined posts don't count.
+  select exists (select 1 from public.posts p where p.id = post and p.moderation_state is null);
 $$;
 
 -- Workout links can be answered until the end of the day after the workout (Europe/Zurich).
@@ -2172,6 +2248,732 @@ as $$
   limit 200;
 $$;
 
+-- ---------------------------------------------------------------- staff and moderation
+-- Staff checks. Both need a role in admin_roles AND a session confirmed with a second factor
+-- (TOTP, JWT claim aal = 'aal2'). admin includes moderator.
+create or replace function public.is_moderator()
+returns boolean
+language sql stable security definer set search_path = ''
+as $$
+  select coalesce((select auth.jwt() ->> 'aal'), '') = 'aal2'
+    and exists (
+      select 1 from public.admin_roles r
+      where r.user_id = (select auth.uid()) and r.role in ('moderator', 'admin')
+    );
+$$;
+
+create or replace function public.is_admin()
+returns boolean
+language sql stable security definer set search_path = ''
+as $$
+  select coalesce((select auth.jwt() ->> 'aal'), '') = 'aal2'
+    and exists (select 1 from public.admin_roles r where r.user_id = (select auth.uid()) and r.role = 'admin');
+$$;
+
+-- For the dashboard: my own role (or null) and whether this session has the second factor.
+create or replace function public.admin_whoami()
+returns table (role text, has_aal2 boolean)
+language sql stable security definer set search_path = ''
+as $$
+  select
+    (select r.role from public.admin_roles r where r.user_id = (select auth.uid())),
+    coalesce((select auth.jwt() ->> 'aal'), '') = 'aal2';
+$$;
+
+-- Internal helpers for the mod_* / admin_* functions.
+create or replace function public.require_moderator()
+returns void
+language plpgsql stable security definer set search_path = ''
+as $$
+begin
+  if not public.is_moderator() then
+    raise exception 'not_authorized';
+  end if;
+end;
+$$;
+
+create or replace function public.require_admin()
+returns void
+language plpgsql stable security definer set search_path = ''
+as $$
+begin
+  if not public.is_admin() then
+    raise exception 'not_authorized';
+  end if;
+end;
+$$;
+
+-- A written reason is required for every action (at least 10 characters).
+create or replace function public.checked_reason(p_reason text)
+returns text
+language plpgsql immutable set search_path = ''
+as $$
+begin
+  if p_reason is null or char_length(btrim(p_reason)) < 10 then
+    raise exception 'reason_too_short' using hint = 'at least 10 characters';
+  end if;
+  return btrim(p_reason);
+end;
+$$;
+
+create or replace function public.log_moderation_action(
+  p_action text, p_target_type text, p_target_id uuid, p_target_user uuid, p_report uuid,
+  p_reason text, p_user_message text, p_details jsonb
+)
+returns uuid
+language sql security definer set search_path = ''
+as $$
+  insert into public.moderation_actions
+    (actor_id, action, target_type, target_id, target_user_id, report_id, reason, user_message, details)
+  values (
+    auth.uid(), p_action, p_target_type, p_target_id, p_target_user, p_report, p_reason,
+    nullif(btrim(coalesce(p_user_message, '')), ''), coalesce(p_details, '{}')
+  )
+  returning id;
+$$;
+
+-- moderation_actions can't be changed or deleted, not even by admins or the service role.
+create or replace function public.forbid_change()
+returns trigger
+language plpgsql set search_path = ''
+as $$
+begin
+  raise exception '% is append-only', tg_table_name;
+end;
+$$;
+
+-- Keeps the moderation fields of content away from clients (same idea as
+-- guard_profile_moderation: not security definer, so current_user is the caller's role).
+create or replace function public.guard_content_moderation()
+returns trigger
+language plpgsql set search_path = ''
+as $$
+begin
+  if tg_op = 'INSERT' then
+    new.moderation_state := null;
+    new.removed_at := null;
+    new.removed_by := null;
+    new.removed_reason := null;
+  elsif current_user in ('authenticated', 'anon') then
+    new.moderation_state := old.moderation_state;
+    new.removed_at := old.removed_at;
+    new.removed_by := old.removed_by;
+    new.removed_reason := old.removed_reason;
+  end if;
+  return new;
+end;
+$$;
+
+-- Removed content and its files stay as evidence: owners can't delete them.
+create or replace function public.is_moderated_post(post uuid)
+returns boolean
+language sql stable security definer set search_path = ''
+as $$
+  select exists (select 1 from public.posts p where p.id = post and p.moderation_state is not null);
+$$;
+
+create or replace function public.is_moderated_photo(object_name text)
+returns boolean
+language sql stable security definer set search_path = ''
+as $$
+  select exists (
+      select 1 from public.posts p
+      where p.moderation_state is not null
+        and (p.photo_path = object_name
+             or exists (select 1 from public.post_media m
+                        where m.post_id = p.id and (m.photo_path = object_name or m.original_path = object_name)))
+    )
+    or exists (select 1 from public.stories s where s.moderation_state is not null and s.photo_path = object_name);
+$$;
+
+-- Moderators may open (signed URL) only photos of reported or moderated posts and stories;
+-- quarantined ones only admins. Opening the report itself is logged (admin_report_detail).
+create or replace function public.can_moderate_photo(object_name text)
+returns boolean
+language sql stable security definer set search_path = ''
+as $$
+  select public.is_moderator() and (
+    exists (
+      select 1 from public.posts p
+      where (p.photo_path = object_name
+             or exists (select 1 from public.post_media m where m.post_id = p.id and m.photo_path = object_name))
+        and (p.moderation_state is distinct from 'quarantined' or public.is_admin())
+        and (
+          p.moderation_state is not null
+          or exists (select 1 from public.reports r where r.target_type = 'post' and r.target_id = p.id)
+          or exists (select 1 from public.report_snapshots rs where rs.post_id = p.id)
+        )
+    )
+    or exists (
+      select 1 from public.stories s
+      where s.photo_path = object_name
+        and (s.moderation_state is distinct from 'quarantined' or public.is_admin())
+        and (
+          s.moderation_state is not null
+          or exists (select 1 from public.reports r where r.target_type = 'story' and r.target_id = s.id)
+          or exists (select 1 from public.report_snapshots rs where rs.story_id = s.id)
+        )
+    )
+  );
+$$;
+
+-- Owner of a piece of content (raises if it doesn't exist). Internal.
+create or replace function public.moderation_target_owner(p_type text, p_id uuid)
+returns uuid
+language plpgsql stable security definer set search_path = ''
+as $$
+declare
+  target_owner uuid;
+begin
+  case p_type
+    when 'post' then select p.user_id into target_owner from public.posts p where p.id = p_id;
+    when 'story' then select s.user_id into target_owner from public.stories s where s.id = p_id;
+    when 'comment' then select c.user_id into target_owner from public.comments c where c.id = p_id;
+    when 'message' then select m.sender_id into target_owner from public.messages m where m.id = p_id;
+    else raise exception 'unsupported_target_type';
+  end case;
+  if target_owner is null then
+    raise exception 'target_not_found';
+  end if;
+  return target_owner;
+end;
+$$;
+
+create or replace function public.moderation_state_of(p_type text, p_id uuid)
+returns text
+language plpgsql stable security definer set search_path = ''
+as $$
+declare
+  state text;
+begin
+  case p_type
+    when 'post' then select p.moderation_state into state from public.posts p where p.id = p_id;
+    when 'story' then select s.moderation_state into state from public.stories s where s.id = p_id;
+    when 'comment' then select c.moderation_state into state from public.comments c where c.id = p_id;
+    when 'message' then select m.moderation_state into state from public.messages m where m.id = p_id;
+    else raise exception 'unsupported_target_type';
+  end case;
+  return state;
+end;
+$$;
+
+-- Internal: sets or clears the moderation state of one piece of content.
+create or replace function public.set_moderation_state(p_type text, p_id uuid, p_state text, p_reason text)
+returns void
+language plpgsql security definer set search_path = ''
+as $$
+declare
+  removed timestamptz := case when p_state is null then null else now() end;
+  remover uuid := case when p_state is null then null else auth.uid() end;
+  why text := case when p_state is null then null else p_reason end;
+begin
+  case p_type
+    when 'post' then
+      update public.posts set moderation_state = p_state, removed_at = removed, removed_by = remover, removed_reason = why where id = p_id;
+    when 'story' then
+      update public.stories set moderation_state = p_state, removed_at = removed, removed_by = remover, removed_reason = why where id = p_id;
+    when 'comment' then
+      update public.comments set moderation_state = p_state, removed_at = removed, removed_by = remover, removed_reason = why where id = p_id;
+    when 'message' then
+      update public.messages set moderation_state = p_state, removed_at = removed, removed_by = remover, removed_reason = why where id = p_id;
+    else raise exception 'unsupported_target_type';
+  end case;
+end;
+$$;
+
+-- Staff can't be targeted by moderation, and nobody targets themself.
+create or replace function public.check_moderation_target(p_user uuid)
+returns void
+language plpgsql stable security definer set search_path = ''
+as $$
+begin
+  if p_user = auth.uid() then
+    raise exception 'cannot_target_self';
+  end if;
+  if exists (select 1 from public.admin_roles r where r.user_id = p_user) then
+    raise exception 'cannot_target_staff';
+  end if;
+end;
+$$;
+
+create or replace function public.add_moderation_notice(p_user uuid, p_action uuid, p_kind text, p_message text)
+returns void
+language sql security definer set search_path = ''
+as $$
+  insert into public.moderation_notices (user_id, action_id, kind, message)
+  select p_user, p_action, p_kind, btrim(p_message)
+  where nullif(btrim(coalesce(p_message, '')), '') is not null;
+$$;
+
+-- Removes a post, story, comment or message (hidden, not deleted). Moderator.
+create or replace function public.mod_remove_content(
+  p_type text, p_id uuid, p_reason text, p_user_message text default null, p_report_id uuid default null
+)
+returns uuid
+language plpgsql security definer set search_path = ''
+as $$
+declare
+  why text := public.checked_reason(p_reason);
+  target_owner uuid;
+  action uuid;
+begin
+  perform public.require_moderator();
+  target_owner := public.moderation_target_owner(p_type, p_id);
+  if public.moderation_state_of(p_type, p_id) = 'quarantined' and not public.is_admin() then
+    raise exception 'quarantined_admin_only';
+  end if;
+  perform public.set_moderation_state(p_type, p_id, 'removed', why);
+  action := public.log_moderation_action('remove_content', p_type, p_id, target_owner, p_report_id, why, p_user_message, '{}');
+  perform public.add_moderation_notice(target_owner, action, 'removal', p_user_message);
+  return action;
+end;
+$$;
+
+-- Possibly illegal content: hidden from everyone except admins, nothing is deleted. Moderator.
+create or replace function public.mod_quarantine_content(p_type text, p_id uuid, p_reason text, p_report_id uuid default null)
+returns uuid
+language plpgsql security definer set search_path = ''
+as $$
+declare
+  why text := public.checked_reason(p_reason);
+  target_owner uuid;
+begin
+  perform public.require_moderator();
+  target_owner := public.moderation_target_owner(p_type, p_id);
+  perform public.set_moderation_state(p_type, p_id, 'quarantined', why);
+  return public.log_moderation_action('quarantine_content', p_type, p_id, target_owner, p_report_id, why, null, '{}');
+end;
+$$;
+
+-- Makes removed or quarantined content visible again. Admin only.
+create or replace function public.mod_restore_content(p_type text, p_id uuid, p_reason text, p_report_id uuid default null)
+returns uuid
+language plpgsql security definer set search_path = ''
+as $$
+declare
+  why text := public.checked_reason(p_reason);
+  target_owner uuid;
+  previous text;
+begin
+  perform public.require_admin();
+  target_owner := public.moderation_target_owner(p_type, p_id);
+  previous := public.moderation_state_of(p_type, p_id);
+  perform public.set_moderation_state(p_type, p_id, null, null);
+  return public.log_moderation_action(
+    'restore_content', p_type, p_id, target_owner, p_report_id, why, null, jsonb_build_object('previous_state', previous)
+  );
+end;
+$$;
+
+-- A warning the user sees (moderation_notices). Moderator.
+create or replace function public.mod_warn_user(p_user_id uuid, p_reason text, p_user_message text, p_report_id uuid default null)
+returns uuid
+language plpgsql security definer set search_path = ''
+as $$
+declare
+  why text := public.checked_reason(p_reason);
+  action uuid;
+begin
+  perform public.require_moderator();
+  perform public.check_moderation_target(p_user_id);
+  if nullif(btrim(coalesce(p_user_message, '')), '') is null then
+    raise exception 'user_message_required';
+  end if;
+  if not exists (select 1 from public.profiles p where p.id = p_user_id) then
+    raise exception 'user_not_found';
+  end if;
+  action := public.log_moderation_action('warn_user', 'profile', p_user_id, p_user_id, p_report_id, why, p_user_message, '{}');
+  perform public.add_moderation_notice(p_user_id, action, 'warning', p_user_message);
+  return action;
+end;
+$$;
+
+-- Suspends an account until p_until (null = until lifted, admins only). Moderators: at most
+-- 7 days and only reason code 'moderation'. 'terms_pending' (missing legal confirmation) is
+-- for admins and is lifted automatically once the user confirms.
+create or replace function public.mod_suspend_user(
+  p_user_id uuid, p_until timestamptz, p_reason text, p_user_message text,
+  p_reason_code text default 'moderation', p_report_id uuid default null
+)
+returns uuid
+language plpgsql security definer set search_path = ''
+as $$
+declare
+  why text := public.checked_reason(p_reason);
+  current_status text;
+  action uuid;
+begin
+  perform public.require_moderator();
+  perform public.check_moderation_target(p_user_id);
+  if p_reason_code is null or p_reason_code not in ('moderation', 'terms_pending') then
+    raise exception 'invalid_reason_code';
+  end if;
+  if not public.is_admin() then
+    if p_reason_code <> 'moderation' then
+      raise exception 'not_authorized';
+    end if;
+    if p_until is null or p_until > now() + interval '7 days' then
+      raise exception 'suspension_too_long' using hint = 'moderators: at most 7 days';
+    end if;
+  end if;
+  if p_until is not null and p_until <= now() then
+    raise exception 'suspension_in_past';
+  end if;
+  select p.account_status into current_status from public.profiles p where p.id = p_user_id for update;
+  if not found then
+    raise exception 'user_not_found';
+  end if;
+  if current_status in ('banned', 'deleting') then
+    raise exception 'user_not_suspendable';
+  end if;
+  update public.profiles
+  set account_status = 'suspended', suspended_until = p_until, suspension_reason_code = p_reason_code,
+      moderation_message = nullif(btrim(coalesce(p_user_message, '')), ''), moderation_updated_at = now()
+  where id = p_user_id;
+  action := public.log_moderation_action(
+    'suspend_user', 'profile', p_user_id, p_user_id, p_report_id, why, p_user_message,
+    jsonb_build_object('until', p_until, 'reason_code', p_reason_code)
+  );
+  return action;
+end;
+$$;
+
+-- Bans an account for good (visible reason on the "Konto gesperrt" screen). Admin only.
+create or replace function public.mod_ban_user(p_user_id uuid, p_reason text, p_user_message text, p_report_id uuid default null)
+returns uuid
+language plpgsql security definer set search_path = ''
+as $$
+declare
+  why text := public.checked_reason(p_reason);
+  current_status text;
+begin
+  perform public.require_admin();
+  perform public.check_moderation_target(p_user_id);
+  select p.account_status into current_status from public.profiles p where p.id = p_user_id for update;
+  if not found then
+    raise exception 'user_not_found';
+  end if;
+  if current_status = 'deleting' then
+    raise exception 'user_not_suspendable';
+  end if;
+  update public.profiles
+  set account_status = 'banned', suspended_until = null, suspension_reason_code = 'moderation',
+      moderation_message = nullif(btrim(coalesce(p_user_message, '')), ''), moderation_updated_at = now()
+  where id = p_user_id;
+  return public.log_moderation_action('ban_user', 'profile', p_user_id, p_user_id, p_report_id, why, p_user_message, '{}');
+end;
+$$;
+
+-- Lifts a ban or a suspension. Admin only.
+create or replace function public.mod_unban_user(p_user_id uuid, p_reason text, p_report_id uuid default null)
+returns uuid
+language plpgsql security definer set search_path = ''
+as $$
+declare
+  why text := public.checked_reason(p_reason);
+  previous text;
+begin
+  perform public.require_admin();
+  perform public.check_moderation_target(p_user_id);
+  select p.account_status into previous from public.profiles p where p.id = p_user_id for update;
+  if not found then
+    raise exception 'user_not_found';
+  end if;
+  if previous not in ('suspended', 'banned') then
+    raise exception 'user_not_suspended';
+  end if;
+  update public.profiles
+  set account_status = 'active', suspended_until = null, suspension_reason_code = null,
+      moderation_message = null, moderation_updated_at = now()
+  where id = p_user_id;
+  return public.log_moderation_action(
+    'unban_user', 'profile', p_user_id, p_user_id, p_report_id, why, null, jsonb_build_object('previous_status', previous)
+  );
+end;
+$$;
+
+-- Sets a report to in review, resolved or dismissed, with a note (at least 10 characters).
+create or replace function public.mod_resolve_report(p_report_id uuid, p_status text, p_resolution_note text)
+returns uuid
+language plpgsql security definer set search_path = ''
+as $$
+declare
+  why text := public.checked_reason(p_resolution_note);
+  report public.reports%rowtype;
+begin
+  perform public.require_moderator();
+  if p_status is null or p_status not in ('in_review', 'resolved', 'dismissed') then
+    raise exception 'invalid_status';
+  end if;
+  select * into report from public.reports r where r.id = p_report_id for update;
+  if not found then
+    raise exception 'report_not_found';
+  end if;
+  update public.reports
+  set status = p_status, resolution_note = why, handled_by = auth.uid(), handled_at = now()
+  where id = p_report_id;
+  return public.log_moderation_action(
+    'resolve_report', report.target_type, report.target_id, report.target_user_id, p_report_id, why, null,
+    jsonb_build_object('status', p_status, 'previous_status', report.status)
+  );
+end;
+$$;
+
+-- ---------------------------------------------------------------- staff reads
+-- Report queue: metadata only (no content), so it isn't logged. Moderator.
+create or replace function public.admin_report_queue(
+  p_status text default 'open', p_target_type text default null, p_reason text default null,
+  p_min_age_hours integer default null, p_newest_first boolean default false,
+  p_limit integer default 50, p_offset integer default 0
+)
+returns table (
+  id uuid, target_type text, target_id uuid, target_user_id uuid, target_username text,
+  reporter_username text, reason text, status text, created_at timestamptz, reports_on_target bigint
+)
+language plpgsql stable security definer set search_path = ''
+as $$
+begin
+  perform public.require_moderator();
+  return query
+  select r.id, r.target_type, r.target_id, r.target_user_id, tp.username, rp.username, r.reason, r.status, r.created_at,
+         (select count(*) from public.reports o where o.target_type = r.target_type and o.target_id = r.target_id)
+  from public.reports r
+  left join public.profiles tp on tp.id = r.target_user_id
+  left join public.profiles rp on rp.id = r.reporter_id
+  where (p_status is null or r.status = p_status)
+    and (p_target_type is null or r.target_type = p_target_type)
+    and (p_reason is null or r.reason = p_reason)
+    and (p_min_age_hours is null or r.created_at <= now() - make_interval(hours => p_min_age_hours))
+  order by case when p_newest_first then r.created_at end desc, r.created_at
+  limit least(greatest(coalesce(p_limit, 50), 1), 200) offset greatest(coalesce(p_offset, 0), 0);
+end;
+$$;
+
+-- One report with the reported content (message reports: only the stored snapshots), the
+-- reporter and the affected account. Opening it is logged and moves an open report to
+-- 'in_review'. Quarantined content only for admins. Moderator.
+create or replace function public.admin_report_detail(p_report_id uuid)
+returns jsonb
+language plpgsql security definer set search_path = ''
+as $$
+declare
+  report public.reports%rowtype;
+  content jsonb;
+  hidden boolean := false;
+begin
+  perform public.require_moderator();
+  select * into report from public.reports r where r.id = p_report_id;
+  if not found then
+    raise exception 'report_not_found';
+  end if;
+
+  if report.target_type in ('post', 'story', 'comment', 'message')
+    and public.moderation_state_of(report.target_type, report.target_id) = 'quarantined'
+    and not public.is_admin() then
+    hidden := true;
+  elsif report.target_type = 'post' then
+    select jsonb_build_object(
+      'id', p.id, 'caption', p.caption, 'workout_date', p.workout_date, 'created_at', p.created_at,
+      'in_feed', p.in_feed, 'moderation_state', p.moderation_state, 'removed_reason', p.removed_reason,
+      'photos', coalesce((select jsonb_agg(m.photo_path order by m.position) from public.post_media m where m.post_id = p.id),
+                         jsonb_build_array(p.photo_path))
+    ) into content from public.posts p where p.id = report.target_id;
+  elsif report.target_type = 'story' then
+    select jsonb_build_object(
+      'id', s.id, 'photo_path', s.photo_path, 'overlay_text', s.overlay_text, 'created_at', s.created_at,
+      'expires_at', s.expires_at, 'moderation_state', s.moderation_state, 'removed_reason', s.removed_reason
+    ) into content from public.stories s where s.id = report.target_id;
+  elsif report.target_type = 'comment' then
+    select jsonb_build_object(
+      'id', c.id, 'body', c.body, 'post_id', c.post_id, 'created_at', c.created_at,
+      'moderation_state', c.moderation_state, 'removed_reason', c.removed_reason
+    ) into content from public.comments c where c.id = report.target_id;
+  elsif report.target_type = 'message' then
+    select jsonb_build_object(
+      'moderation_state', public.moderation_state_of('message', report.target_id),
+      'snapshots', coalesce(jsonb_agg(jsonb_build_object(
+        'message_id', rs.message_id, 'sender_id', rs.sender_id, 'sender_username', sp.username,
+        'body', rs.body, 'post_id', rs.post_id, 'comment_id', rs.comment_id, 'story_id', rs.story_id,
+        'kind', rs.kind, 'sent_at', rs.sent_at, 'is_reported', rs.is_reported,
+        'post_photo_path', (select p.photo_path from public.posts p where p.id = rs.post_id)
+      ) order by rs.sent_at), '[]'::jsonb)
+    ) into content
+    from public.report_snapshots rs
+    left join public.profiles sp on sp.id = rs.sender_id
+    where rs.report_id = report.id;
+  elsif report.target_type = 'profile' then
+    select jsonb_build_object(
+      'id', p.id, 'username', p.username, 'display_name', p.display_name, 'avatar_path', p.avatar_path,
+      'created_at', p.created_at
+    ) into content from public.profiles p where p.id = report.target_id;
+  end if;
+
+  if report.status = 'open' then
+    update public.reports set status = 'in_review' where id = report.id;
+  end if;
+  perform public.log_moderation_action(
+    'view_report', report.target_type, report.target_id, report.target_user_id, report.id,
+    'Meldung im Dashboard geöffnet', null, jsonb_build_object('quarantined_hidden', hidden)
+  );
+
+  return jsonb_build_object(
+    'report', jsonb_build_object(
+      'id', report.id, 'target_type', report.target_type, 'target_id', report.target_id,
+      'reason', report.reason, 'details', report.details,
+      'status', case when report.status = 'open' then 'in_review' else report.status end,
+      'resolution_note', report.resolution_note, 'handled_at', report.handled_at, 'created_at', report.created_at
+    ),
+    'reporter', (select jsonb_build_object('id', p.id, 'username', p.username, 'display_name', p.display_name)
+                 from public.profiles p where p.id = report.reporter_id),
+    'target_user', (select jsonb_build_object('id', p.id, 'username', p.username, 'display_name', p.display_name,
+                                              'account_status', p.account_status, 'suspended_until', p.suspended_until)
+                    from public.profiles p where p.id = report.target_user_id),
+    'content', content,
+    'content_hidden_quarantine', hidden,
+    'other_reports', (select count(*) from public.reports o
+                      where o.target_type = report.target_type and o.target_id = report.target_id and o.id <> report.id)
+  );
+end;
+$$;
+
+-- History of one account: status, reports against it, actions and warnings. Logged. Moderator.
+create or replace function public.admin_user_detail(p_user_id uuid)
+returns jsonb
+language plpgsql security definer set search_path = ''
+as $$
+declare
+  result jsonb;
+begin
+  perform public.require_moderator();
+  select jsonb_build_object(
+    'profile', jsonb_build_object(
+      'id', p.id, 'username', p.username, 'display_name', p.display_name, 'avatar_path', p.avatar_path,
+      'created_at', p.created_at, 'is_private', p.is_private, 'account_status', p.account_status,
+      'suspended_until', p.suspended_until, 'suspension_reason_code', p.suspension_reason_code,
+      'moderation_message', p.moderation_message, 'moderation_updated_at', p.moderation_updated_at,
+      'staff_role', (select r.role from public.admin_roles r where r.user_id = p.id)
+    ),
+    'reports_against', coalesce((
+      select jsonb_agg(x order by x.created_at desc) from (
+        select r.id, r.target_type, r.reason, r.status, r.created_at
+        from public.reports r where r.target_user_id = p.id order by r.created_at desc limit 100
+      ) x), '[]'::jsonb),
+    'actions', coalesce((
+      select jsonb_agg(x order by x.created_at desc) from (
+        select a.id, a.action, a.target_type, a.target_id, a.reason, a.user_message, a.details, a.created_at,
+               (select ap.username from public.profiles ap where ap.id = a.actor_id) as actor_username
+        from public.moderation_actions a
+        where a.target_user_id = p.id and a.action not like 'view_%'
+        order by a.created_at desc limit 100
+      ) x), '[]'::jsonb),
+    'reports_filed', (select count(*) from public.reports r where r.reporter_id = p.id)
+  ) into result
+  from public.profiles p where p.id = p_user_id;
+  if result is null then
+    raise exception 'user_not_found';
+  end if;
+  perform public.log_moderation_action('view_user', 'profile', p_user_id, p_user_id, null, 'Konto-Verlauf im Dashboard geöffnet', null, '{}');
+  return result;
+end;
+$$;
+
+-- Search by username, display name or exact id (public profile data, not logged). Moderator.
+create or replace function public.admin_search_users(p_query text)
+returns table (id uuid, username text, display_name text, account_status text, created_at timestamptz)
+language plpgsql stable security definer set search_path = ''
+as $$
+declare
+  q text := btrim(coalesce(p_query, ''));
+  pattern text;
+begin
+  perform public.require_moderator();
+  if char_length(q) < 2 then
+    return;
+  end if;
+  pattern := '%' || replace(replace(replace(q, '\', '\\'), '%', '\%'), '_', '\_') || '%';
+  return query
+  select p.id, p.username, p.display_name, p.account_status, p.created_at
+  from public.profiles p
+  where p.id::text = q or p.username ilike pattern or p.display_name ilike pattern
+  order by (p.username = lower(q)) desc, p.username
+  limit 50;
+end;
+$$;
+
+-- E-mail of an account: admins only, every call is logged.
+create or replace function public.admin_get_user_email(p_user_id uuid, p_reason text)
+returns text
+language plpgsql security definer set search_path = ''
+as $$
+declare
+  why text := public.checked_reason(p_reason);
+  address text;
+begin
+  perform public.require_admin();
+  select u.email into address from auth.users u where u.id = p_user_id;
+  if not found then
+    raise exception 'user_not_found';
+  end if;
+  perform public.log_moderation_action('view_email', 'profile', p_user_id, p_user_id, null, why, null, '{}');
+  return address;
+end;
+$$;
+
+-- The audit log, read only. Admin.
+create or replace function public.admin_audit_log(
+  p_query text default null, p_action text default null, p_target_user uuid default null,
+  p_limit integer default 100, p_offset integer default 0
+)
+returns table (
+  id uuid, created_at timestamptz, actor_id uuid, actor_username text, action text, target_type text,
+  target_id uuid, target_user_id uuid, report_id uuid, reason text, user_message text, details jsonb
+)
+language plpgsql stable security definer set search_path = ''
+as $$
+begin
+  perform public.require_admin();
+  return query
+  select a.id, a.created_at, a.actor_id, ap.username, a.action, a.target_type, a.target_id, a.target_user_id,
+         a.report_id, a.reason, a.user_message, a.details
+  from public.moderation_actions a
+  left join public.profiles ap on ap.id = a.actor_id
+  where (p_action is null or a.action = p_action)
+    and (p_target_user is null or a.target_user_id = p_target_user)
+    and (p_query is null or a.reason ilike '%' || p_query || '%' or a.action ilike '%' || p_query || '%'
+         or ap.username ilike '%' || p_query || '%')
+  order by a.created_at desc
+  limit least(greatest(coalesce(p_limit, 100), 1), 500) offset greatest(coalesce(p_offset, 0), 0);
+end;
+$$;
+
+-- Numbers for the dashboard overview. Moderator.
+create or replace function public.admin_overview()
+returns jsonb
+language plpgsql stable security definer set search_path = ''
+as $$
+begin
+  perform public.require_moderator();
+  return jsonb_build_object(
+    'open_reports', (select count(*) from public.reports r where r.status = 'open'),
+    'in_review_reports', (select count(*) from public.reports r where r.status = 'in_review'),
+    'oldest_open_at', (select min(r.created_at) from public.reports r where r.status = 'open'),
+    'quarantined', (select count(*) from public.posts p where p.moderation_state = 'quarantined')
+                 + (select count(*) from public.stories s where s.moderation_state = 'quarantined')
+                 + (select count(*) from public.comments c where c.moderation_state = 'quarantined')
+                 + (select count(*) from public.messages m where m.moderation_state = 'quarantined')
+  );
+end;
+$$;
+
+-- For the app: my notices from the moderation team, and marking them read.
+create or replace function public.mark_moderation_notices_read()
+returns void
+language sql security definer set search_path = ''
+as $$
+  update public.moderation_notices set read_at = now()
+  where user_id = (select auth.uid()) and read_at is null;
+$$;
+
 -- Returns the 1:1 conversation with `other_user`, creating it if needed.
 -- Only allowed with people you follow. Conversations and members are created
 -- exclusively through this function.
@@ -2337,6 +3139,29 @@ create trigger workout_shares_training_added
   after update of status on public.workout_shares
   for each row execute function public.on_training_added();
 
+drop trigger if exists moderation_actions_append_only on public.moderation_actions;
+create trigger moderation_actions_append_only
+  before update or delete on public.moderation_actions
+  for each row execute function public.forbid_change();
+drop trigger if exists moderation_actions_no_truncate on public.moderation_actions;
+create trigger moderation_actions_no_truncate
+  before truncate on public.moderation_actions
+  for each statement execute function public.forbid_change();
+
+do $$
+declare
+  t text;
+begin
+  foreach t in array array['posts', 'stories', 'comments', 'messages'] loop
+    execute format('drop trigger if exists %I on public.%I', t || '_moderation_guard', t);
+    execute format(
+      'create trigger %I before insert or update on public.%I for each row execute function public.guard_content_moderation()',
+      t || '_moderation_guard', t
+    );
+  end loop;
+end;
+$$;
+
 drop trigger if exists profiles_moderation_guard on public.profiles;
 create trigger profiles_moderation_guard
   before insert or update on public.profiles
@@ -2436,6 +3261,53 @@ revoke all on function public.report_message(uuid, text, text) from public, anon
 grant execute on function public.report_message(uuid, text, text) to authenticated;
 revoke all on function public.get_my_blocked_accounts() from public, anon;
 grant execute on function public.get_my_blocked_accounts() to authenticated;
+-- Staff functions: callable when signed in; each checks the role and aal2 itself.
+do $$
+declare
+  f text;
+begin
+  foreach f in array array[
+    'public.is_moderator()', 'public.is_admin()', 'public.admin_whoami()',
+    'public.mod_remove_content(text, uuid, text, text, uuid)',
+    'public.mod_quarantine_content(text, uuid, text, uuid)',
+    'public.mod_restore_content(text, uuid, text, uuid)',
+    'public.mod_warn_user(uuid, text, text, uuid)',
+    'public.mod_suspend_user(uuid, timestamptz, text, text, text, uuid)',
+    'public.mod_ban_user(uuid, text, text, uuid)',
+    'public.mod_unban_user(uuid, text, uuid)',
+    'public.mod_resolve_report(uuid, text, text)',
+    'public.admin_report_queue(text, text, text, integer, boolean, integer, integer)',
+    'public.admin_report_detail(uuid)',
+    'public.admin_user_detail(uuid)',
+    'public.admin_search_users(text)',
+    'public.admin_get_user_email(uuid, text)',
+    'public.admin_audit_log(text, text, uuid, integer, integer)',
+    'public.admin_overview()',
+    'public.mark_moderation_notices_read()'
+  ] loop
+    execute format('revoke all on function %s from public, anon', f);
+    execute format('grant execute on function %s to authenticated', f);
+  end loop;
+  -- Internal only.
+  foreach f in array array[
+    'public.require_moderator()', 'public.require_admin()', 'public.checked_reason(text)',
+    'public.log_moderation_action(text, text, uuid, uuid, uuid, text, text, jsonb)',
+    'public.forbid_change()', 'public.guard_content_moderation()',
+    'public.moderation_target_owner(text, uuid)', 'public.moderation_state_of(text, uuid)',
+    'public.set_moderation_state(text, uuid, text, text)', 'public.check_moderation_target(uuid)',
+    'public.add_moderation_notice(uuid, uuid, text, text)'
+  ] loop
+    execute format('revoke all on function %s from public, anon, authenticated', f);
+  end loop;
+  -- Used inside policies.
+  foreach f in array array[
+    'public.is_moderated_post(uuid)', 'public.is_moderated_photo(text)', 'public.can_moderate_photo(text)'
+  ] loop
+    execute format('revoke all on function %s from public, anon', f);
+    execute format('grant execute on function %s to authenticated', f);
+  end loop;
+end;
+$$;
 revoke all on function public.get_my_reports() from public, anon;
 grant execute on function public.get_my_reports() to authenticated;
 
@@ -2463,6 +3335,10 @@ grant select on public.rest_budgets, public.rest_day_uses to authenticated;
 -- Blocks: the blocker reads, adds and removes their own (RLS below). No updates.
 revoke all on public.user_blocks from anon, authenticated;
 grant select, insert, delete on public.user_blocks to authenticated;
+-- Staff tables: no client access at all (functions only). Notices: owners read their own.
+revoke all on public.admin_roles, public.moderation_actions from anon, authenticated;
+revoke all on public.moderation_notices from anon, authenticated;
+grant select on public.moderation_notices to authenticated;
 -- Reports and snapshots: no direct access (report_content / report_message / get_my_reports).
 revoke all on public.reports, public.report_snapshots from anon, authenticated;
 -- Former usernames: no direct access at all (resolve_usernames / username_available only).
@@ -2505,6 +3381,9 @@ alter table public.rest_day_uses        enable row level security;
 alter table public.user_blocks          enable row level security;
 alter table public.reports              enable row level security;
 alter table public.report_snapshots     enable row level security;
+alter table public.admin_roles          enable row level security;
+alter table public.moderation_actions   enable row level security;
+alter table public.moderation_notices   enable row level security;
 alter table public.hashtags             enable row level security;
 alter table public.content_hashtags     enable row level security;
 
@@ -2530,8 +3409,9 @@ drop policy if exists "posts: read own, followed or shared" on public.posts;
 create policy "posts: read own, followed or shared" on public.posts
   for select to authenticated
   using (
-    user_id = (select auth.uid())
-    or (
+    moderation_state is null
+    and user_id = (select auth.uid())
+    or moderation_state is null and (
       public.can_see_account(user_id)
       and (
         public.is_following(user_id)
@@ -2560,7 +3440,8 @@ create policy "posts: update own" on public.posts
 
 drop policy if exists "posts: delete own" on public.posts;
 create policy "posts: delete own" on public.posts
-  for delete to authenticated using (user_id = (select auth.uid()) and public.is_account_active());
+  for delete to authenticated
+  using (user_id = (select auth.uid()) and public.is_account_active() and moderation_state is null);
 
 -- post_media: visible with its post; only the post owner adds, reorders or removes photos.
 drop policy if exists "post_media: read on visible posts" on public.post_media;
@@ -2586,7 +3467,8 @@ create policy "post_media: reorder own" on public.post_media
 
 drop policy if exists "post_media: delete own" on public.post_media;
 create policy "post_media: delete own" on public.post_media
-  for delete to authenticated using (user_id = (select auth.uid()) and public.is_account_active());
+  for delete to authenticated
+  using (user_id = (select auth.uid()) and public.is_account_active() and not public.is_moderated_post(post_id));
 
 -- post_tags: the owner tags people they follow; a tagged person can remove themselves.
 drop policy if exists "post_tags: read on visible posts" on public.post_tags;
@@ -2623,7 +3505,8 @@ create policy "post_likes: unlike own" on public.post_likes
 -- comments
 drop policy if exists "comments: read on visible posts" on public.comments;
 create policy "comments: read on visible posts" on public.comments
-  for select to authenticated using (public.can_view_post(post_id) and public.can_see_account(user_id));
+  for select to authenticated
+  using (moderation_state is null and public.can_view_post(post_id) and public.can_see_account(user_id));
 
 drop policy if exists "comments: write on visible posts" on public.comments;
 create policy "comments: write on visible posts" on public.comments
@@ -2640,6 +3523,7 @@ create policy "comments: delete own or on own post" on public.comments
   for delete to authenticated
   using (
     public.is_account_active()
+    and moderation_state is null
     and (
       user_id = (select auth.uid())
       or exists (
@@ -2706,8 +3590,8 @@ drop policy if exists "stories: read active from followed, own always" on public
 create policy "stories: read active from followed, own always" on public.stories
   for select to authenticated
   using (
-    user_id = (select auth.uid())
-    or (
+    moderation_state is null and user_id = (select auth.uid())
+    or moderation_state is null and (
       expires_at > now()
       and public.can_see_account(user_id)
       and (
@@ -2717,7 +3601,7 @@ create policy "stories: read active from followed, own always" on public.stories
       )
       and not public.is_hidden_from_me(user_id, 'stories')
     )
-    or public.is_in_visible_highlight(id)
+    or moderation_state is null and public.is_in_visible_highlight(id)
   );
 
 -- Mentions follow can_tag, at most 10.
@@ -2733,7 +3617,8 @@ create policy "stories: insert own" on public.stories
 
 drop policy if exists "stories: delete own" on public.stories;
 create policy "stories: delete own" on public.stories
-  for delete to authenticated using (user_id = (select auth.uid()) and public.is_account_active());
+  for delete to authenticated
+  using (user_id = (select auth.uid()) and public.is_account_active() and moderation_state is null);
 
 -- story_likes: the liker and the story owner can see a like.
 drop policy if exists "story_likes: read own or on own story" on public.story_likes;
@@ -2860,7 +3745,8 @@ create policy "conversation_members: leave" on public.conversation_members
 -- messages
 drop policy if exists "messages: members read" on public.messages;
 create policy "messages: members read" on public.messages
-  for select to authenticated using (public.is_conversation_member(conversation_id));
+  for select to authenticated
+  using (moderation_state is null and public.is_account_active() and public.is_conversation_member(conversation_id));
 
 drop policy if exists "messages: members send" on public.messages;
 create policy "messages: members send" on public.messages
@@ -2884,7 +3770,8 @@ create policy "messages: members send" on public.messages
 
 drop policy if exists "messages: delete own" on public.messages;
 create policy "messages: delete own" on public.messages
-  for delete to authenticated using (sender_id = (select auth.uid()) and public.is_account_active());
+  for delete to authenticated
+  using (sender_id = (select auth.uid()) and public.is_account_active() and moderation_state is null);
 -- No update policy: pins change only through set_message_pinned().
 
 -- message_reactions: members of the chat read them; you only set or remove your own.
@@ -3039,6 +3926,12 @@ create policy "reports: reporter reads own" on public.reports
   for select to authenticated using (reporter_id = (select auth.uid()));
 -- report_snapshots: no policies, no client access.
 
+-- admin_roles, moderation_actions: no policies, no client access (staff use the functions).
+-- moderation_notices: the affected person reads their own; marking read via function.
+drop policy if exists "moderation_notices: owner reads" on public.moderation_notices;
+create policy "moderation_notices: owner reads" on public.moderation_notices
+  for select to authenticated using (user_id = (select auth.uid()));
+
 -- notifications: only the recipient, only reading and marking as read.
 drop policy if exists "notifications: recipient reads" on public.notifications;
 create policy "notifications: recipient reads" on public.notifications
@@ -3093,7 +3986,7 @@ on conflict (id) do update
 drop policy if exists "photos: read visible" on storage.objects;
 create policy "photos: read visible" on storage.objects
   for select to authenticated
-  using (bucket_id = 'photos' and public.can_view_photo(name));
+  using (bucket_id = 'photos' and (public.can_view_photo(name) or public.can_moderate_photo(name)));
 
 drop policy if exists "photos: upload to own folder" on storage.objects;
 create policy "photos: upload to own folder" on storage.objects
@@ -3113,4 +4006,9 @@ create policy "photos: update own" on storage.objects
 drop policy if exists "photos: delete own" on storage.objects;
 create policy "photos: delete own" on storage.objects
   for delete to authenticated
-  using (bucket_id = 'photos' and (storage.foldername(name))[1] = (select auth.uid())::text and public.is_account_active());
+  using (
+    bucket_id = 'photos'
+    and (storage.foldername(name))[1] = (select auth.uid())::text
+    and public.is_account_active()
+    and not public.is_moderated_photo(name)
+  );

@@ -246,6 +246,12 @@ export type Database = {
           Rel<"story_views_user_id_fkey", "user_id", "profiles">,
         ];
       };
+      moderation_notices: {
+        Row: { id: Uuid; user_id: Uuid; action_id: Uuid | null; kind: string; message: string; created_at: Timestamp; read_at: Timestamp | null };
+        Insert: Record<string, never>;
+        Update: Record<string, never>;
+        Relationships: [Rel<"moderation_notices_user_id_fkey", "user_id", "profiles">];
+      };
       user_blocks: {
         Row: { blocker_id: Uuid; blocked_id: Uuid; created_at: Timestamp };
         Insert: { blocker_id: Uuid; blocked_id: Uuid };
@@ -472,6 +478,7 @@ export type Database = {
     Views: Record<string, never>;
     Functions: {
       username_available: { Args: { name: string }; Returns: boolean };
+      mark_moderation_notices_read: { Args: Record<string, never>; Returns: undefined };
       conversation_has_block: { Args: { conversation: Uuid }; Returns: boolean };
       get_my_account_status: {
         Args: Record<string, never>;

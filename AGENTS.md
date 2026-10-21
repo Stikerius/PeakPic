@@ -56,3 +56,13 @@ Docs: https://docs.expo.dev/eas/index.md
   - Touch-Ziele mindestens 44pt. Icons nur aus Ionicons; aktiv gefüllt, inaktiv umrandet.
   - Animationen kurz und dezent (Press-Feedback: leicht abdunkeln/skalieren).
   - Echte Zustände: Skeletons für ladende Listen, leere Zustände mit kurzem sachlichem Text und klarer Aktion, verständliche Fehlertexte. Texte auf Deutsch, knapp und nüchtern.
+
+## Sicherheitsregeln
+
+- **Der service_role-Key kommt NIEMALS in die App, ins Web-Dashboard (`admin-web/`), in Logs oder ins Repository.** Er wird nur als Secret in Supabase Edge Functions genutzt, und nur dort, wo die Auth-Admin-API oder Storage-Verwaltung wirklich nötig ist. Sonst immer security-definer-SQL-Funktionen mit Rollenprüfung.
+- **Jede Edge Function** prüft zuerst das JWT, validiert alle Eingaben und begrenzt Mengen.
+- **Rollen nie aus `user_metadata` lesen** (der Nutzer kann es selbst ändern), nur aus `admin_roles` (oder `app_metadata`). Staff-Funktionen prüfen `is_moderator()` / `is_admin()`, die zusätzlich eine Zwei-Faktor-Sitzung (`aal2`) verlangen.
+- **Chats nur über Snapshots:** Moderatoren sehen Chat-Inhalte ausschliesslich über `report_snapshots` gemeldeter Nachrichten. Keine Funktion darf Chats frei auflisten oder lesen.
+- **Alle Regeln serverseitig** (RLS, Trigger, security-definer-Funktionen), nie nur in App oder Dashboard. Clients schreiben nie direkt, was Rechte, Sperren, Meldungen oder Zustimmungen betrifft.
+- **Jede Moderationsaktion und jedes Einsehen privater Inhalte** schreibt in derselben Transaktion einen Eintrag in `moderation_actions` (unveränderlich).
+- **Neue Tabellen:** immer RLS, keine Policy mit `using (true)`, bestehende Policies nicht aufweichen. Lese-Policies berücksichtigen `can_see_account()` (Blocks, Kontostatus) und `moderation_state`, Schreib-Policies `is_account_active()`.
