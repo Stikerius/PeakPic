@@ -1,5 +1,5 @@
 import Ionicons from "@expo/vector-icons/Ionicons";
-import { createContext, use, useState, type ReactNode } from "react";
+import { createContext, use, useState, type ComponentType, type ReactNode } from "react";
 import { ScrollView, StyleSheet, Text, View } from "react-native";
 
 import { Button } from "@/components/ui/button";
@@ -118,6 +118,22 @@ export function ReportProvider({ children }: { children: ReactNode }) {
       </Sheet>
     </ReportContext>
   );
+}
+
+/**
+ * For screens that are themselves modals (post, training report, stories, comments): they get
+ * their own sheet. The one at the root can't appear above a native modal on iOS; it stayed
+ * invisible and blocked every touch. Wrap at module level (`export default withReportSheet(X)`).
+ */
+export function withReportSheet<P extends object>(Screen: ComponentType<P>): ComponentType<P> {
+  function WithReportSheet(props: P) {
+    return (
+      <ReportProvider>
+        <Screen {...props} />
+      </ReportProvider>
+    );
+  }
+  return WithReportSheet;
 }
 
 export function useReport(): ReportContextValue {

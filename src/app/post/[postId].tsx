@@ -5,6 +5,7 @@ import { ActivityIndicator, Alert, ScrollView, StyleSheet, Text, View } from "re
 
 import { PostCard } from "@/components/feed/post-card";
 import { Button } from "@/components/ui/button";
+import { withReportSheet } from "@/components/moderation/report-provider";
 import { fontSize, spacing } from "@/constants/theme";
 import { useOpenProfile } from "@/hooks/use-open-profile";
 import { useOtherPostActions } from "@/hooks/use-other-post-actions";
@@ -26,7 +27,7 @@ import { fetchWorkoutIdForPost } from "@/lib/trainingRepo";
 type LoadState = { status: "loading" } | { status: "missing" } | { status: "error" } | { status: "ready"; post: FeedPost };
 
 /** A single post, e.g. opened from a shared post in a chat. */
-export default function PostScreen() {
+function PostScreen() {
   useTrackScreen("screen_post");
   const { colors } = useTheme();
   const styles = useStyles();
@@ -233,3 +234,5 @@ const useStyles = makeStyles(({ colors }) =>
     },
   }),
 );
+
+export default withReportSheet(PostScreen);

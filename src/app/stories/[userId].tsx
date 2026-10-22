@@ -18,7 +18,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { scheduleOnRN } from "react-native-worklets";
 
 import { MentionSpots } from "@/components/mention-spots";
-import { useReport } from "@/components/moderation/report-provider";
+import { useReport, withReportSheet } from "@/components/moderation/report-provider";
 import { HighlightPicker } from "@/components/stories/highlight-picker";
 import { StoryActivitySheet } from "@/components/stories/story-activity-sheet";
 import { Avatar } from "@/components/ui/avatar";
@@ -137,7 +137,7 @@ function ProgressSegment({ state, progress }: { state: "done" | "active" | "todo
   );
 }
 
-export default function StoryViewerScreen() {
+function StoryViewerScreen() {
   useTrackScreen("screen_stories");
   return (
     <DarkScheme>
@@ -815,3 +815,5 @@ const useStyles = makeStyles(({ colors }) =>
     },
   }),
 );
+
+export default withReportSheet(StoryViewerScreen);

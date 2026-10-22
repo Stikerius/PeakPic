@@ -17,7 +17,7 @@ import { GestureDetector } from "react-native-gesture-handler";
 import Animated, { SlideInDown, interpolate, useAnimatedStyle } from "react-native-reanimated";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
-import { useReport } from "@/components/moderation/report-provider";
+import { useReport, withReportSheet } from "@/components/moderation/report-provider";
 import { TaggedText } from "@/components/tagged-text";
 import { TaggedTextInput } from "@/components/tagged-text-input";
 import { Avatar } from "@/components/ui/avatar";
@@ -103,7 +103,7 @@ function CommentRow({ comment, isReply, highlighted, onOpenProfile, onToggleLike
   );
 }
 
-export default function CommentsScreen() {
+function CommentsScreen() {
   useTrackScreen("screen_comments");
   const { colors } = useTheme();
   const styles = useStyles();
@@ -601,3 +601,5 @@ const useStyles = makeStyles(({ colors }) =>
     },
   }),
 );
+
+export default withReportSheet(CommentsScreen);

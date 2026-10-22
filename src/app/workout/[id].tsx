@@ -4,7 +4,7 @@ import { router, Stack, useLocalSearchParams } from "expo-router";
 import { useEffect, useState } from "react";
 import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 
-import { useReport } from "@/components/moderation/report-provider";
+import { useReport, withReportSheet } from "@/components/moderation/report-provider";
 import { VISIBILITY_ICONS } from "@/components/training/activity-row";
 import { ErrorState } from "@/components/ui/empty-state";
 import { radius, spacing, typography } from "@/constants/theme";
@@ -40,7 +40,7 @@ function Stat({ label, value }: { label: string; value: string }) {
 }
 
 /** "Trainingsbericht": one recorded training with all sets (only if the database lets me see it). */
-export default function WorkoutReportScreen() {
+function WorkoutReportScreen() {
   useTrackScreen("screen_workout_report");
   const { colors } = useTheme();
   const styles = useStyles();
@@ -317,3 +317,5 @@ const useStyles = makeStyles(({ colors }) =>
     },
   }),
 );
+
+export default withReportSheet(WorkoutReportScreen);
