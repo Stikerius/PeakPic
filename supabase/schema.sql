@@ -42,11 +42,14 @@
 --   * hashtags      tags and use counts readable by every signed-in user; which content uses a
 --                   tag only as far as that content is readable. Maintained by triggers only.
 --   * chats         only members can read conversations, members and messages
---   * training plan one per user: an ordered cycle of units (plan_days), not tied to weekdays.
---                   Readable by the owner, and by people who may see the owner's posts while
---                   "Plan im Profil anzeigen" is on (can_view_plan). Written only through
---                   save_training_plan() / delete_training_plan(); sequence_changed_at marks
---                   changes of order or units (the plan streak restarts there).
+--   * training plans up to 10 per user, exactly one active: an ordered cycle of days
+--                   (plan_days: training or rest) with exercises (plan_exercises), not tied
+--                   to weekdays.
+--                   Readable by the owner, and per plan visibility ('private' | 'followers' |
+--                   'public', public only while the profile is public; can_view_plan).
+--                   Written only through save_plan() / activate_plan() / duplicate_plan() /
+--                   delete_plan(); sequence_changed_at marks changes of order or day types
+--                   and activation (the plan streak restarts there).
 --   * plan on posts posts.plan_day_id: a unit of the poster's own plan (checked by a trigger,
 --                   changeable only while the workout day is today or yesterday); title,
 --                   position and plan length are copied onto the post so the label survives
@@ -501,11 +504,13 @@ create table if not exists public.notifications (
 );
 create index if not exists notifications_user_created_idx on public.notifications (user_id, created_at desc);
 
--- Training plan: an ordered cycle of units (e.g. Push, Pull, Beine), repeated, not tied to
--- weekdays. One plan per user.
+-- Training plans: an ordered cycle of days (e.g. Push, Pull, Beine, Ruhetag), repeated, not
+-- tied to weekdays. Up to 10 per user, exactly one of them active (the one Home, the camera
+-- and the plan streak use). Written only through save_plan / activate_plan / duplicate_plan /
+-- delete_plan.
 create table if not exists public.training_plans (
   id                  uuid primary key default gen_random_uuid(),
-  user_id             uuid not null unique references public.profiles (id) on delete cascade,
+  user_id             uuid not null references public.profiles (id) on delete cascade,
   name                text not null check (char_length(name) between 1 and 40 and name = btrim(name)),
   show_in_profile     boolean not null default true,
   -- Set when units are added, removed or reordered (not for renames or notes).
@@ -522,6 +527,78 @@ create table if not exists public.plan_days (
   notes      text check (char_length(notes) <= 300),
   created_at timestamptz not null default now(),
   unique (plan_id, position)
+);
+
+-- Several plans per user (the first version allowed one): the existing plan stays and is the
+-- active one. visibility replaces show_in_profile (kept, no longer used): a shown plan becomes
+-- 'followers', or 'public' when the owner's posts are public; a hidden one 'private'.
+alter table public.training_plans drop constraint if exists training_plans_user_id_key;
+create index if not exists training_plans_user_idx on public.training_plans (user_id);
+alter table public.training_plans add column if not exists is_active boolean not null default false;
+alter table public.training_plans add column if not exists allow_adopt boolean not null default true;
+alter table public.training_plans
+  add column if not exists adopted_from_plan_id uuid references public.training_plans (id) on delete set null;
+alter table public.training_plans
+  add column if not exists adopted_from_user_id uuid references public.profiles (id) on delete set null;
+do $$
+begin
+  if not exists (
+    select 1 from information_schema.columns
+    where table_schema = 'public' and table_name = 'training_plans' and column_name = 'visibility'
+  ) then
+    alter table public.training_plans add column visibility text not null default 'private'
+      check (visibility in ('private', 'followers', 'public'));
+    update public.training_plans tp
+    set visibility = case
+          when not tp.show_in_profile then 'private'
+          when exists (select 1 from public.profiles p
+                       where p.id = tp.user_id and not p.is_private and p.post_visibility = 'everyone') then 'public'
+          else 'followers'
+        end,
+        is_active = true;
+  end if;
+end;
+$$;
+create unique index if not exists training_plans_one_active_idx on public.training_plans (user_id) where is_active;
+
+-- A plan day is a training day or a planned rest day (no exercises).
+alter table public.plan_days add column if not exists day_type text not null default 'training';
+do $$
+begin
+  if not exists (select 1 from pg_constraint where conname = 'plan_days_day_type_check') then
+    alter table public.plan_days add constraint plan_days_day_type_check check (day_type in ('training', 'rest'));
+  end if;
+end;
+$$;
+
+-- Exercises of a training day: sets and either a number of reps (or a range) or a time.
+create table if not exists public.plan_exercises (
+  id               uuid primary key default gen_random_uuid(),
+  plan_day_id      uuid not null references public.plan_days (id) on delete cascade,
+  position         integer not null check (position >= 0),
+  name             text not null check (char_length(name) between 1 and 60 and name = btrim(name)),
+  sets             integer not null check (sets between 1 and 20),
+  reps_min         integer check (reps_min between 1 and 999),
+  reps_max         integer check (reps_max between 1 and 999),
+  target_seconds   integer check (target_seconds between 1 and 3600),
+  target_weight_kg numeric(6, 2) check (target_weight_kg between 0 and 1000),
+  notes            text check (char_length(notes) <= 300),
+  created_at       timestamptz not null default now(),
+  unique (plan_day_id, position),
+  check (reps_min is not null or target_seconds is not null),
+  check (reps_max is null or (reps_min is not null and reps_max >= reps_min))
+);
+
+-- Planned rest days that were confirmed ("Ruhetag bestätigen"). Like rest_day_uses they keep
+-- the streak alive without counting as a training day. Only use_planned_rest_day writes here.
+-- The rows stay when the plan is deleted (the streak history doesn't change).
+create table if not exists public.planned_rest_uses (
+  user_id     uuid not null references public.profiles (id) on delete cascade,
+  day         date not null,
+  plan_id     uuid references public.training_plans (id) on delete set null,
+  plan_day_id uuid references public.plan_days (id) on delete set null,
+  created_at  timestamptz not null default now(),
+  primary key (user_id, day)
 );
 
 -- Which unit of the poster's plan a training proof belongs to. The snapshot columns are
@@ -1796,42 +1873,72 @@ end;
 $$;
 
 -- ---------------------------------------------------------------- training plan
--- Same audience as the owner's posts (followers, or everyone signed in if public; not hidden),
--- and only while the owner shows the plan in the profile. The owner always.
+-- Who may read a plan (with its days and exercises): the owner always. Others only when the
+-- owner's account is visible to them (active, no block), the plan isn't private and they are
+-- not hidden from the owner's posts; 'followers' for confirmed followers, 'public' also for
+-- everyone signed in, but only while the owner's profile is public (otherwise followers only).
 create or replace function public.can_view_plan(plan uuid)
 returns boolean
 language sql stable security definer set search_path = ''
 as $$
   select exists (
     select 1 from public.training_plans tp
+    join public.profiles owner_profile on owner_profile.id = tp.user_id
     where tp.id = plan
       and (
         tp.user_id = (select auth.uid())
         or (
-          tp.show_in_profile
+          tp.visibility <> 'private'
           and public.can_see_account(tp.user_id)
-          and (public.is_following(tp.user_id) or public.is_public_content(tp.user_id, 'posts'))
           and not public.is_hidden_from_me(tp.user_id, 'posts')
+          and (
+            public.is_following(tp.user_id)
+            or (tp.visibility = 'public' and not owner_profile.is_private)
+          )
         )
       )
   );
 $$;
 
--- Creates or replaces the caller's plan in one go. p_days is the full ordered list:
--- [{"id": <existing unit id or null>, "title": "...", "notes": "..."}]. Existing units keep
--- their id (posts stay assigned to them), units left out are removed. 1 to 21 units.
-create or replace function public.save_training_plan(p_name text, p_show_in_profile boolean, p_days jsonb)
+-- The first version had one plan per user (save_training_plan / delete_training_plan).
+drop function if exists public.save_training_plan(text, boolean, jsonb);
+drop function if exists public.delete_training_plan();
+
+-- Limits of plans, also used by the app (lib/planRepo.ts).
+create or replace function public.plan_limits()
+returns jsonb
+language sql immutable set search_path = ''
+as $$
+  select jsonb_build_object('plans', 10, 'days', 30, 'exercises_per_day', 20);
+$$;
+
+-- Creates (p_plan_id null) or updates one of my plans in one go. p_days is the full ordered
+-- list: [{"id": <existing day id or null>, "type": "training" | "rest", "title": "...",
+-- "notes": "...", "exercises": [{"id": ..., "name": "...", "sets": 3, "reps_min": 8,
+-- "reps_max": 12, "target_seconds": null, "target_weight_kg": null, "notes": "..."}]}].
+-- Existing days and exercises keep their id (posts stay assigned), the rest is removed.
+-- 1 to 30 days, at most 20 exercises per training day, at most 10 plans. My first plan is
+-- active at once.
+create or replace function public.save_plan(
+  p_plan_id uuid, p_name text, p_visibility text, p_allow_adopt boolean, p_days jsonb
+)
 returns uuid
 language plpgsql security definer set search_path = ''
 as $$
 declare
   me uuid := auth.uid();
-  plan uuid;
-  old_sequence uuid[];
-  new_sequence uuid[] := '{}';
-  item jsonb;
-  item_id uuid;
+  plan uuid := p_plan_id;
+  old_sequence text[];
+  new_sequence text[] := '{}';
+  day_ids uuid[] := '{}';
+  day_item jsonb;
+  ex_item jsonb;
+  day_id uuid;
+  ex_id uuid;
+  ex_ids uuid[];
+  day_kind text;
   idx integer := 0;
+  ex_idx integer;
 begin
   if me is null then
     raise exception 'not authenticated';
@@ -1839,40 +1946,109 @@ begin
   if not public.is_account_active() then
     raise exception 'account_inactive';
   end if;
-  if jsonb_typeof(p_days) is distinct from 'array'
-    or jsonb_array_length(p_days) not between 1 and 21 then
-    raise exception 'plan_length' using hint = 'A plan has 1 to 21 units.';
+  if p_visibility not in ('private', 'followers', 'public') then
+    raise exception 'invalid_visibility';
+  end if;
+  if jsonb_typeof(p_days) is distinct from 'array' or jsonb_array_length(p_days) not between 1 and 30 then
+    raise exception 'plan_length' using hint = 'A plan has 1 to 30 days.';
+  end if;
+  if not exists (
+    select 1 from jsonb_array_elements(p_days) d where coalesce(d ->> 'type', 'training') = 'training'
+  ) then
+    raise exception 'plan_needs_training_day';
   end if;
 
-  insert into public.training_plans (user_id, name, show_in_profile)
-  values (me, btrim(p_name), coalesce(p_show_in_profile, true))
-  on conflict (user_id) do update
-    set name = excluded.name, show_in_profile = excluded.show_in_profile, updated_at = now()
-  returning id into plan;
+  if plan is null then
+    -- Serialises plan creation per user (the limit of 10).
+    perform 1 from public.profiles pr where pr.id = me for update;
+    if (select count(*) from public.training_plans tp where tp.user_id = me) >= 10 then
+      raise exception 'plan_limit' using hint = '10';
+    end if;
+    insert into public.training_plans (user_id, name, show_in_profile, visibility, allow_adopt, is_active)
+    values (me, btrim(p_name), p_visibility <> 'private', p_visibility, coalesce(p_allow_adopt, true),
+            not exists (select 1 from public.training_plans tp where tp.user_id = me and tp.is_active))
+    returning id into plan;
+  else
+    update public.training_plans
+    set name = btrim(p_name), visibility = p_visibility, show_in_profile = p_visibility <> 'private',
+        allow_adopt = coalesce(p_allow_adopt, true), updated_at = now()
+    where id = plan and user_id = me;
+    if not found then
+      raise exception 'plan_not_found';
+    end if;
+  end if;
 
-  select coalesce(array_agg(d.id order by d.position), '{}') into old_sequence
+  select coalesce(array_agg(d.id::text || ':' || d.day_type order by d.position), '{}') into old_sequence
   from public.plan_days d where d.plan_id = plan;
   -- Out of the way of the new positions (unique per plan).
   update public.plan_days set position = position + 1000 where plan_id = plan;
 
-  for item in select value from jsonb_array_elements(p_days) loop
-    item_id := nullif(item ->> 'id', '')::uuid;
-    if item_id is not null
-      and not (item_id = any (new_sequence))
-      and exists (select 1 from public.plan_days d where d.id = item_id and d.plan_id = plan) then
-      update public.plan_days
-      set position = idx, title = btrim(item ->> 'title'), notes = nullif(btrim(coalesce(item ->> 'notes', '')), '')
-      where id = item_id;
-    else
-      insert into public.plan_days (plan_id, position, title, notes)
-      values (plan, idx, btrim(item ->> 'title'), nullif(btrim(coalesce(item ->> 'notes', '')), ''))
-      returning id into item_id;
+  for day_item in select value from jsonb_array_elements(p_days) loop
+    day_kind := coalesce(day_item ->> 'type', 'training');
+    if day_kind not in ('training', 'rest') then
+      raise exception 'invalid_day_type';
     end if;
-    new_sequence := new_sequence || item_id;
+    day_id := nullif(day_item ->> 'id', '')::uuid;
+    if day_id is not null
+      and not (day_id = any (day_ids))
+      and exists (select 1 from public.plan_days d where d.id = day_id and d.plan_id = plan) then
+      update public.plan_days
+      set position = idx, day_type = day_kind, title = btrim(day_item ->> 'title'),
+          notes = nullif(btrim(coalesce(day_item ->> 'notes', '')), '')
+      where id = day_id;
+    else
+      insert into public.plan_days (plan_id, position, day_type, title, notes)
+      values (plan, idx, day_kind, btrim(day_item ->> 'title'), nullif(btrim(coalesce(day_item ->> 'notes', '')), ''))
+      returning id into day_id;
+    end if;
+    day_ids := day_ids || day_id;
+    new_sequence := new_sequence || (day_id::text || ':' || day_kind);
+
+    -- Exercises: rest days have none.
+    if day_kind = 'rest' then
+      delete from public.plan_exercises where plan_day_id = day_id;
+    else
+      if jsonb_typeof(coalesce(day_item -> 'exercises', '[]'::jsonb)) <> 'array'
+        or jsonb_array_length(coalesce(day_item -> 'exercises', '[]'::jsonb)) > 20 then
+        raise exception 'too_many_exercises' using hint = '20';
+      end if;
+      update public.plan_exercises set position = position + 1000 where plan_day_id = day_id;
+      ex_ids := '{}';
+      ex_idx := 0;
+      for ex_item in select value from jsonb_array_elements(coalesce(day_item -> 'exercises', '[]'::jsonb)) loop
+        ex_id := nullif(ex_item ->> 'id', '')::uuid;
+        if ex_id is not null
+          and not (ex_id = any (ex_ids))
+          and exists (select 1 from public.plan_exercises e where e.id = ex_id and e.plan_day_id = day_id) then
+          update public.plan_exercises
+          set position = ex_idx, name = btrim(ex_item ->> 'name'), sets = (ex_item ->> 'sets')::integer,
+              reps_min = nullif(ex_item ->> 'reps_min', '')::integer,
+              reps_max = nullif(ex_item ->> 'reps_max', '')::integer,
+              target_seconds = nullif(ex_item ->> 'target_seconds', '')::integer,
+              target_weight_kg = nullif(ex_item ->> 'target_weight_kg', '')::numeric,
+              notes = nullif(btrim(coalesce(ex_item ->> 'notes', '')), '')
+          where id = ex_id;
+        else
+          insert into public.plan_exercises
+            (plan_day_id, position, name, sets, reps_min, reps_max, target_seconds, target_weight_kg, notes)
+          values (
+            day_id, ex_idx, btrim(ex_item ->> 'name'), (ex_item ->> 'sets')::integer,
+            nullif(ex_item ->> 'reps_min', '')::integer, nullif(ex_item ->> 'reps_max', '')::integer,
+            nullif(ex_item ->> 'target_seconds', '')::integer, nullif(ex_item ->> 'target_weight_kg', '')::numeric,
+            nullif(btrim(coalesce(ex_item ->> 'notes', '')), '')
+          )
+          returning id into ex_id;
+        end if;
+        ex_ids := ex_ids || ex_id;
+        ex_idx := ex_idx + 1;
+      end loop;
+      delete from public.plan_exercises where plan_day_id = day_id and not (id = any (ex_ids));
+    end if;
     idx := idx + 1;
   end loop;
 
-  delete from public.plan_days where plan_id = plan and not (id = any (new_sequence));
+  delete from public.plan_days where plan_id = plan and not (id = any (day_ids));
+  -- New order (or a day turned into a rest day): the plan streak starts again from day 1.
   if old_sequence is distinct from new_sequence then
     update public.training_plans set sequence_changed_at = now() where id = plan;
   end if;
@@ -1880,11 +2056,94 @@ begin
 end;
 $$;
 
-create or replace function public.delete_training_plan()
+-- Makes one of my plans the active one. The order starts again at day 1 and the plan streak
+-- runs anew; posts keep their assignment.
+create or replace function public.activate_plan(p_plan_id uuid)
+returns void
+language plpgsql security definer set search_path = ''
+as $$
+declare
+  me uuid := auth.uid();
+begin
+  if me is null then
+    raise exception 'not authenticated';
+  end if;
+  if not public.is_account_active() then
+    raise exception 'account_inactive';
+  end if;
+  if not exists (select 1 from public.training_plans tp where tp.id = p_plan_id and tp.user_id = me) then
+    raise exception 'plan_not_found';
+  end if;
+  update public.training_plans set is_active = false where user_id = me and is_active and id <> p_plan_id;
+  update public.training_plans set is_active = true, sequence_changed_at = now(), updated_at = now()
+  where id = p_plan_id;
+end;
+$$;
+
+-- Copies one of my plans (with exercises, weights and notes) as an inactive plan.
+create or replace function public.duplicate_plan(p_plan_id uuid)
+returns uuid
+language plpgsql security definer set search_path = ''
+as $$
+declare
+  me uuid := auth.uid();
+  source public.training_plans%rowtype;
+  copy_id uuid;
+  source_day record;
+  new_day uuid;
+begin
+  if me is null then
+    raise exception 'not authenticated';
+  end if;
+  if not public.is_account_active() then
+    raise exception 'account_inactive';
+  end if;
+  select * into source from public.training_plans tp where tp.id = p_plan_id and tp.user_id = me;
+  if not found then
+    raise exception 'plan_not_found';
+  end if;
+  perform 1 from public.profiles pr where pr.id = me for update;
+  if (select count(*) from public.training_plans tp where tp.user_id = me) >= 10 then
+    raise exception 'plan_limit' using hint = '10';
+  end if;
+  insert into public.training_plans (user_id, name, show_in_profile, visibility, allow_adopt, is_active)
+  values (me, left('Kopie von ' || source.name, 40), source.show_in_profile, source.visibility, source.allow_adopt, false)
+  returning id into copy_id;
+  for source_day in select * from public.plan_days d where d.plan_id = p_plan_id order by d.position loop
+    insert into public.plan_days (plan_id, position, day_type, title, notes)
+    values (copy_id, source_day.position, source_day.day_type, source_day.title, source_day.notes)
+    returning id into new_day;
+    insert into public.plan_exercises
+      (plan_day_id, position, name, sets, reps_min, reps_max, target_seconds, target_weight_kg, notes)
+    select new_day, e.position, e.name, e.sets, e.reps_min, e.reps_max, e.target_seconds, e.target_weight_kg, e.notes
+    from public.plan_exercises e where e.plan_day_id = source_day.id;
+  end loop;
+  return copy_id;
+end;
+$$;
+
+-- Deletes one of my plans (days and exercises go with it; posts and rest days stay).
+create or replace function public.delete_plan(p_plan_id uuid)
 returns void
 language sql security definer set search_path = ''
 as $$
-  delete from public.training_plans where user_id = (select auth.uid()) and public.is_account_active();
+  delete from public.training_plans
+  where id = p_plan_id and user_id = (select auth.uid()) and public.is_account_active();
+$$;
+
+-- Exercise names I used before, for suggestions (most used first).
+create or replace function public.my_exercise_names()
+returns table (name text)
+language sql stable security definer set search_path = ''
+as $$
+  select e.name
+  from public.plan_exercises e
+  join public.plan_days d on d.id = e.plan_day_id
+  join public.training_plans tp on tp.id = d.plan_id
+  where tp.user_id = (select auth.uid())
+  group by lower(e.name), e.name
+  order by count(*) desc, e.name
+  limit 200;
 $$;
 
 -- ---------------------------------------------------------------- streak inputs
@@ -1976,6 +2235,13 @@ begin
   if d is null or d not in (public.app_today(), public.app_today() - 1) then
     raise exception 'rest_day_not_allowed' using hint = 'only today or yesterday';
   end if;
+  -- An active plan with rest days plans them itself (use_planned_rest_day), no budget.
+  if exists (
+    select 1 from public.training_plans tp join public.plan_days d on d.plan_id = tp.id
+    where tp.user_id = me and tp.is_active and d.day_type = 'rest'
+  ) then
+    raise exception 'rest_day_planned';
+  end if;
   -- Locks the budget row, so parallel calls can't both take the last rest day.
   select * into budget from public.rest_budgets b where b.user_id = me for update;
   if not found or budget.rests_per_cycle = 0 then
@@ -2013,31 +2279,120 @@ begin
     raise exception 'rest_day_not_allowed' using hint = 'only today or yesterday';
   end if;
   delete from public.rest_day_uses where user_id = auth.uid() and day = d;
+  delete from public.planned_rest_uses where user_id = auth.uid() and day = d;
 end;
 $$;
 
--- Rest days of `target`, for whoever may see their calendar (the budget stays private).
+-- Plan entries completed since the active plan's order last changed, oldest first: training
+-- proofs assigned to a day of the plan and confirmed planned rest days. Internal; the same
+-- list the app gets from plan_proofs().
+create or replace function public.plan_progress(p_user uuid)
+returns table (day date, created_at timestamptz, plan_day_id uuid, kind text)
+language sql stable security definer set search_path = ''
+as $$
+  select x.day, x.created_at, x.plan_day_id, x.kind
+  from (
+    select p.workout_date as day, p.created_at, p.plan_day_id, 'training'::text as kind
+    from public.posts p
+    join public.training_plans tp on tp.user_id = p.user_id and tp.is_active
+    where p.user_id = p_user
+      and p.created_at >= tp.sequence_changed_at
+      and public.post_counts_as_workout(p.id)
+    union all
+    select r.day, r.created_at, r.plan_day_id, 'rest'
+    from public.planned_rest_uses r
+    join public.training_plans tp on tp.id = r.plan_id and tp.is_active
+    where r.user_id = p_user and r.created_at >= tp.sequence_changed_at
+  ) x
+  order by x.day, x.created_at;
+$$;
+
+-- Confirms the planned rest day of the active plan for `d` (today or yesterday). Allowed when
+-- the plan entry before it is really done: the last completed entry (training day or planned
+-- rest day) was on the day before `d`, and the entry after it is a rest day. Not on a day with
+-- training, not twice. Keeps the streak alive, doesn't count as a training day.
+create or replace function public.use_planned_rest_day(d date)
+returns void
+language plpgsql security definer set search_path = ''
+as $$
+declare
+  me uuid := auth.uid();
+  plan public.training_plans%rowtype;
+  entries uuid[];
+  kinds text[];
+  last_day date;
+  last_entry uuid;
+  last_index integer;
+  next_index integer;
+begin
+  if me is null then
+    raise exception 'not authenticated';
+  end if;
+  if not public.is_account_active() then
+    raise exception 'account_inactive';
+  end if;
+  if d is null or d not in (public.app_today(), public.app_today() - 1) then
+    raise exception 'rest_day_not_allowed' using hint = 'only today or yesterday';
+  end if;
+  select * into plan from public.training_plans tp where tp.user_id = me and tp.is_active for update;
+  if not found then
+    raise exception 'planned_rest_no_plan';
+  end if;
+  if public.is_training_day(me, d) then
+    raise exception 'rest_day_is_training_day';
+  end if;
+  if exists (select 1 from public.planned_rest_uses r where r.user_id = me and r.day = d)
+    or exists (select 1 from public.rest_day_uses r where r.user_id = me and r.day = d) then
+    raise exception 'planned_rest_already_used';
+  end if;
+  select array_agg(pd.id order by pd.position), array_agg(pd.day_type order by pd.position)
+  into entries, kinds
+  from public.plan_days pd where pd.plan_id = plan.id;
+
+  -- The last completed entry before d that belongs to the plan.
+  select pp.day, pp.plan_day_id into last_day, last_entry
+  from public.plan_progress(me) pp
+  where pp.day < d and pp.plan_day_id = any (entries)
+  order by pp.day desc, pp.created_at desc
+  limit 1;
+  if last_entry is null then
+    raise exception 'planned_rest_not_due' using hint = 'no completed plan day before';
+  end if;
+  if last_day <> d - 1 then
+    raise exception 'planned_rest_not_due' using hint = 'the previous plan day was not done the day before';
+  end if;
+  last_index := array_position(entries, last_entry);
+  next_index := (last_index % array_length(entries, 1)) + 1;
+  if kinds[next_index] <> 'rest' then
+    raise exception 'planned_rest_not_due' using hint = 'the next plan day is a training day';
+  end if;
+  insert into public.planned_rest_uses (user_id, day, plan_id, plan_day_id)
+  values (me, d, plan.id, entries[next_index]);
+end;
+$$;
+
+-- Rest days of `target` (from the budget and confirmed planned rest days), for whoever may
+-- see their calendar (the budget and the plan stay private).
 create or replace function public.rest_days(target uuid)
 returns table (day date)
 language sql stable security definer set search_path = ''
 as $$
   select r.day from public.rest_day_uses r
+  where r.user_id = target and public.can_view_calendar(target)
+  union
+  select r.day from public.planned_rest_uses r
   where r.user_id = target and public.can_view_calendar(target);
 $$;
 
--- My training proofs since my plan's order last changed, with their plan unit, for the plan
--- streak. Same notion of "counts" as the normal streak (post_counts_as_workout).
+-- My completed plan entries since the active plan's order last changed, for the plan streak:
+-- training proofs (kind 'training', with their plan day if assigned) and confirmed planned
+-- rest days (kind 'rest'). Same notion of "counts" as the normal streak.
+drop function if exists public.plan_proofs();
 create or replace function public.plan_proofs()
-returns table (post_id uuid, day date, created_at timestamptz, plan_day_id uuid)
+returns table (day date, created_at timestamptz, plan_day_id uuid, kind text)
 language sql stable security definer set search_path = ''
 as $$
-  select p.id, p.workout_date, p.created_at, p.plan_day_id
-  from public.posts p
-  join public.training_plans tp on tp.user_id = p.user_id
-  where p.user_id = (select auth.uid())
-    and p.created_at >= tp.sequence_changed_at
-    and public.post_counts_as_workout(p.id)
-  order by p.workout_date, p.created_at;
+  select pp.day, pp.created_at, pp.plan_day_id, pp.kind from public.plan_progress((select auth.uid())) pp;
 $$;
 
 -- posts.plan_day_id must be a unit of the poster's own plan, and can only change while the
@@ -2079,7 +2434,7 @@ begin
   into unit_title, unit_position, unit_count
   from public.plan_days d
   join public.training_plans tp on tp.id = d.plan_id
-  where d.id = new.plan_day_id and tp.user_id = new.user_id;
+  where d.id = new.plan_day_id and tp.user_id = new.user_id and d.day_type = 'training';
   if not found then
     raise exception 'plan_day_not_yours';
   end if;
@@ -2098,8 +2453,12 @@ as $$
 begin
   if tg_table_name = 'posts' then
     delete from public.rest_day_uses where user_id = new.user_id and day = new.workout_date;
+    delete from public.planned_rest_uses where user_id = new.user_id and day = new.workout_date;
   elsif new.status = 'accepted' then
     delete from public.rest_day_uses r
+    using public.posts p
+    where p.id = new.post_id and r.user_id = new.tagged_user_id and r.day = p.workout_date;
+    delete from public.planned_rest_uses r
     using public.posts p
     where p.id = new.post_id and r.user_id = new.tagged_user_id and r.day = p.workout_date;
   end if;
@@ -3931,10 +4290,21 @@ revoke all on function public.can_repost(uuid) from public, anon;
 grant execute on function public.can_repost(uuid) to authenticated;
 revoke all on function public.can_view_plan(uuid) from public, anon;
 grant execute on function public.can_view_plan(uuid) to authenticated;
-revoke all on function public.save_training_plan(text, boolean, jsonb) from public, anon;
-grant execute on function public.save_training_plan(text, boolean, jsonb) to authenticated;
-revoke all on function public.delete_training_plan() from public, anon;
-grant execute on function public.delete_training_plan() to authenticated;
+revoke all on function public.save_plan(uuid, text, text, boolean, jsonb) from public, anon;
+grant execute on function public.save_plan(uuid, text, text, boolean, jsonb) to authenticated;
+revoke all on function public.activate_plan(uuid) from public, anon;
+grant execute on function public.activate_plan(uuid) to authenticated;
+revoke all on function public.duplicate_plan(uuid) from public, anon;
+grant execute on function public.duplicate_plan(uuid) to authenticated;
+revoke all on function public.delete_plan(uuid) from public, anon;
+grant execute on function public.delete_plan(uuid) to authenticated;
+revoke all on function public.my_exercise_names() from public, anon;
+grant execute on function public.my_exercise_names() to authenticated;
+revoke all on function public.plan_limits() from public, anon;
+grant execute on function public.plan_limits() to authenticated;
+revoke all on function public.use_planned_rest_day(date) from public, anon;
+grant execute on function public.use_planned_rest_day(date) to authenticated;
+revoke all on function public.plan_progress(uuid) from public, anon, authenticated;
 revoke all on function public.is_training_day(uuid, date) from public, anon, authenticated;
 revoke all on function public.on_post_plan_day() from public, anon, authenticated;
 revoke all on function public.on_training_added() from public, anon, authenticated;
@@ -4066,9 +4436,11 @@ to authenticated;
 -- Hashtags: read only; rows and counters are maintained by triggers.
 revoke all on public.hashtags, public.content_hashtags from anon, authenticated;
 grant select on public.hashtags, public.content_hashtags to authenticated;
--- Training plans: read only; written through save_training_plan / delete_training_plan.
-revoke all on public.training_plans, public.plan_days from anon, authenticated;
-grant select on public.training_plans, public.plan_days to authenticated;
+-- Training plans: read only; written through save_plan / activate_plan / duplicate_plan / delete_plan.
+revoke all on public.training_plans, public.plan_days, public.plan_exercises from anon, authenticated;
+grant select on public.training_plans, public.plan_days, public.plan_exercises to authenticated;
+revoke all on public.planned_rest_uses from anon, authenticated;
+grant select on public.planned_rest_uses to authenticated;
 -- Rest days: owners read their own; all writes go through the rest-day functions.
 revoke all on public.rest_budgets, public.rest_day_uses from anon, authenticated;
 grant select on public.rest_budgets, public.rest_day_uses to authenticated;
@@ -4118,6 +4490,8 @@ alter table public.notifications        enable row level security;
 alter table public.username_history     enable row level security;
 alter table public.training_plans       enable row level security;
 alter table public.plan_days            enable row level security;
+alter table public.plan_exercises       enable row level security;
+alter table public.planned_rest_uses    enable row level security;
 alter table public.rest_budgets         enable row level security;
 alter table public.rest_day_uses        enable row level security;
 alter table public.user_blocks          enable row level security;
@@ -4630,16 +5004,32 @@ create policy "training_plans: read" on public.training_plans
   using (
     user_id = (select auth.uid())
     or (
-      show_in_profile
+      visibility <> 'private'
       and public.can_see_account(user_id)
-      and (public.is_following(user_id) or public.is_public_content(user_id, 'posts'))
       and not public.is_hidden_from_me(user_id, 'posts')
+      and (
+        public.is_following(user_id)
+        or (visibility = 'public' and exists (
+          select 1 from public.profiles pr where pr.id = user_id and not pr.is_private
+        ))
+      )
     )
   );
 
 drop policy if exists "plan_days: read with plan" on public.plan_days;
 create policy "plan_days: read with plan" on public.plan_days
   for select to authenticated using (public.can_view_plan(plan_id));
+
+drop policy if exists "plan_exercises: read with plan" on public.plan_exercises;
+create policy "plan_exercises: read with plan" on public.plan_exercises
+  for select to authenticated
+  using (exists (
+    select 1 from public.plan_days d where d.id = plan_day_id and public.can_view_plan(d.plan_id)
+  ));
+
+drop policy if exists "planned_rest_uses: owner reads" on public.planned_rest_uses;
+create policy "planned_rest_uses: owner reads" on public.planned_rest_uses
+  for select to authenticated using (user_id = (select auth.uid()));
 
 -- rest_budgets / rest_day_uses: only the owner reads; no write policies (functions only).
 drop policy if exists "rest_budgets: owner reads" on public.rest_budgets;
@@ -5026,6 +5416,7 @@ insert into public.usage_event_types (name, area, source) values
   ('like_created', 'feed', 'server'),
   ('follow_created', 'profile', 'server'),
   ('report_created', 'moderation', 'server'),
+  ('plan_created', 'plans', 'server'),
   ('screen_home', 'home', 'client'),
   ('screen_feed', 'feed', 'client'),
   ('screen_post', 'feed', 'client'),
@@ -5047,6 +5438,9 @@ insert into public.usage_event_types (name, area, source) values
   ('screen_profile_edit', 'profile', 'client'),
   ('screen_day', 'profile', 'client'),
   ('screen_plan_edit', 'plans', 'client'),
+  ('screen_plan_editor', 'plans', 'client'),
+  ('plan_activated', 'plans', 'client'),
+  ('planned_rest_confirmed', 'plans', 'client'),
   ('screen_search', 'search', 'client'),
   ('screen_hashtag', 'search', 'client'),
   ('screen_settings', 'settings', 'client'),
@@ -5119,7 +5513,8 @@ begin
       ('story_likes', 'insert', 'like_created'),
       ('comment_likes', 'insert', 'like_created'),
       ('follows', 'insert', 'follow_created'),
-      ('reports', 'insert', 'report_created')
+      ('reports', 'insert', 'report_created'),
+      ('training_plans', 'insert', 'plan_created')
     ) as v(tbl, op, event)
   loop
     execute format('drop trigger if exists %I on public.%I', t.tbl || '_usage_' || t.op, t.tbl);

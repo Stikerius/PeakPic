@@ -14,7 +14,7 @@ type PlanAndRest = {
   reload: () => void;
 };
 
-const NO_REST: MyRestDays = { budget: null, uses: [] };
+const NO_REST: MyRestDays = { budget: null, uses: [], planned: [] };
 
 /**
  * My plan, plan proofs and rest days, reloaded when the screen regains focus. Failures leave

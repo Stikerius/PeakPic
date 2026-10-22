@@ -131,7 +131,8 @@ function RootNavigator() {
         <Stack.Screen name="settings" options={{ title: "Einstellungen", headerBackTitle: "Profil" }} />
         <Stack.Screen name="delete-account" options={{ title: "Konto löschen" }} />
         <Stack.Screen name="profile-edit" options={{ title: "Profil bearbeiten", presentation: "modal" }} />
-        <Stack.Screen name="plan-edit" options={{ title: "Trainingsplan", presentation: "modal" }} />
+        <Stack.Screen name="plan-edit" options={{ title: "Trainingspläne" }} />
+        <Stack.Screen name="plan-editor/[planId]" options={{ title: "Plan bearbeiten", presentation: "modal" }} />
         <Stack.Screen name="privacy/[scope]" options={{ title: "" }} />
         <Stack.Screen name="app-icon" options={{ title: "App-Icon" }} />
         <Stack.Screen name="blocked-accounts" options={{ title: "Blockierte Konten" }} />

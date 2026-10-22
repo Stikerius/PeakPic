@@ -159,13 +159,48 @@ export function computeStreakStatsFromDays(
 
 // ----------------------------------------------------------------------------- plan streak
 
-/** A training proof since the plan's order last changed (see plan_proofs() in the database). */
+/**
+ * A completed plan entry since the active plan's order last changed (see plan_proofs() in the
+ * database): a training proof (with its plan day if assigned) or a confirmed planned rest day.
+ */
 export type PlanProof = {
   day: DayKey;
   /** ISO timestamp; orders proofs of the same day. */
   createdAt: string;
   planDayId: string | null;
+  /** Default "training". */
+  kind?: "training" | "rest";
 };
+
+/** A day of the plan cycle: a training day or a planned rest day. */
+export type PlanEntry = { id: string; type: "training" | "rest" };
+
+/** Ids of the planned rest days of a plan. */
+export function restEntryIds(entries: readonly PlanEntry[]): Set<string> {
+  return new Set(entries.filter((e) => e.type === "rest").map((e) => e.id));
+}
+
+/** First training day at or after `index` in the cycle (the unit to pick for a post). */
+export function nextTrainingIndex(entries: readonly PlanEntry[], index: number): number {
+  if (entries.length === 0) return 0;
+  for (let step = 0; step < entries.length; step += 1) {
+    const i = (index + step) % entries.length;
+    if (entries[i]?.type === "training") return i;
+  }
+  return index % entries.length;
+}
+
+/** Whether going from `from` to `to` in the cycle passes only planned rest days. */
+function skipsOnlyRest(planDayIds: readonly string[], restIds: ReadonlySet<string>, from: number, to: number): boolean {
+  if (restIds.size === 0) return false;
+  let i = from;
+  while (i !== to) {
+    const id = planDayIds[i];
+    if (id === undefined || !restIds.has(id)) return false;
+    i = (i + 1) % planDayIds.length;
+  }
+  return true;
+}
 
 function sortProofs(proofs: readonly PlanProof[]): PlanProof[] {
   return [...proofs].sort((a, b) =>
@@ -189,17 +224,26 @@ export function nextPlanDayIndex(planDayIds: readonly string[], proofs: readonly
 }
 
 /**
- * Days on which every proof was the unit due at that moment. A proof without a unit (or with
- * one that isn't in the plan) doesn't move the order on; a wrong unit does (the next one due
- * is the one after it), so the plan streak can restart with the next correct proof.
+ * Days on which every training proof was the unit due at that moment. A proof without a unit
+ * (or with one that isn't in the plan) doesn't move the order on; a wrong unit does (the next
+ * one due is the one after it), so the plan streak can restart with the next correct proof.
+ * Planned rest days that are due may be skipped by training the next training day instead;
+ * confirmed rest days move the order on like a training day.
  */
-export function correctPlanDays(planDayIds: readonly string[], proofs: readonly PlanProof[]): Set<DayKey> {
+export function correctPlanDays(
+  planDayIds: readonly string[],
+  proofs: readonly PlanProof[],
+  restIds: ReadonlySet<string> = new Set(),
+): Set<DayKey> {
   const verdict = new Map<DayKey, boolean>();
   if (planDayIds.length === 0) return new Set();
   let expected = 0;
   for (const proof of sortProofs(proofs)) {
     const index = proof.planDayId !== null ? planDayIds.indexOf(proof.planDayId) : -1;
-    verdict.set(proof.day, (verdict.get(proof.day) ?? true) && index === expected);
+    if (proof.kind !== "rest") {
+      const ok = index === expected || (index !== -1 && skipsOnlyRest(planDayIds, restIds, expected, index));
+      verdict.set(proof.day, (verdict.get(proof.day) ?? true) && ok);
+    }
     if (index !== -1) expected = (index + 1) % planDayIds.length;
   }
   return new Set([...verdict].filter(([, ok]) => ok).map(([day]) => day));
@@ -214,6 +258,8 @@ export type PlanStreakInput = {
   trainingDays: ReadonlySet<DayKey>;
   restDays: ReadonlySet<DayKey>;
   today: DayKey;
+  /** Planned rest days of the plan (may be skipped by training on). */
+  restIds?: ReadonlySet<string>;
 };
 
 /**
@@ -222,8 +268,8 @@ export type PlanStreakInput = {
  * assignment (also a day that only counts through someone else's linked post, or one before
  * the last plan change) ends it. It never exceeds the normal streak.
  */
-export function currentPlanStreak({ planDayIds, proofs, trainingDays, restDays, today }: PlanStreakInput): number {
-  const correct = correctPlanDays(planDayIds, proofs);
+export function currentPlanStreak({ planDayIds, proofs, trainingDays, restDays, today, restIds }: PlanStreakInput): number {
+  const correct = correctPlanDays(planDayIds, proofs, restIds);
   const active = (day: DayKey) => trainingDays.has(day) || restDays.has(day);
   let cursor = active(today) ? today : addDays(today, -1);
   let streak = 0;
@@ -235,6 +281,54 @@ export function currentPlanStreak({ planDayIds, proofs, trainingDays, restDays, 
     cursor = addDays(cursor, -1);
   }
   return streak;
+}
+
+// ----------------------------------------------------------------------------- planned rest days
+
+export type PlannedRestInput = {
+  /** The active plan's days in cycle order. */
+  entries: readonly PlanEntry[];
+  /** Completed entries since the plan's order last changed (plan_proofs()). */
+  proofs: readonly PlanProof[];
+  today: DayKey;
+  /** All training days (a rest day can't be on one). */
+  trainingDays: ReadonlySet<DayKey>;
+  /** Rest days already used (budget and planned). */
+  restDays: ReadonlySet<DayKey>;
+};
+
+/**
+ * The planned rest day that can be confirmed now, mirroring use_planned_rest_day: the last
+ * completed plan entry was on the day before, the entry after it is a rest day, and that day
+ * is today or yesterday, without training and not already a rest day. null otherwise (also
+ * when nothing of the plan was done yet: a rest day needs a training day before it).
+ */
+export function plannedRestDue({ entries, proofs, today, trainingDays, restDays }: PlannedRestInput): {
+  day: DayKey;
+  entryId: string;
+  index: number;
+} | null {
+  if (entries.length === 0) return null;
+  const ids = entries.map((e) => e.id);
+  const done = sortProofs(proofs).filter((p) => p.planDayId !== null && ids.includes(p.planDayId));
+  const last = done[done.length - 1];
+  if (last === undefined || last.planDayId === null) return null;
+  const index = (ids.indexOf(last.planDayId) + 1) % entries.length;
+  const entry = entries[index];
+  if (entry === undefined || entry.type !== "rest") return null;
+  const day = addDays(last.day, 1);
+  if (day !== today && day !== addDays(today, -1)) return null;
+  if (trainingDays.has(day) || restDays.has(day)) return null;
+  return { day, entryId: entry.id, index };
+}
+
+export function canUsePlannedRestDay(day: DayKey, input: PlannedRestInput): boolean {
+  return plannedRestDue(input)?.day === day;
+}
+
+/** Rest days from all sources (budget and planned); each day once. */
+export function combineRestDays(budget: readonly DayKey[], planned: readonly DayKey[]): DayKey[] {
+  return [...new Set([...budget, ...planned])].sort();
 }
 
 // ----------------------------------------------------------------------------- rest days

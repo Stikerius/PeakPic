@@ -14,6 +14,8 @@ export type LegalConfirmationType = "accept" | "acknowledge";
 export type Json = string | number | boolean | null | Json[] | { [key: string]: Json };
 export type AudienceScope = "stories" | "posts";
 export type AccountStatus = "active" | "suspended" | "banned" | "deleting";
+export type PlanVisibility = "private" | "followers" | "public";
+export type PlanDayType = "training" | "rest";
 export type ReportTargetType = "post" | "story" | "comment" | "message" | "profile";
 export type ReportReason =
   | "spam"
@@ -280,7 +282,13 @@ export type Database = {
           id: Uuid;
           user_id: Uuid;
           name: string;
+          /** Replaced by visibility; kept in sync by save_plan. */
           show_in_profile: boolean;
+          visibility: PlanVisibility;
+          allow_adopt: boolean;
+          is_active: boolean;
+          adopted_from_plan_id: Uuid | null;
+          adopted_from_user_id: Uuid | null;
           sequence_changed_at: Timestamp;
           created_at: Timestamp;
           updated_at: Timestamp;
@@ -290,10 +298,42 @@ export type Database = {
         Relationships: [Rel<"training_plans_user_id_fkey", "user_id", "profiles">];
       };
       plan_days: {
-        Row: { id: Uuid; plan_id: Uuid; position: number; title: string; notes: string | null; created_at: Timestamp };
+        Row: {
+          id: Uuid;
+          plan_id: Uuid;
+          position: number;
+          day_type: PlanDayType;
+          title: string;
+          notes: string | null;
+          created_at: Timestamp;
+        };
         Insert: Record<string, never>;
         Update: Record<string, never>;
         Relationships: [Rel<"plan_days_plan_id_fkey", "plan_id", "training_plans">];
+      };
+      plan_exercises: {
+        Row: {
+          id: Uuid;
+          plan_day_id: Uuid;
+          position: number;
+          name: string;
+          sets: number;
+          reps_min: number | null;
+          reps_max: number | null;
+          target_seconds: number | null;
+          target_weight_kg: number | null;
+          notes: string | null;
+          created_at: Timestamp;
+        };
+        Insert: Record<string, never>;
+        Update: Record<string, never>;
+        Relationships: [Rel<"plan_exercises_plan_day_id_fkey", "plan_day_id", "plan_days">];
+      };
+      planned_rest_uses: {
+        Row: { user_id: Uuid; day: string; plan_id: Uuid | null; plan_day_id: Uuid | null; created_at: Timestamp };
+        Insert: Record<string, never>;
+        Update: Record<string, never>;
+        Relationships: [];
       };
       highlights: {
         Row: { id: Uuid; user_id: Uuid; title: string; cover_story_id: Uuid | null; created_at: Timestamp };
@@ -564,10 +604,17 @@ export type Database = {
       rest_days: { Args: { target: Uuid }; Returns: { day: string }[] };
       plan_proofs: {
         Args: Record<string, never>;
-        Returns: { post_id: Uuid; day: string; created_at: Timestamp; plan_day_id: Uuid | null }[];
+        Returns: { day: string; created_at: Timestamp; plan_day_id: Uuid | null; kind: "training" | "rest" }[];
       };
-      save_training_plan: { Args: { p_name: string; p_show_in_profile: boolean; p_days: Json }; Returns: Uuid };
-      delete_training_plan: { Args: Record<string, never>; Returns: undefined };
+      save_plan: {
+        Args: { p_plan_id: Uuid | null; p_name: string; p_visibility: PlanVisibility; p_allow_adopt: boolean; p_days: Json };
+        Returns: Uuid;
+      };
+      activate_plan: { Args: { p_plan_id: Uuid }; Returns: undefined };
+      duplicate_plan: { Args: { p_plan_id: Uuid }; Returns: Uuid };
+      delete_plan: { Args: { p_plan_id: Uuid }; Returns: undefined };
+      my_exercise_names: { Args: Record<string, never>; Returns: { name: string }[] };
+      use_planned_rest_day: { Args: { d: string }; Returns: undefined };
       resolve_usernames: { Args: { names: string[] }; Returns: { username: string; user_id: Uuid }[] };
       get_or_create_direct_conversation: { Args: { other_user: Uuid }; Returns: Uuid };
       set_message_pinned: { Args: { message: Uuid; pinned: boolean }; Returns: undefined };

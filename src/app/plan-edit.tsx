@@ -1,284 +1,160 @@
-import Ionicons from "@expo/vector-icons/Ionicons";
-import { router } from "expo-router";
-import type { ComponentProps } from "react";
-import { useEffect, useRef, useState } from "react";
-import {
-  ActivityIndicator,
-  Alert,
-  KeyboardAvoidingView,
-  Platform,
-  Pressable,
-  ScrollView,
-  StyleSheet,
-  Switch,
-  Text,
-  View,
-} from "react-native";
+import { router, useFocusEffect } from "expo-router";
+import { useCallback, useState } from "react";
+import { ActivityIndicator, Alert, ScrollView, StyleSheet, Text, View } from "react-native";
 
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Divider } from "@/components/ui/divider";
-import { ErrorState } from "@/components/ui/empty-state";
-import { ListItem } from "@/components/ui/list-item";
+import { EmptyState, ErrorState } from "@/components/ui/empty-state";
+import { LIST_ICON_INSET, ListItem } from "@/components/ui/list-item";
 import { SectionFooter, SectionHeader } from "@/components/ui/section-header";
-import { TextField } from "@/components/ui/text-field";
 import { spacing, typography } from "@/constants/theme";
+import { showActionSheet } from "@/lib/actionSheet";
 import { describeError } from "@/lib/errors";
 import {
-  PLAN_DAY_NOTES_MAX_LENGTH,
-  PLAN_DAY_TITLE_MAX_LENGTH,
-  PLAN_MAX_DAYS,
-  PLAN_NAME_MAX_LENGTH,
-  deleteMyPlan,
-  fetchMyPlan,
-  planDraftError,
-  saveMyPlan,
-  type PlanDayDraft,
+  PLAN_MAX_PLANS,
+  VISIBILITY_LABELS,
+  activatePlan,
+  deletePlan,
+  duplicatePlan,
+  fetchMyPlans,
   type TrainingPlan,
 } from "@/lib/planRepo";
 import { makeStyles, useTheme } from "@/lib/theme";
-import { useTrackScreen } from "@/lib/usage";
+import { track, useTrackScreen } from "@/lib/usage";
 
-/** A draft unit plus a key that stays stable while reordering. */
-type DraftRow = PlanDayDraft & { key: string };
-
-type IconName = ComponentProps<typeof Ionicons>["name"];
-
-function IconButton({
-  icon,
-  label,
-  onPress,
-  disabled = false,
-  destructive = false,
-}: {
-  icon: IconName;
-  label: string;
-  onPress: () => void;
-  disabled?: boolean;
-  destructive?: boolean;
-}) {
-  const { colors } = useTheme();
-  const styles = useStyles();
-  return (
-    <Pressable
-      onPress={onPress}
-      disabled={disabled}
-      accessibilityRole="button"
-      accessibilityLabel={label}
-      accessibilityState={{ disabled }}
-      style={({ pressed }) => [styles.iconButton, pressed && styles.pressed, disabled && styles.disabled]}
-    >
-      <Ionicons name={icon} size={20} color={destructive ? colors.danger : colors.textSecondary} />
-    </Pressable>
-  );
+function planSubtitle(plan: TrainingPlan): string {
+  const training = plan.days.filter((d) => d.type === "training").length;
+  const rest = plan.days.length - training;
+  const days = `${training} ${training === 1 ? "Trainingstag" : "Trainingstage"}${rest > 0 ? `, ${rest} ${rest === 1 ? "Ruhetag" : "Ruhetage"}` : ""}`;
+  return `${days} · ${VISIBILITY_LABELS[plan.visibility]}`;
 }
 
-export default function PlanEditScreen() {
+/** "Trainingspläne": my plans, one of them active. Everything optional. */
+export default function PlansScreen() {
   useTrackScreen("screen_plan_edit");
   const { colors } = useTheme();
   const styles = useStyles();
-  const [plan, setPlan] = useState<TrainingPlan | null | undefined>(undefined);
-  const [loadFailed, setLoadFailed] = useState(false);
-  const [name, setName] = useState("");
-  const [showInProfile, setShowInProfile] = useState(true);
-  const [rows, setRows] = useState<DraftRow[]>([]);
-  const [saving, setSaving] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const nextKey = useRef(0);
+  const [plans, setPlans] = useState<TrainingPlan[] | null>(null);
+  const [failed, setFailed] = useState(false);
+  const [busy, setBusy] = useState(false);
 
-  function newRow(draft: PlanDayDraft): DraftRow {
-    nextKey.current += 1;
-    return { ...draft, key: `row-${nextKey.current}` };
-  }
-
-  function load() {
-    fetchMyPlan()
+  const load = useCallback(() => {
+    let active = true;
+    fetchMyPlans()
       .then((result) => {
-        setPlan(result);
-        setName(result?.name ?? "");
-        setShowInProfile(result?.showInProfile ?? true);
-        setRows(
-          result !== null
-            ? result.days.map((d) => newRow({ id: d.id, title: d.title, notes: d.notes ?? "" }))
-            : [newRow({ id: null, title: "", notes: "" })],
-        );
+        if (!active) return;
+        setFailed(false);
+        setPlans(result);
       })
-      .catch(() => setLoadFailed(true));
+      .catch(() => {
+        if (active) setFailed(true);
+      });
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  useFocusEffect(load);
+
+  function run(action: () => Promise<unknown>) {
+    setBusy(true);
+    action()
+      .then(() => load())
+      .catch((error: unknown) => Alert.alert("Hat nicht geklappt", describeError(error)))
+      .finally(() => setBusy(false));
   }
 
-  useEffect(load, []);
-
-  function updateRow(key: string, change: Partial<PlanDayDraft>) {
-    setRows((current) => current.map((row) => (row.key === key ? { ...row, ...change } : row)));
-  }
-
-  function moveRow(index: number, by: -1 | 1) {
-    setRows((current) => {
-      const target = index + by;
-      if (target < 0 || target >= current.length) return current;
-      const next = [...current];
-      [next[index], next[target]] = [next[target], next[index]];
-      return next;
-    });
-  }
-
-  function removeRow(key: string) {
-    setRows((current) => current.filter((row) => row.key !== key));
-  }
-
-  async function save() {
-    const draftError = planDraftError(name, rows);
-    if (draftError !== null) {
-      setError(draftError);
-      return;
-    }
-    setSaving(true);
-    setError(null);
-    try {
-      await saveMyPlan(name, showInProfile, rows);
-      router.back();
-    } catch (saveError) {
-      setError(`Speichern fehlgeschlagen. ${describeError(saveError)}`);
-    } finally {
-      setSaving(false);
-    }
-  }
-
-  function confirmDelete() {
-    Alert.alert("Plan entfernen?", "Der Plan und seine Einheiten werden gelöscht. Deine Beiträge bleiben erhalten.", [
-      { text: "Abbrechen", style: "cancel" },
-      {
-        text: "Entfernen",
-        style: "destructive",
-        onPress: () => {
-          setSaving(true);
-          deleteMyPlan()
-            .then(() => router.back())
-            .catch((deleteError: unknown) => setError(`Entfernen fehlgeschlagen. ${describeError(deleteError)}`))
-            .finally(() => setSaving(false));
+  function confirmActivate(plan: TrainingPlan) {
+    Alert.alert(
+      `„${plan.name}“ aktivieren?`,
+      "Die Reihenfolge beginnt wieder bei Tag 1 und dein Plan-Streak startet neu. Bisherige Beiträge behalten ihre Zuordnung.",
+      [
+        { text: "Abbrechen", style: "cancel" },
+        {
+          text: "Aktivieren",
+          onPress: () =>
+            run(async () => {
+              await activatePlan(plan.id);
+              track("plan_activated");
+            }),
         },
-      },
+      ],
+    );
+  }
+
+  function confirmDelete(plan: TrainingPlan) {
+    Alert.alert(
+      `„${plan.name}“ löschen?`,
+      `Der Plan mit allen Tagen und Übungen wird gelöscht. Deine Beiträge bleiben erhalten.${plan.isActive ? " Danach hast du keinen aktiven Plan." : ""}`,
+      [
+        { text: "Abbrechen", style: "cancel" },
+        { text: "Löschen", style: "destructive", onPress: () => run(() => deletePlan(plan.id)) },
+      ],
+    );
+  }
+
+  function openMenu(plan: TrainingPlan) {
+    showActionSheet(plan.name, [
+      { label: "Bearbeiten", onPress: () => router.push({ pathname: "/plan-editor/[planId]", params: { planId: plan.id } }) },
+      ...(plan.isActive ? [] : [{ label: "Aktivieren", onPress: () => confirmActivate(plan) }]),
+      { label: "Duplizieren", onPress: () => run(() => duplicatePlan(plan.id)) },
+      { label: "Löschen", destructive: true, onPress: () => confirmDelete(plan) },
     ]);
   }
 
-  if (plan === undefined) {
+  if (plans === null) {
     return (
       <View style={styles.centered}>
-        {loadFailed ? (
-          <ErrorState
-            onRetry={() => {
-              setLoadFailed(false);
-              load();
-            }}
-          />
-        ) : (
-          <ActivityIndicator color={colors.textSecondary} />
-        )}
+        {failed ? <ErrorState onRetry={load} /> : <ActivityIndicator color={colors.textSecondary} />}
+      </View>
+    );
+  }
+
+  const canCreate = plans.length < PLAN_MAX_PLANS;
+  const newPlan = () => router.push({ pathname: "/plan-editor/[planId]", params: { planId: "new" } });
+
+  if (plans.length === 0) {
+    return (
+      <View style={styles.screen}>
+        <EmptyState
+          icon="list-outline"
+          title="Noch kein Trainingsplan"
+          message="Ein Plan ist freiwillig: eine Reihenfolge von Trainings- und Ruhetagen, unabhängig von Wochentagen."
+          action={{ label: "Plan anlegen", onPress: newPlan }}
+          fill
+        />
       </View>
     );
   }
 
   return (
-    <KeyboardAvoidingView style={styles.screen} behavior={Platform.OS === "ios" ? "padding" : undefined}>
-      <ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
-        <SectionHeader title="Plan" />
-        <View style={styles.padded}>
-          <TextField
-            label="Name"
-            value={name}
-            onChangeText={setName}
-            placeholder="z.B. Push / Pull / Beine"
-            maxLength={PLAN_NAME_MAX_LENGTH}
-          />
-        </View>
-        <View style={styles.group}>
-          <ListItem
-            title="Plan im Profil anzeigen"
-            trailing={
-              <Switch
-                value={showInProfile}
-                onValueChange={setShowInProfile}
-                trackColor={{ true: colors.accent, false: colors.border }}
-                accessibilityLabel="Plan im Profil anzeigen"
-              />
-            }
-          />
-        </View>
-        <SectionFooter>
-          Sichtbar für alle, die deine Beiträge sehen dürfen (bestätigte Follower bzw. alle bei öffentlichem Profil).
-        </SectionFooter>
-
-        <SectionHeader title={`Einheiten (${rows.length})`} />
-        <Text style={styles.intro}>
-          Die Einheiten wiederholen sich in dieser Reihenfolge, unabhängig von Wochentagen.
-        </Text>
-        <View style={styles.group}>
-          {rows.map((row, index) => (
-            <View key={row.key}>
-              {index > 0 && <Divider />}
-              <View style={styles.unit}>
-                <View style={styles.unitHeader}>
-                  <Text style={styles.unitLabel}>Einheit {index + 1}</Text>
-                  <View style={styles.unitActions}>
-                    <IconButton
-                      icon="chevron-up"
-                      label={`Einheit ${index + 1} nach oben`}
-                      onPress={() => moveRow(index, -1)}
-                      disabled={index === 0}
-                    />
-                    <IconButton
-                      icon="chevron-down"
-                      label={`Einheit ${index + 1} nach unten`}
-                      onPress={() => moveRow(index, 1)}
-                      disabled={index === rows.length - 1}
-                    />
-                    <IconButton
-                      icon="trash-outline"
-                      label={`Einheit ${index + 1} löschen`}
-                      onPress={() => removeRow(row.key)}
-                      disabled={rows.length === 1}
-                      destructive
-                    />
-                  </View>
-                </View>
-                <TextField
-                  label="Name"
-                  value={row.title}
-                  onChangeText={(title) => updateRow(row.key, { title })}
-                  placeholder="z.B. Push"
-                  maxLength={PLAN_DAY_TITLE_MAX_LENGTH}
-                />
-                <TextField
-                  label="Notizen (optional)"
-                  value={row.notes}
-                  onChangeText={(notes) => updateRow(row.key, { notes })}
-                  placeholder="z.B. Bankdrücken 4×8, Schulterdrücken 3×10"
-                  maxLength={PLAN_DAY_NOTES_MAX_LENGTH}
-                  multiline
-                />
-              </View>
-            </View>
-          ))}
-        </View>
-        <View style={styles.padded}>
-          <Button
-            label="Einheit hinzufügen"
-            icon="add"
-            variant="secondary"
-            onPress={() => setRows((current) => [...current, newRow({ id: null, title: "", notes: "" })])}
-            disabled={rows.length >= PLAN_MAX_DAYS}
-            style={styles.addButton}
-          />
-        </View>
-
-        {error !== null && <Text style={styles.error}>{error}</Text>}
-        <View style={[styles.padded, styles.actions]}>
-          <Button label="Speichern" onPress={() => void save()} loading={saving} />
-          {plan !== null && (
-            <Button label="Plan entfernen" variant="ghost" destructive onPress={confirmDelete} disabled={saving} />
-          )}
-        </View>
-      </ScrollView>
-    </KeyboardAvoidingView>
+    <ScrollView style={styles.screen} contentContainerStyle={styles.content}>
+      <SectionHeader title={`Meine Pläne (${plans.length} von ${PLAN_MAX_PLANS})`} />
+      <View style={styles.group}>
+        {plans.map((plan, index) => (
+          <View key={plan.id}>
+            {index > 0 && <Divider inset={LIST_ICON_INSET} />}
+            <ListItem
+              icon={plan.isActive ? "checkmark-circle" : "list-outline"}
+              title={plan.name}
+              subtitle={planSubtitle(plan)}
+              trailing={plan.isActive ? <Badge value="Aktiv" tone="neutral" /> : undefined}
+              onPress={() => openMenu(plan)}
+              disabled={busy}
+              accessibilityLabel={`${plan.name}${plan.isActive ? ", aktiv" : ""}, ${planSubtitle(plan)}`}
+            />
+          </View>
+        ))}
+      </View>
+      <SectionFooter>
+        Der aktive Plan bestimmt, was auf Home als Nächstes dran ist, und zählt für den Plan-Streak.
+      </SectionFooter>
+      <View style={styles.padded}>
+        <Button label="Neuer Plan" icon="add" variant="secondary" onPress={newPlan} disabled={!canCreate || busy} />
+        {!canCreate && <Text style={styles.hint}>Du hast die Höchstzahl von {PLAN_MAX_PLANS} Plänen erreicht.</Text>}
+      </View>
+    </ScrollView>
   );
 }
 
@@ -297,9 +173,6 @@ const useStyles = makeStyles(({ colors }) =>
     content: {
       paddingBottom: spacing.xl,
     },
-    padded: {
-      paddingHorizontal: spacing.md,
-    },
     group: {
       marginTop: spacing.ms,
       borderTopWidth: StyleSheet.hairlineWidth,
@@ -307,52 +180,14 @@ const useStyles = makeStyles(({ colors }) =>
       borderColor: colors.divider,
       backgroundColor: colors.surface,
     },
-    intro: {
-      ...typography.caption,
-      color: colors.textSecondary,
-      paddingHorizontal: spacing.md,
-    },
-    unit: {
-      gap: spacing.ms,
-      padding: spacing.md,
-    },
-    unitHeader: {
-      flexDirection: "row",
-      alignItems: "center",
-      justifyContent: "space-between",
-    },
-    unitLabel: {
-      ...typography.bodyStrong,
-      color: colors.text,
-    },
-    unitActions: {
-      flexDirection: "row",
-      marginRight: -spacing.sm,
-    },
-    iconButton: {
-      width: 44,
-      height: 44,
-      alignItems: "center",
-      justifyContent: "center",
-    },
-    pressed: {
-      opacity: 0.6,
-    },
-    disabled: {
-      opacity: 0.3,
-    },
-    addButton: {
-      marginTop: spacing.md,
-    },
-    error: {
-      ...typography.caption,
-      color: colors.danger,
+    padded: {
       paddingHorizontal: spacing.md,
       paddingTop: spacing.md,
-    },
-    actions: {
       gap: spacing.sm,
-      paddingTop: spacing.lg,
+    },
+    hint: {
+      ...typography.caption,
+      color: colors.textSecondary,
     },
   }),
 );

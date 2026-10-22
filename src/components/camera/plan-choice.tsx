@@ -2,7 +2,8 @@ import { Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 
 import { SegmentedControl } from "@/components/ui/segmented-control";
 import { radius, spacing, typography } from "@/constants/theme";
-import type { TrainingPlan } from "@/lib/planRepo";
+import { planEntries, type TrainingPlan } from "@/lib/planRepo";
+import { nextTrainingIndex } from "@/lib/streak";
 import { makeStyles } from "@/lib/theme";
 
 type PlanChoiceProps = {
@@ -20,10 +21,15 @@ const YES_NO = [
   { value: "yes", label: "Ja" },
 ] as const;
 
-/** "Gehört zu deinem Plan?" with the plan's units as chips. Only shown to people with a plan. */
+/**
+ * "Gehört zu deinem Plan?" with the plan's training days as chips (rest days can't be a
+ * training proof). Only shown to people with an active plan.
+ */
 export function PlanChoice({ plan, nextIndex, value, onChange, disabled = false }: PlanChoiceProps) {
   const styles = useStyles();
-  const nextId = plan.days[nextIndex]?.id ?? plan.days[0]?.id ?? null;
+  // A rest day due next: the training day after it is the one to pre-select.
+  const nextTraining = nextTrainingIndex(planEntries(plan), nextIndex);
+  const nextId = plan.days[nextTraining]?.id ?? null;
   return (
     <View style={styles.container}>
       <View style={styles.row}>
@@ -44,9 +50,10 @@ export function PlanChoice({ plan, nextIndex, value, onChange, disabled = false 
           showsHorizontalScrollIndicator={false}
           contentContainerStyle={styles.chips}
           accessibilityRole="radiogroup"
-          accessibilityLabel="Einheit"
+          accessibilityLabel="Trainingstag"
         >
           {plan.days.map((day, index) => {
+            if (day.type === "rest") return null;
             const selected = day.id === value;
             return (
               <Pressable
@@ -55,7 +62,7 @@ export function PlanChoice({ plan, nextIndex, value, onChange, disabled = false 
                 disabled={disabled}
                 accessibilityRole="radio"
                 accessibilityState={{ checked: selected, disabled }}
-                accessibilityLabel={`${day.title}, Einheit ${index + 1} von ${plan.days.length}${index === nextIndex ? ", als Nächstes dran" : ""}`}
+                accessibilityLabel={`${day.title}, Tag ${index + 1} von ${plan.days.length}${index === nextTraining ? ", als Nächstes dran" : ""}`}
                 style={[styles.chip, selected && styles.chipSelected]}
               >
                 <Text style={[styles.chipText, selected && styles.chipTextSelected]} numberOfLines={1}>

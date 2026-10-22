@@ -66,14 +66,15 @@ export function useRestDayActions(
   }
 
   function requestUndo(day: DayKey) {
-    Alert.alert(`Ruhetag ${dayName(day)} zurücknehmen?`, "Der Ruhetag wird wieder gutgeschrieben.", [
+    const planned = rest.planned.includes(day);
+    Alert.alert(`Ruhetag ${dayName(day)} zurücknehmen?`, planned ? "Der geplante Ruhetag gilt dann als nicht bestätigt." : "Der Ruhetag wird wieder gutgeschrieben.", [
       { text: "Abbrechen", style: "cancel" },
       { text: "Zurücknehmen", style: "destructive", onPress: () => run(() => undoRestDay(day)) },
     ]);
   }
 
   function requestToggle(day: DayKey) {
-    if (rest.uses.includes(day)) requestUndo(day);
+    if (rest.uses.includes(day) || rest.planned.includes(day)) requestUndo(day);
     else requestUse(day);
   }
 

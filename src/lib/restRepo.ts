@@ -6,21 +6,26 @@ export type MyRestDays = {
   /** null: never set up (the feature stays hidden). */
   budget: RestBudget | null;
   uses: DayKey[];
+  /** Confirmed planned rest days of my plans (no budget needed). */
+  planned: DayKey[];
 };
 
 /** My rest day budget and the rest days I used (only I can read them). */
 export async function fetchMyRestDays(): Promise<MyRestDays> {
   const userId = await requireUserId();
-  const [budget, uses] = await Promise.all([
+  const [budget, uses, planned] = await Promise.all([
     supabase.from("rest_budgets").select("rests_per_cycle, cycle_start").eq("user_id", userId).maybeSingle(),
     supabase.from("rest_day_uses").select("day").eq("user_id", userId).order("day"),
+    supabase.from("planned_rest_uses").select("day").eq("user_id", userId).order("day"),
   ]);
   if (budget.error) throw budget.error;
   if (uses.error) throw uses.error;
+  if (planned.error) throw planned.error;
   return {
     budget:
       budget.data !== null ? { restsPerWeek: budget.data.rests_per_cycle, cycleStart: budget.data.cycle_start } : null,
     uses: uses.data.map((row) => row.day),
+    planned: planned.data.map((row) => row.day),
   };
 }
 
@@ -41,6 +46,8 @@ function restErrorMessage(error: RpcError): string {
       return "An diesem Tag hast du schon trainiert.";
     case "rest_day_not_allowed":
       return "Ruhetage gehen nur für heute oder gestern.";
+    case "rest_day_planned":
+      return "Dein aktiver Plan legt die Ruhetage selbst fest.";
     default:
       return error.message ?? "Etwas ist schiefgelaufen.";
   }

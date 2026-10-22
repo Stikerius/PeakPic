@@ -18,7 +18,7 @@ import {
   usernameFormatError,
   usernameLockedMessage,
 } from "@/lib/names";
-import { fetchMyPlan, type TrainingPlan } from "@/lib/planRepo";
+import { fetchMyPlans, type TrainingPlan } from "@/lib/planRepo";
 import { NameChangeError, getMyProfile, isUsernameAvailable, updateMyNames, type Profile } from "@/lib/profileRepo";
 import { makeStyles, useTheme } from "@/lib/theme";
 import { useTrackScreen } from "@/lib/usage";
@@ -53,13 +53,13 @@ export default function ProfileEditScreen() {
   useEffect(load, []);
 
   // undefined while loading; refreshed when coming back from the plan editor.
-  const [plan, setPlan] = useState<TrainingPlan | null | undefined>(undefined);
+  const [plans, setPlans] = useState<TrainingPlan[] | undefined>(undefined);
   useFocusEffect(
     useCallback(() => {
       let active = true;
-      fetchMyPlan()
+      fetchMyPlans()
         .then((result) => {
-          if (active) setPlan(result);
+          if (active) setPlans(result);
         })
         .catch(() => undefined);
       return () => {
@@ -197,17 +197,19 @@ export default function ProfileEditScreen() {
           <Button label="Speichern" onPress={() => void save()} loading={saving} />
         </View>
 
-        <SectionHeader title="Trainingsplan" />
+        <SectionHeader title="Trainingspläne" />
         <View style={styles.group}>
           <ListItem
             icon="list-outline"
-            title={plan ? plan.name : "Plan anlegen"}
+            title={plans === undefined || plans.length === 0 ? "Plan anlegen" : "Trainingspläne"}
             subtitle={
-              plan === undefined
+              plans === undefined
                 ? "…"
-                : plan === null
-                  ? "Freiwillig. Eine feste Abfolge von Einheiten, z.B. Push, Pull, Beine."
-                  : `${plan.days.length === 1 ? "1 Einheit" : `${plan.days.length} Einheiten`}${plan.showInProfile ? "" : " · nicht im Profil sichtbar"}`
+                : plans.length === 0
+                  ? "Freiwillig. Eine feste Abfolge von Trainings- und Ruhetagen, z.B. Push, Pull, Beine."
+                  : `${plans.length} ${plans.length === 1 ? "Plan" : "Pläne"}${
+                      plans.find((p) => p.isActive) !== undefined ? ` · aktiv: ${plans.find((p) => p.isActive)?.name ?? ""}` : " · keiner aktiv"
+                    }`
             }
             chevron
             onPress={() => router.push("/plan-edit")}

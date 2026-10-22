@@ -56,7 +56,16 @@ Bricht etwas ab, bleibt der Status `deleting`. Die App zeigt dann „Löschung w
 
 **Was bleibt (pseudonymisiert):** `moderation_actions` (UUID, Texte zum Nutzer entfernt, Namen in Begründungen ersetzt durch „[gelöschtes Konto]“), `reports` mit `target_user_id` (Melder wird `null`, Namen in Details und Notizen ersetzt), `report_snapshots` (Kopien gemeldeter Nachrichten mit `sender_id`, Namen ersetzt), `account_deletions` (nur Hash). Entfernte Inhalte des Kontos werden mitgelöscht, auch ihre Dateien.
 
-**Neue Tabellen ohne Bezug zu Konten** (beim Löschen nichts zu tun): `usage_counters`, `usage_event_types`, `usage_meta` (nur Tagessummen pro Ereignis, keine Nutzer-ID). Das Löschen eines Kontos erhöht den Zähler `account_deleted`.
+**Tabellen beim Löschen eines Kontos** (neue Tabellen hier ergänzen):
+
+| Ergebnis | Tabellen |
+|---|---|
+| Gelöscht (`on delete cascade`) | `profiles`, `username_history` (Name wird frei), `posts`, `post_media`, `post_tags`, `post_likes`, `comments`, `comment_likes`, `follows`, `stories`, `story_likes`, `story_views`, `highlights`, `highlight_items`, `audience_restrictions`, `conversation_members` (eigene Zeile), `messages` (eigene), `message_reactions`, `workout_shares`, `post_reposts`, `content_hashtags`, `notifications`, `training_plans`, `plan_days`, `plan_exercises`, `planned_rest_uses`, `rest_budgets`, `rest_day_uses`, `user_blocks`, `admin_roles`, `moderation_notices`, `legal_confirmations`, `confirmation_followups` |
+| Auf `null` gesetzt | `reports.reporter_id`, `messages.pinned_by`, `conversations.created_by`, `training_plans.adopted_from_user_id` (Kopien anderer behalten ihren Plan, Herkunft „Gelöschtes Konto“) |
+| Nur UUID, Texte pseudonymisiert | `moderation_actions`, `reports.target_user_id`, `report_snapshots.sender_id` |
+| Bereinigt | `stories.mentioned_user_ids` / `mention_positions` anderer |
+| Ohne Bezug zu Konten | `usage_counters`, `usage_event_types`, `usage_meta` (nur Tagessummen pro Ereignis, keine Nutzer-ID). Das Löschen eines Kontos erhöht den Zähler `account_deleted`. |
+| Bleibt | `account_deletions` (nur Hash) |
 
 **Prüfen nach dem Löschen:** `supabase/check-deleted-user.sql` durchsucht alle Tabellen nach der alten ID.
 

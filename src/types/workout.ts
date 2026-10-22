@@ -16,7 +16,7 @@ export type WorkoutWithPhoto = Workout & {
   photoUrls: string[];
   /** false: a training proof for streak and calendar only, not in the feed. */
   inFeed: boolean;
-  /** "Pull · Einheit 2 von 6" if the proof belongs to a plan unit. */
+  /** "Pull · Tag 2 von 6" if the proof belongs to a plan day. */
   planLabel: string | null;
 };
 

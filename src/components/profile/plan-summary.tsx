@@ -3,6 +3,7 @@ import { useState } from "react";
 import { LayoutAnimation, Pressable, StyleSheet, Text, View } from "react-native";
 
 import { radius, spacing, typography } from "@/constants/theme";
+import { exerciseSummary } from "@/lib/planDraft";
 import type { TrainingPlan } from "@/lib/planRepo";
 import { makeStyles, useTheme } from "@/lib/theme";
 
@@ -31,7 +32,7 @@ export function PlanSummary({ plan, nextIndex = null }: PlanSummaryProps) {
         onPress={toggle}
         accessibilityRole="button"
         accessibilityState={{ expanded: open }}
-        accessibilityLabel={`Trainingsplan ${plan.name}, ${count} Einheiten${next !== undefined ? `, als Nächstes ${next.title}` : ""}`}
+        accessibilityLabel={`Trainingsplan ${plan.name}, ${count} Tage${next !== undefined ? `, als Nächstes ${next.type === "rest" ? "Ruhetag" : next.title}` : ""}`}
         style={({ pressed }) => [styles.header, pressed && styles.pressed]}
       >
         <Ionicons name="list-outline" size={20} color={colors.textSecondary} />
@@ -40,8 +41,8 @@ export function PlanSummary({ plan, nextIndex = null }: PlanSummaryProps) {
             {plan.name}
           </Text>
           <Text style={styles.subtitle} numberOfLines={1}>
-            {count === 1 ? "1 Einheit" : `${count} Einheiten`} im Zyklus
-            {next !== undefined ? ` · Als Nächstes: ${next.title}` : ""}
+            {count === 1 ? "1 Tag" : `${count} Tage`} im Zyklus
+            {next !== undefined ? ` · Als Nächstes: ${next.type === "rest" ? "Ruhetag" : next.title}` : ""}
           </Text>
         </View>
         <Ionicons name={open ? "chevron-up" : "chevron-down"} size={18} color={colors.textTertiary} />
@@ -54,10 +55,15 @@ export function PlanSummary({ plan, nextIndex = null }: PlanSummaryProps) {
               <View key={day.id} style={[styles.day, isNext && styles.dayNext]}>
                 <Text style={[styles.position, isNext && styles.positionNext]}>{index + 1}</Text>
                 <View style={styles.dayText}>
-                  <Text style={styles.dayTitle}>
-                    {day.title}
+                  <Text style={[styles.dayTitle, day.type === "rest" && styles.restTitle]}>
+                    {day.type === "rest" && day.title !== "Ruhetag" ? `Ruhetag · ${day.title}` : day.title}
                     {isNext && <Text style={styles.nextLabel}> · Als Nächstes</Text>}
                   </Text>
+                  {day.exercises.map((exercise) => (
+                    <Text key={exercise.id} style={styles.exercise}>
+                      {exercise.name} · {exerciseSummary(exercise)}
+                    </Text>
+                  ))}
                   {day.notes !== null && <Text style={styles.notes}>{day.notes}</Text>}
                 </View>
               </View>
@@ -132,6 +138,14 @@ const useStyles = makeStyles(({ colors }) =>
     },
     dayTitle: {
       ...typography.body,
+      color: colors.text,
+    },
+    restTitle: {
+      color: colors.textSecondary,
+    },
+    exercise: {
+      ...typography.caption,
+      ...typography.numeric,
       color: colors.text,
     },
     nextLabel: {

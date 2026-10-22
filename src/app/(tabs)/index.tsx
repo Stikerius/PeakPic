@@ -1,6 +1,6 @@
 import { router } from "expo-router";
 import { useState } from "react";
-import { ActivityIndicator, ScrollView, StyleSheet, Text, View } from "react-native";
+import { ActivityIndicator, Alert, ScrollView, StyleSheet, Text, View } from "react-native";
 
 import { MonthCalendar } from "@/components/streak/month-calendar";
 import { PlanStreakCard } from "@/components/streak/plan-streak-card";
@@ -10,6 +10,8 @@ import { fontSize, spacing } from "@/constants/theme";
 import { usePlanAndRest } from "@/hooks/use-plan-and-rest";
 import { useRestDayActions } from "@/hooks/use-rest-day-actions";
 import { useWorkoutDays } from "@/hooks/use-workout-days";
+import { describeError } from "@/lib/errors";
+import { confirmPlannedRestDay, planEntries } from "@/lib/planRepo";
 import {
   addDays,
   addMonths,
@@ -17,11 +19,13 @@ import {
   currentPlanStreak,
   nextPlanDayIndex,
   parseDayKey,
+  plannedRestDue,
+  restEntryIds,
   runLengthByDay,
   toDayKey,
 } from "@/lib/streak";
 import { makeStyles, useTheme } from "@/lib/theme";
-import { useTrackScreen } from "@/lib/usage";
+import { track, useTrackScreen } from "@/lib/usage";
 
 export default function HomeScreen() {
   useTrackScreen("screen_home");
@@ -32,6 +36,7 @@ export default function HomeScreen() {
 
   const today = toDayKey(new Date());
   const { year: currentYear, month: currentMonth } = parseDayKey(today);
+  const [confirmingRest, setConfirmingRest] = useState(false);
   const [visibleMonth, setVisibleMonth] = useState({
     year: currentYear,
     month: currentMonth,
@@ -40,22 +45,61 @@ export default function HomeScreen() {
   const stats = computeStreakStatsFromDays(days, today, restDays);
   const restDaySet = new Set(restDays);
   const runLengths = runLengthByDay(stats.trainingDays, restDaySet);
-  const planDayIds = plan?.days.map((d) => d.id) ?? [];
+  const entries = plan !== null ? planEntries(plan) : [];
+  const planDayIds = entries.map((e) => e.id);
+  const restIds = restEntryIds(entries);
+  // An active plan with rest days plans them itself; the weekly budget is not used then.
+  const planHasRest = restIds.size > 0;
   const planStreak =
     plan !== null
-      ? currentPlanStreak({ planDayIds, proofs, trainingDays: stats.trainingDays, restDays: restDaySet, today })
+      ? currentPlanStreak({ planDayIds, proofs, trainingDays: stats.trainingDays, restDays: restDaySet, today, restIds })
       : 0;
+  const restDue = planHasRest
+    ? plannedRestDue({ entries, proofs, today, trainingDays: stats.trainingDays, restDays: restDaySet })
+    : null;
   const reloadAll = () => {
     reload();
     reloadPlanAndRest();
   };
   const restActions = useRestDayActions(rest, stats.trainingDays, today, reloadAll);
-  // Only people with a rest day budget can tap yesterday / today in the calendar.
+  const recentDays = [addDays(today, -1), today];
+  // Tappable in the calendar: with the budget yesterday / today without training; with a plan
+  // with rest days the due rest day and confirmed planned rest days (to take one back).
   const restActionDays = new Set(
-    rest.budget !== null && rest.budget.restsPerWeek > 0
-      ? [addDays(today, -1), today].filter((day) => !stats.trainingDays.has(day))
-      : [],
+    planHasRest
+      ? recentDays.filter((day) => day === restDue?.day || rest.planned.includes(day))
+      : rest.budget !== null && rest.budget.restsPerWeek > 0
+        ? recentDays.filter((day) => !stats.trainingDays.has(day))
+        : [],
   );
+
+  function confirmRest(day: string) {
+    Alert.alert(
+      day === today ? "Ruhetag für heute bestätigen?" : "Ruhetag für gestern bestätigen?",
+      "Laut deinem Plan ist Ruhetag. Dein Streak läuft weiter, ohne dass der Tag als Training zählt.",
+      [
+        { text: "Abbrechen", style: "cancel" },
+        {
+          text: "Bestätigen",
+          onPress: () => {
+            setConfirmingRest(true);
+            confirmPlannedRestDay(day)
+              .then(() => {
+                track("planned_rest_confirmed");
+                reloadAll();
+              })
+              .catch((error: unknown) => Alert.alert("Hat nicht geklappt", describeError(error)))
+              .finally(() => setConfirmingRest(false));
+          },
+        },
+      ],
+    );
+  }
+
+  function selectActionDay(day: string) {
+    if (planHasRest && day === restDue?.day && !rest.planned.includes(day)) confirmRest(day);
+    else restActions.requestToggle(day);
+  }
   const canGoNext =
     visibleMonth.year * 12 + visibleMonth.month < currentYear * 12 + currentMonth;
 
@@ -76,14 +120,20 @@ export default function HomeScreen() {
         trainedToday={stats.trainingDays.has(today)}
       />
       {plan !== null && (
-        <PlanStreakCard plan={plan} streak={planStreak} nextIndex={nextPlanDayIndex(planDayIds, proofs)} />
+        <PlanStreakCard
+          plan={plan}
+          streak={planStreak}
+          nextIndex={nextPlanDayIndex(planDayIds, proofs)}
+          trainedToday={stats.trainingDays.has(today)}
+          restDue={restDue?.day ?? null}
+          today={today}
+          busy={confirmingRest}
+          onConfirmRest={confirmRest}
+        />
       )}
-      <RestDaysCard
-        rest={rest}
-        trainingDays={stats.trainingDays}
-        today={today}
-        onChanged={reloadAll}
-      />
+      {!planHasRest && (
+        <RestDaysCard rest={rest} trainingDays={stats.trainingDays} today={today} onChanged={reloadAll} />
+      )}
       <MonthCalendar
         year={visibleMonth.year}
         month={visibleMonth.month}
@@ -96,7 +146,7 @@ export default function HomeScreen() {
         onNext={() => setVisibleMonth((m) => addMonths(m.year, m.month, 1))}
         onSelectDay={(day) => router.push({ pathname: "/day/[date]", params: { date: day } })}
         actionDays={restActionDays}
-        onSelectActionDay={restActions.requestToggle}
+        onSelectActionDay={selectActionDay}
       />
     </ScrollView>
   );
