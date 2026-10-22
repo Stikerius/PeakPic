@@ -9,9 +9,11 @@ import { describeError } from "@/lib/errors";
 import { listFollowing } from "@/lib/socialRepo";
 import { makeStyles, useTheme } from "@/lib/theme";
 import type { PublicProfile } from "@/types/social";
+import { useTrackScreen } from "@/lib/usage";
 
 /** Start a chat with someone you follow (or open the existing one). */
 export default function NewChatScreen() {
+  useTrackScreen("screen_chat_new");
   const { colors, scheme } = useTheme();
   const styles = useStyles();
   const [people, setPeople] = useState<PublicProfile[] | null>(null);

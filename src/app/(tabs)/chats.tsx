@@ -10,8 +10,10 @@ import { listConversations, subscribeToMessages } from "@/lib/chatRepo";
 import { formatRelativeTime } from "@/lib/format";
 import { makeStyles, useTheme } from "@/lib/theme";
 import type { ConversationSummary } from "@/types/chat";
+import { useTrackScreen } from "@/lib/usage";
 
 export default function ChatListScreen() {
+  useTrackScreen("screen_chats");
   const { colors } = useTheme();
   const styles = useStyles();
   const [conversations, setConversations] = useState<ConversationSummary[] | null>(null);

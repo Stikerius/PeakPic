@@ -12,6 +12,7 @@ import { listReposts, type Repost } from "@/lib/repostRepo";
 import { makeStyles, useTheme } from "@/lib/theme";
 import { listWorkoutLinks, withdrawWorkoutLink, type WorkoutLink } from "@/lib/workoutLinkRepo";
 import type { WorkoutShareStatus } from "@/types/database";
+import { useTrackScreen } from "@/lib/usage";
 
 const STATUS_LABELS: Record<WorkoutShareStatus, string> = {
   pending: "Ausstehend",
@@ -24,6 +25,7 @@ const STATUS_LABELS: Record<WorkoutShareStatus, string> = {
  * only be viewed here; only the reposter can delete them.
  */
 export default function PostLinksScreen() {
+  useTrackScreen("screen_post_links");
   const { colors } = useTheme();
   const styles = useStyles();
   const { postId } = useLocalSearchParams<{ postId: string }>();

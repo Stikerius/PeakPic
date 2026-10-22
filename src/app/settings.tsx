@@ -27,6 +27,7 @@ import {
 } from "@/lib/profileRepo";
 import { makeStyles, useTheme } from "@/lib/theme";
 import type { AudienceScope, TagPermission, Visibility } from "@/types/database";
+import { setUsageEnabled, useTrackScreen, useUsageEnabled } from "@/lib/usage";
 
 type RowProps = {
   icon: ComponentProps<typeof Ionicons>["name"];
@@ -104,6 +105,7 @@ function countLabel(count: number | undefined): string {
 }
 
 export default function SettingsScreen() {
+  useTrackScreen("screen_settings");
   const { colors, preference, setPreference } = useTheme();
   const styles = useStyles();
   const [counts, setCounts] = useState<Partial<Record<AudienceScope, number>>>({});
@@ -112,6 +114,7 @@ export default function SettingsScreen() {
   const [tags, setTags] = useState<TagSettings | null>(null);
   const requestCount = useFollowRequestCount();
   const legal = useLegalGate();
+  const usageEnabled = useUsageEnabled();
 
   useFocusEffect(
     useCallback(() => {
@@ -346,6 +349,28 @@ export default function SettingsScreen() {
       <Text style={styles.footnote}>
         Verborgene Personen sehen deine Storys bzw. Workout-Beiträge und deinen Kalender nicht mehr. Sie
         erfahren davon nichts.
+      </Text>
+
+      <Text style={[styles.sectionTitle, styles.sectionSpacing]}>Datenschutz</Text>
+      <View style={styles.card}>
+        <View style={styles.row}>
+          <Ionicons name="bar-chart-outline" size={22} color={colors.text} />
+          <View style={styles.rowText}>
+            <Text style={styles.rowTitle}>Anonyme Nutzungsstatistik</Text>
+            <Text style={styles.rowSubtitle}>Hilft uns zu sehen, welche Bereiche genutzt werden</Text>
+          </View>
+          <Switch
+            value={usageEnabled}
+            onValueChange={(value) => void setUsageEnabled(value)}
+            trackColor={{ true: colors.accent, false: colors.border }}
+            accessibilityLabel="Anonyme Nutzungsstatistik"
+          />
+        </View>
+      </View>
+      <Text style={styles.footnote}>
+        Gezählt wird nur, wie oft ein Bereich der App geöffnet wird (zum Beispiel Feed oder Chats), als Tagessumme
+        für alle Nutzer zusammen. Dabei wird weder dein Konto noch dein Gerät gespeichert, und keine Inhalte. Die
+        Einstellung gilt nur auf diesem Gerät.
       </Text>
 
       <Text style={[styles.sectionTitle, styles.sectionSpacing]}>Rechtliches</Text>

@@ -7,9 +7,11 @@ import { fontSize, spacing } from "@/constants/theme";
 import { describeError } from "@/lib/errors";
 import { fetchHashtagPage, type HashtagPage } from "@/lib/hashtagRepo";
 import { makeStyles, useTheme } from "@/lib/theme";
+import { useTrackScreen } from "@/lib/usage";
 
 /** All posts with a hashtag that I may see, newest first. */
 export default function HashtagScreen() {
+  useTrackScreen("screen_hashtag");
   const { colors } = useTheme();
   const styles = useStyles();
   const { tag } = useLocalSearchParams<{ tag: string }>();

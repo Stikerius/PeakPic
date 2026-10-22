@@ -14,6 +14,7 @@ import { createPost, getTodaysDayPostId } from "@/lib/postRepo";
 import { nextPlanDayIndex } from "@/lib/streak";
 import { DarkScheme, makeStyles } from "@/lib/theme";
 import type { CapturedPhoto } from "@/types/photo";
+import { useTrackScreen } from "@/lib/usage";
 
 const NOTICE_DURATION_MS = 2500;
 
@@ -24,6 +25,7 @@ type TabScreenNavigation = {
 };
 
 export default function CameraScreen() {
+  useTrackScreen("screen_camera");
   // The camera is always dark; the tab stays mounted, so only claim the status bar while shown.
   const isFocused = useIsFocused();
   return (

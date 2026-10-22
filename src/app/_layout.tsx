@@ -12,9 +12,12 @@ import { LegalGateProvider, useLegalGate } from "@/lib/legalGate";
 import { OnboardingProvider, useOnboarding } from "@/lib/onboarding";
 import { SessionProvider, useSession } from "@/lib/session";
 import { ThemeProvider, makeStyles, useTheme } from "@/lib/theme";
+import { startUsageTracking } from "@/lib/usage";
 
 // Keep the splash screen up until the stored session has been restored.
 void SplashScreen.preventAutoHideAsync();
+// Anonymous usage counters: counted on the device, sent in batches (lib/usage.ts).
+startUsageTracking();
 
 export default function RootLayout() {
   return (

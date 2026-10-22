@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 
 /**
  * Tiny hash router: #/queue, #/reports/<id>, #/users, #/users/<id>, #/audit, #/legal,
- * #/legal/<id>, #/pending, #/ (overview).
+ * #/legal/<id>, #/pending, #/usage, #/ (overview).
  */
 export type Route =
   | { page: "overview" }
@@ -13,7 +13,8 @@ export type Route =
   | { page: "audit" }
   | { page: "legal" }
   | { page: "legal-edit"; id: string }
-  | { page: "pending" };
+  | { page: "pending" }
+  | { page: "usage" };
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -28,6 +29,7 @@ export function parseRoute(hash: string): Route {
   if (first === "legal" && second !== undefined && UUID.test(second)) return { page: "legal-edit", id: second };
   if (first === "legal") return { page: "legal" };
   if (first === "pending") return { page: "pending" };
+  if (first === "usage") return { page: "usage" };
   return { page: "overview" };
 }
 
@@ -51,6 +53,8 @@ export function href(route: Route): string {
       return `#/legal/${route.id}`;
     case "pending":
       return "#/pending";
+    case "usage":
+      return "#/usage";
   }
 }
 

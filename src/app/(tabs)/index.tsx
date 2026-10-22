@@ -21,8 +21,10 @@ import {
   toDayKey,
 } from "@/lib/streak";
 import { makeStyles, useTheme } from "@/lib/theme";
+import { useTrackScreen } from "@/lib/usage";
 
 export default function HomeScreen() {
+  useTrackScreen("screen_home");
   const { colors } = useTheme();
   const styles = useStyles();
   const { days, sharedDays, restDays, loading, error, reload } = useWorkoutDays();

@@ -11,6 +11,7 @@ import { spacing, typography } from "@/constants/theme";
 import { describeError } from "@/lib/errors";
 import { REPORT_DETAILS_MAX_LENGTH, REPORT_REASONS, REPORT_TARGET_LABELS, submitReport } from "@/lib/reportRepo";
 import { makeStyles, useTheme } from "@/lib/theme";
+import { track } from "@/lib/usage";
 import type { ReportReason, ReportTargetType } from "@/types/database";
 
 type ReportRequest = {
@@ -36,6 +37,7 @@ export function ReportProvider({ children }: { children: ReactNode }) {
   const [sent, setSent] = useState(false);
 
   function openReport(next: ReportRequest) {
+    track("report_opened");
     setReason(null);
     setDetails("");
     setError(null);

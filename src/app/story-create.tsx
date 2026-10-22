@@ -10,11 +10,13 @@ import { StoryEditor } from "@/components/stories/story-editor";
 import { fontSize, onPhoto, radius, spacing } from "@/constants/theme";
 import { DarkScheme, makeStyles, useTheme } from "@/lib/theme";
 import type { CapturedPhoto } from "@/types/photo";
+import { useTrackScreen } from "@/lib/usage";
 
 const NOTICE_DURATION_MS = 2500;
 
 /** Story flow: own camera (or gallery) first, then the editor with filters, text and tags. */
 export default function StoryCreateScreen() {
+  useTrackScreen("screen_story_create");
   return (
     <DarkScheme>
       <StoryCreateScreenContent />

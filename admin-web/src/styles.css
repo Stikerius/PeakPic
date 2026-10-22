@@ -160,3 +160,21 @@ textarea { resize: vertical; }
 .diff-removed { background: var(--diff-removed); text-decoration: line-through; }
 .diff-same { color: var(--text-2); }
 .plain-list { list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: 8px; }
+
+/* Usage statistics */
+.toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; margin: 12px 0 16px; }
+.segmented { display: inline-flex; gap: 4px; flex-wrap: wrap; }
+.card-change { font-size: 12px; }
+.chart-grid-layout { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 12px; margin-bottom: 12px; }
+.chart-grid-layout .panel { margin: 0; }
+.chart { margin: 0; }
+.chart figcaption { display: flex; justify-content: space-between; font-weight: 600; margin-bottom: 6px; }
+.chart svg, svg.bars { width: 100%; height: auto; display: block; }
+.chart-grid { stroke: var(--border); stroke-width: 1; stroke-dasharray: 3 3; }
+.chart-axis { stroke: var(--border); stroke-width: 1; }
+.chart-line { fill: none; stroke: var(--accent); stroke-width: 2; stroke-linejoin: round; stroke-linecap: round; }
+.chart-dot { fill: var(--accent); }
+.chart-label { fill: var(--text-2); font-size: 11px; font-variant-numeric: tabular-nums; }
+.chart-label.strong { fill: var(--text); font-size: 12px; }
+.bar-track { fill: var(--raised); }
+.bar { fill: var(--accent); }

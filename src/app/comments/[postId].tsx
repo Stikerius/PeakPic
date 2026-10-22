@@ -31,6 +31,7 @@ import { formatRelativeTime } from "@/lib/format";
 import { useSession } from "@/lib/session";
 import { makeStyles, useTheme } from "@/lib/theme";
 import type { PostComment } from "@/types/social";
+import { useTrackScreen } from "@/lib/usage";
 
 /** Sheet height as a fraction of the screen. */
 const SHEET_HEIGHT = 0.75;
@@ -103,6 +104,7 @@ function CommentRow({ comment, isReply, highlighted, onOpenProfile, onToggleLike
 }
 
 export default function CommentsScreen() {
+  useTrackScreen("screen_comments");
   const { colors } = useTheme();
   const styles = useStyles();
   const myId = useSession().session?.user.id;

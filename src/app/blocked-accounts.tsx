@@ -12,8 +12,10 @@ import { spacing } from "@/constants/theme";
 import { listBlockedAccounts, unblockUser, type BlockedAccount } from "@/lib/blockRepo";
 import { describeError } from "@/lib/errors";
 import { makeStyles } from "@/lib/theme";
+import { useTrackScreen } from "@/lib/usage";
 
 export default function BlockedAccountsScreen() {
+  useTrackScreen("screen_blocked");
   const styles = useStyles();
   const [accounts, setAccounts] = useState<BlockedAccount[] | null>(null);
   const [failed, setFailed] = useState(false);

@@ -533,6 +533,7 @@ export type Database = {
         }[];
       };
       confirm_legal_documents: { Args: { p_document_ids: Uuid[]; p_app_version: string }; Returns: number };
+      track_events: { Args: { events: Json }; Returns: number };
       get_my_account_status: {
         Args: Record<string, never>;
         Returns: { status: AccountStatus; suspended_until: Timestamp | null; reason_code: string | null; message: string | null }[];

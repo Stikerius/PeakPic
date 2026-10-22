@@ -9,9 +9,11 @@ import { describeError } from "@/lib/errors";
 import { emitAppEvent } from "@/lib/events";
 import { acceptFollowRequest, declineFollowRequest, listFollowRequests, type FollowRequest } from "@/lib/socialRepo";
 import { makeStyles, useTheme } from "@/lib/theme";
+import { useTrackScreen } from "@/lib/usage";
 
 /** Open requests to follow my private profile: confirm or decline. */
 export default function FollowRequestsScreen() {
+  useTrackScreen("screen_follow_requests");
   const { colors } = useTheme();
   const styles = useStyles();
   const openProfile = useOpenProfile();

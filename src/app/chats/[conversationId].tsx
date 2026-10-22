@@ -46,6 +46,7 @@ import { useSession } from "@/lib/session";
 import { makeStyles, useTheme } from "@/lib/theme";
 import type { ChatMessage } from "@/types/chat";
 import type { PublicProfile } from "@/types/social";
+import { useTrackScreen } from "@/lib/usage";
 
 /** How many older pages a jump to a quoted or pinned message may load. */
 const MAX_JUMP_PAGES = 20;
@@ -72,6 +73,7 @@ function withReaction(message: ChatMessage, userId: string, emoji: string | null
 }
 
 export default function ChatScreen() {
+  useTrackScreen("screen_chat");
   const { colors } = useTheme();
   const styles = useStyles();
   const { conversationId } = useLocalSearchParams<{ conversationId: string }>();

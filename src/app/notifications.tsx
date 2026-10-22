@@ -23,6 +23,7 @@ import { useSession } from "@/lib/session";
 import { refreshStories } from "@/lib/storyStore";
 import { toDayKey } from "@/lib/streak";
 import { makeStyles, useTheme } from "@/lib/theme";
+import { useTrackScreen } from "@/lib/usage";
 
 const KIND_ICONS: Record<NotificationKind, { name: ComponentProps<typeof Ionicons>["name"]; color: ColorName }> = {
   story: { name: "aperture", color: "accent" },
@@ -36,6 +37,7 @@ const KIND_ICONS: Record<NotificationKind, { name: ComponentProps<typeof Ionicon
 };
 
 export default function NotificationsScreen() {
+  useTrackScreen("screen_notifications");
   const { colors } = useTheme();
   const styles = useStyles();
   const myId = useSession().session?.user.id;

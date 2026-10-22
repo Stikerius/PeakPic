@@ -26,8 +26,10 @@ import { fetchUserPostsOnDay } from "@/lib/userProfileRepo";
 import { workoutRepo } from "@/lib/workoutRepo";
 import type { FeedPost } from "@/types/social";
 import type { WorkoutWithPhoto } from "@/types/workout";
+import { useTrackScreen } from "@/lib/usage";
 
 export default function DayScreen() {
+  useTrackScreen("screen_day");
   const { colors } = useTheme();
   const styles = useStyles();
   // Without userId (or with your own) this is your day and photos can be deleted.

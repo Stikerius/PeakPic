@@ -20,6 +20,7 @@ import {
 import { makeStyles, useTheme } from "@/lib/theme";
 import { fetchUserProfile } from "@/lib/userProfileRepo";
 import type { PublicProfile } from "@/types/social";
+import { useTrackScreen } from "@/lib/usage";
 
 type ListKind = "followers" | "following";
 
@@ -28,6 +29,7 @@ type ListKind = "followers" | "following";
  * profiles and people I follow; otherwise only the counts are visible (RLS agrees).
  */
 export default function FollowListScreen() {
+  useTrackScreen("screen_follows");
   const { colors, scheme } = useTheme();
   const styles = useStyles();
   const { userId, list } = useLocalSearchParams<{ userId: string; list: ListKind }>();

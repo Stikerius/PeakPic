@@ -16,6 +16,7 @@ import { fontSize, onPhoto, radius, spacing } from "@/constants/theme";
 import { loadAppIconLibrary } from "@/lib/appIcon";
 import { describeError } from "@/lib/errors";
 import { makeStyles, useTheme } from "@/lib/theme";
+import { useTrackScreen } from "@/lib/usage";
 
 const COLUMNS = 3;
 /** iOS-like corner radius relative to the icon size. */
@@ -30,6 +31,7 @@ type State =
   | { status: "ready"; library: IconLibrary; current: string | null };
 
 export default function AppIconScreen() {
+  useTrackScreen("screen_app_icon");
   const { colors } = useTheme();
   const styles = useStyles();
   const { width } = useWindowDimensions();

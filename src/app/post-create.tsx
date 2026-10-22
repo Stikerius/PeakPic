@@ -19,6 +19,7 @@ import {
 } from "@/lib/postRepo";
 import { DarkScheme, makeStyles, useTheme } from "@/lib/theme";
 import { requestWorkoutLinks } from "@/lib/workoutLinkRepo";
+import { useTrackScreen } from "@/lib/usage";
 
 /** Photos per post (carousel). */
 const MAX_PHOTOS = 10;
@@ -48,6 +49,7 @@ async function linkWorkouts(postId: string, userIds: string[]): Promise<void> {
 }
 
 export default function PostCreateScreen() {
+  useTrackScreen("screen_post_create");
   return (
     <DarkScheme>
       <PostCreateScreenContent />

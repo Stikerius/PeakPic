@@ -10,11 +10,13 @@ import { MESSAGE_MAX_LENGTH, shareCommentWithUser, sharePostWithUser } from "@/l
 import { listFollowing } from "@/lib/socialRepo";
 import { makeStyles, useTheme } from "@/lib/theme";
 import type { PublicProfile } from "@/types/social";
+import { useTrackScreen } from "@/lib/usage";
 
 type SendState = "sending" | "sent" | "error";
 
 /** Sends a post, or with `commentId` one of its comments, into direct chats. */
 export default function SharePostScreen() {
+  useTrackScreen("screen_share");
   const { colors, scheme } = useTheme();
   const styles = useStyles();
   const { postId, commentId } = useLocalSearchParams<{ postId: string; commentId?: string }>();

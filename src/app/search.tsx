@@ -9,10 +9,12 @@ import { fontSize, radius, spacing } from "@/constants/theme";
 import { getMyFollowStatuses, listFollowing, searchProfiles, type FollowStatus } from "@/lib/socialRepo";
 import { makeStyles, useTheme } from "@/lib/theme";
 import type { PublicProfile } from "@/types/social";
+import { useTrackScreen } from "@/lib/usage";
 
 const SEARCH_DEBOUNCE_MS = 300;
 
 export default function SearchScreen() {
+  useTrackScreen("screen_search");
   const { colors, scheme } = useTheme();
   const styles = useStyles();
   const [query, setQuery] = useState("");

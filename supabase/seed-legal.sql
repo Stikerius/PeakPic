@@ -111,7 +111,11 @@ TODO: Anzahl der Kontextnachrichten und Aufbewahrungsdauer eintragen.
 
 TODO: prüfen und bestätigen, dass dabei Standortdaten (EXIF) entfernt werden.
 
-Wir verwenden keine Werbung, kein Tracking und keine Analysedienste.
+**Anonyme Nutzungsstatistik:** Um zu sehen, welche Bereiche der App genutzt werden, zählen wir Tagessummen für alle Nutzer zusammen, zum Beispiel „heute 120 Aufrufe des Feeds“ oder „heute 35 neue Beiträge“. Dabei speichern wir weder dein Konto noch dein Gerät, keine Sitzungskennung und keine Inhalte, und es gibt keine einzelnen Ereignisse, die sich dir zuordnen lassen. Die Aufrufe werden auf deinem Gerät gesammelt und höchstens einmal pro Minute als Summe gesendet. Du kannst das Zählen der Aufrufe in den Einstellungen unter Datenschutz → Anonyme Nutzungsstatistik ausschalten; die Wahl wird nur auf deinem Gerät gespeichert. Die Zahl neu erstellter Inhalte (Beiträge, Kommentare, Nachrichten usw.) zählt der Server unabhängig davon, ebenfalls nur als Tagessumme. Zweck: Verbesserung der App (berechtigtes Interesse).
+
+TODO: Unser Hosting-Anbieter Supabase führt eigene technische Zugriffsprotokolle (zum Beispiel Anfragen an den Server). Inhalt und Aufbewahrung prüfen und hier angeben.
+
+Wir verwenden keine Werbung, kein Tracking über andere Apps oder Websites und keine Analysedienste von Drittanbietern.
 
 ## 3. Wozu und auf welcher Grundlage
 

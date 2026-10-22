@@ -14,6 +14,7 @@ export function Layout({ route, children, theme, onToggleTheme }: LayoutProps) {
     { route: { page: "users" }, label: "Nutzer", active: route.page === "users" || route.page === "user" },
     ...(isAdmin
       ? [
+          { route: { page: "usage" } as Route, label: "Nutzung", active: route.page === "usage" },
           { route: { page: "legal" } as Route, label: "Rechtstexte", active: route.page === "legal" || route.page === "legal-edit" },
           { route: { page: "pending" } as Route, label: "Offene Bestätigungen", active: route.page === "pending" },
           { route: { page: "audit" } as Route, label: "Audit-Log", active: route.page === "audit" },

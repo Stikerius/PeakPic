@@ -21,6 +21,7 @@ import { fetchPost } from "@/lib/feedRepo";
 import { REPOST_CAPTION_MAX_LENGTH, createRepost } from "@/lib/repostRepo";
 import { makeStyles, useTheme } from "@/lib/theme";
 import type { FeedPost } from "@/types/social";
+import { useTrackScreen } from "@/lib/usage";
 
 /**
  * "Selbst posten": a linked person reposts the original workout with an optional caption.
@@ -28,6 +29,7 @@ import type { FeedPost } from "@/types/social";
  * database checks both). The repost points at the original; no photos are copied.
  */
 export default function RepostScreen() {
+  useTrackScreen("screen_repost");
   const { colors } = useTheme();
   const styles = useStyles();
   const { postId } = useLocalSearchParams<{ postId: string }>();

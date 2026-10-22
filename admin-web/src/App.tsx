@@ -9,6 +9,7 @@ import { LegalPage } from "./pages/LegalPage";
 import { LoginPage } from "./pages/LoginPage";
 import { OverviewPage } from "./pages/OverviewPage";
 import { PendingPage } from "./pages/PendingPage";
+import { UsagePage } from "./pages/UsagePage";
 import { QueuePage } from "./pages/QueuePage";
 import { ReportDetailPage } from "./pages/ReportDetailPage";
 import { UserDetailPage } from "./pages/UserDetailPage";
@@ -62,6 +63,7 @@ export function App() {
       {route.page === "legal" && isAdmin && <LegalPage />}
       {route.page === "legal-edit" && isAdmin && <LegalEditPage key={route.id} id={route.id} />}
       {route.page === "pending" && isAdmin && <PendingPage />}
+      {route.page === "usage" && isAdmin && <UsagePage />}
     </Layout>
   );
 }

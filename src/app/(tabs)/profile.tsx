@@ -36,10 +36,12 @@ import {
 } from "@/lib/streak";
 import { makeStyles, useTheme } from "@/lib/theme";
 import { fetchProfileGrid, type PostThumbnail } from "@/lib/userProfileRepo";
+import { useTrackScreen } from "@/lib/usage";
 
 const AVATAR_SIZE = 112;
 
 export default function ProfileScreen() {
+  useTrackScreen("screen_profile");
   const { colors } = useTheme();
   const styles = useStyles();
   // Session can briefly be null while signing out, before the route guard unmounts us.

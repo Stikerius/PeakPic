@@ -21,12 +21,14 @@ import {
 import { fetchMyPlan, type TrainingPlan } from "@/lib/planRepo";
 import { NameChangeError, getMyProfile, isUsernameAvailable, updateMyNames, type Profile } from "@/lib/profileRepo";
 import { makeStyles, useTheme } from "@/lib/theme";
+import { useTrackScreen } from "@/lib/usage";
 
 type Availability = "unknown" | "checking" | "available" | "taken";
 
 const AVAILABILITY_DELAY_MS = 400;
 
 export default function ProfileEditScreen() {
+  useTrackScreen("screen_profile_edit");
   const { colors } = useTheme();
   const styles = useStyles();
   const [profile, setProfile] = useState<Profile | null>(null);

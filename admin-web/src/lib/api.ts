@@ -480,3 +480,76 @@ export async function deleteAccountAsAdmin(userId: string, username: string, rea
   }
   throw new ApiError(DELETION_ERRORS.incomplete);
 }
+
+// ------------------------------------------------------------------ usage statistics (admins)
+
+export type StatsBucket = "day" | "week" | "month" | "year";
+export type StatsMetric =
+  | "accounts"
+  | "active_accounts"
+  | "posts"
+  | "stories"
+  | "highlights"
+  | "comments"
+  | "messages"
+  | "likes"
+  | "follows"
+  | "reports"
+  | "workouts"
+  | "plans"
+  | "plans_adopted"
+  | "deleted_accounts";
+
+export type StatsOverview = {
+  accounts: { total: number; active: number; suspended: number; banned: number; deleting: number };
+  /** Counter totals by event name ("published so far", deleted content included). */
+  published: Record<string, number>;
+  /** Rows present now. */
+  present: Record<string, number>;
+};
+
+function numberRecord(value: unknown): Record<string, number> {
+  const r = asRecord(value);
+  return Object.fromEntries(Object.entries(r).map(([k, v]) => [k, num(v)]));
+}
+
+export async function fetchStatsOverview(): Promise<StatsOverview> {
+  const d = asRecord(await rpc("admin_stats_overview", {}));
+  const a = asRecord(d.accounts);
+  return {
+    accounts: { total: num(a.total), active: num(a.active), suspended: num(a.suspended), banned: num(a.banned), deleting: num(a.deleting) },
+    published: numberRecord(d.published),
+    present: numberRecord(d.present),
+  };
+}
+
+export type SeriesPoint = { bucket: string; value: number };
+
+export async function fetchStatsSeries(metric: StatsMetric, from: string, to: string, bucket: StatsBucket): Promise<SeriesPoint[]> {
+  return asArray(await rpc("admin_stats_timeseries", { p_metric: metric, p_from: from, p_to: to, p_bucket: bucket })).map((value) => {
+    const r = asRecord(value);
+    return { bucket: str(r.bucket), value: num(r.value) };
+  });
+}
+
+export type PeriodRow = { metric: string; current: number; previous: number };
+
+export async function fetchStatsPeriod(from: string, to: string): Promise<PeriodRow[]> {
+  return asArray(await rpc("admin_stats_period", { p_from: from, p_to: to })).map((value) => {
+    const r = asRecord(value);
+    return { metric: str(r.metric), current: num(r.current_value), previous: num(r.previous_value) };
+  });
+}
+
+export type AreaRow = { area: string; event: string; total: number };
+
+export async function fetchStatsAreas(from: string, to: string): Promise<AreaRow[]> {
+  return asArray(await rpc("admin_stats_areas", { p_from: from, p_to: to })).map((value) => {
+    const r = asRecord(value);
+    return { area: str(r.area), event: str(r.event), total: num(r.total) };
+  });
+}
+
+export async function fetchStatsFirstDay(): Promise<string | null> {
+  return strOrNull(await rpc("admin_stats_first_day", {}));
+}

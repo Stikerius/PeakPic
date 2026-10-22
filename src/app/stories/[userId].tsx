@@ -40,6 +40,7 @@ import { useSession } from "@/lib/session";
 import { deleteStory, markSeen, resortStories, toggleLike, useStories } from "@/lib/storyStore";
 import { DarkScheme, makeStyles, useTheme } from "@/lib/theme";
 import type { StoryGroup } from "@/types/social";
+import { useTrackScreen } from "@/lib/usage";
 
 const STORY_DURATION_MS = 5000;
 /** Horizontal drag (fraction of the width) or velocity (px/s) that switches to another person. */
@@ -137,6 +138,7 @@ function ProgressSegment({ state, progress }: { state: "done" | "active" | "todo
 }
 
 export default function StoryViewerScreen() {
+  useTrackScreen("screen_stories");
   return (
     <DarkScheme>
       <StoryViewerScreenContent />

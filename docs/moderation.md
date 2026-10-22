@@ -56,6 +56,8 @@ Bricht etwas ab, bleibt der Status `deleting`. Die App zeigt dann „Löschung w
 
 **Was bleibt (pseudonymisiert):** `moderation_actions` (UUID, Texte zum Nutzer entfernt, Namen in Begründungen ersetzt durch „[gelöschtes Konto]“), `reports` mit `target_user_id` (Melder wird `null`, Namen in Details und Notizen ersetzt), `report_snapshots` (Kopien gemeldeter Nachrichten mit `sender_id`, Namen ersetzt), `account_deletions` (nur Hash). Entfernte Inhalte des Kontos werden mitgelöscht, auch ihre Dateien.
 
+**Neue Tabellen ohne Bezug zu Konten** (beim Löschen nichts zu tun): `usage_counters`, `usage_event_types`, `usage_meta` (nur Tagessummen pro Ereignis, keine Nutzer-ID). Das Löschen eines Kontos erhöht den Zähler `account_deleted`.
+
 **Prüfen nach dem Löschen:** `supabase/check-deleted-user.sql` durchsucht alle Tabellen nach der alten ID.
 
 ## Möglicherweise illegale Inhalte
@@ -112,6 +114,7 @@ Drei Texte: **Nutzungsbedingungen** (werden akzeptiert), **Datenschutzerklärung
 - Wird das Alter nur bestätigt (wie jetzt) oder muss es geprüft werden?
 - Kontolöschung: Ist es zulässig, `moderation_actions`, Meldungen und Kopien gemeldeter Nachrichten nach dem Löschen pseudonymisiert (UUID statt Name) aufzubewahren, und wie lange? Ist die UUID zusammen mit anderen Daten noch personenbezogen? Reicht das Entfernen von Namen in Freitexten?
 - Kontolöschung: Inhalte, die als Beweis gesichert werden müssten (Quarantäne), blockieren die Selbstlöschung. Ist das zulässig, und wie lange darf eine Löschung so aufgeschoben werden?
+- Anonyme Nutzungsstatistik: Reicht „berechtigtes Interesse“ für das Zählen von Bildschirmaufrufen ohne Personenbezug, und braucht es dafür eine Einwilligung (Standard an, abschaltbar)? Supabase führt zusätzlich eigene technische Zugriffsprotokolle (API-Anfragen); deren Inhalt und Aufbewahrung klären.
 - Supabase führt eigene Auth-Protokolle (`auth.audit_log_entries`, mit Nutzer-ID und teils E-Mail). Aufbewahrung und Löschung dort klären.
 - Erwähnungen (@username) in Texten anderer bleiben stehen. Weil der Username frei wird, kann er später auf ein neues Konto zeigen.
 

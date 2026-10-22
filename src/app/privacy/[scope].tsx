@@ -8,6 +8,7 @@ import { listFollowers, listHiddenUserIds, setHiddenFrom } from "@/lib/privacyRe
 import { makeStyles, useTheme } from "@/lib/theme";
 import type { AudienceScope } from "@/types/database";
 import type { PublicProfile } from "@/types/social";
+import { useTrackScreen } from "@/lib/usage";
 
 const TITLES: Record<AudienceScope, string> = {
   stories: "Story verbergen vor",
@@ -16,6 +17,7 @@ const TITLES: Record<AudienceScope, string> = {
 
 /** Followers with a switch each: on = this person can't see my stories / posts. */
 export default function HiddenAudienceScreen() {
+  useTrackScreen("screen_privacy");
   const { colors, scheme } = useTheme();
   const styles = useStyles();
   const params = useLocalSearchParams<{ scope: string }>();

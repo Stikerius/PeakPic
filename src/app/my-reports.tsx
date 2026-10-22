@@ -17,12 +17,14 @@ import {
   type MyReport,
 } from "@/lib/reportRepo";
 import { makeStyles } from "@/lib/theme";
+import { useTrackScreen } from "@/lib/usage";
 
 function reasonLabel(report: MyReport): string {
   return REPORT_REASONS.find((r) => r.value === report.reason)?.label ?? report.reason;
 }
 
 export default function MyReportsScreen() {
+  useTrackScreen("screen_my_reports");
   const styles = useStyles();
   const [reports, setReports] = useState<MyReport[] | null>(null);
   const [failed, setFailed] = useState(false);

@@ -20,11 +20,13 @@ import { isWorkoutLinkExpired } from "@/lib/workoutLinks";
 import { answerWorkoutLink, getMyWorkoutLink } from "@/lib/workoutLinkRepo";
 import type { WorkoutShareStatus } from "@/types/database";
 import type { FeedPost } from "@/types/social";
+import { useTrackScreen } from "@/lib/usage";
 
 type LoadState = { status: "loading" } | { status: "missing" } | { status: "error" } | { status: "ready"; post: FeedPost };
 
 /** A single post, e.g. opened from a shared post in a chat. */
 export default function PostScreen() {
+  useTrackScreen("screen_post");
   const { colors } = useTheme();
   const styles = useStyles();
   const { postId } = useLocalSearchParams<{ postId: string }>();

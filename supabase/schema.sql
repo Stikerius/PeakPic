@@ -4978,3 +4978,393 @@ revoke all on function public.account_deletion_blocker(uuid) from public, anon, 
 revoke all on function public.redact_names(text, text[]) from public, anon, authenticated;
 revoke all on function public.finish_account_deletion(uuid, text, uuid) from public, anon, authenticated;
 grant execute on function public.finish_account_deletion(uuid, text, uuid) to service_role;
+
+-- ================================================================ usage statistics
+-- Anonymous usage numbers for the admin dashboard. Only daily counters are stored: never single
+-- events, never user ids, session or device ids, never free text.
+--   * usage_counters     (day in Europe/Zurich, event) -> count. No client access at all.
+--   * usage_event_types  fixed list of allowed events with their area; source 'server' events
+--                        are counted by triggers only, 'client' events come from track_events().
+--   * usage_meta         when the counting triggers were installed (for the one-time backfill,
+--                        supabase/backfill-usage.sql).
+-- Counters stay when content or accounts are deleted, so "published so far" stays right.
+
+create table if not exists public.usage_event_types (
+  name   text primary key check (name ~ '^[a-z][a-z0-9_]{2,47}$'),
+  area   text not null check (area in ('home', 'feed', 'stories', 'camera', 'chat', 'profile', 'plans',
+                                       'workout', 'stats', 'search', 'settings', 'notifications', 'moderation')),
+  source text not null check (source in ('server', 'client'))
+);
+
+create table if not exists public.usage_counters (
+  day   date not null,
+  event text not null references public.usage_event_types (name) on delete cascade,
+  count bigint not null default 0 check (count >= 0),
+  primary key (day, event)
+);
+create index if not exists usage_counters_event_day_idx on public.usage_counters (event, day);
+
+create table if not exists public.usage_meta (
+  key   text primary key check (key in ('triggers_installed_at', 'backfill_done_at')),
+  value timestamptz not null
+);
+
+alter table public.usage_event_types enable row level security;
+alter table public.usage_counters enable row level security;
+alter table public.usage_meta enable row level security;
+revoke all on public.usage_event_types, public.usage_counters, public.usage_meta from public, anon, authenticated;
+
+-- Seed: the allowed events. Later features add theirs here.
+insert into public.usage_event_types (name, area, source) values
+  ('account_created', 'profile', 'server'),
+  ('account_deleted', 'settings', 'server'),
+  ('post_created', 'feed', 'server'),
+  ('story_created', 'stories', 'server'),
+  ('highlight_created', 'stories', 'server'),
+  ('comment_created', 'feed', 'server'),
+  ('message_created', 'chat', 'server'),
+  ('like_created', 'feed', 'server'),
+  ('follow_created', 'profile', 'server'),
+  ('report_created', 'moderation', 'server'),
+  ('screen_home', 'home', 'client'),
+  ('screen_feed', 'feed', 'client'),
+  ('screen_post', 'feed', 'client'),
+  ('screen_comments', 'feed', 'client'),
+  ('screen_repost', 'feed', 'client'),
+  ('screen_share', 'feed', 'client'),
+  ('screen_post_links', 'feed', 'client'),
+  ('screen_stories', 'stories', 'client'),
+  ('screen_highlight', 'stories', 'client'),
+  ('screen_story_create', 'stories', 'client'),
+  ('screen_camera', 'camera', 'client'),
+  ('screen_post_create', 'camera', 'client'),
+  ('screen_chats', 'chat', 'client'),
+  ('screen_chat', 'chat', 'client'),
+  ('screen_chat_new', 'chat', 'client'),
+  ('screen_profile', 'profile', 'client'),
+  ('screen_user_profile', 'profile', 'client'),
+  ('screen_follows', 'profile', 'client'),
+  ('screen_profile_edit', 'profile', 'client'),
+  ('screen_day', 'profile', 'client'),
+  ('screen_plan_edit', 'plans', 'client'),
+  ('screen_search', 'search', 'client'),
+  ('screen_hashtag', 'search', 'client'),
+  ('screen_settings', 'settings', 'client'),
+  ('screen_privacy', 'settings', 'client'),
+  ('screen_blocked', 'settings', 'client'),
+  ('screen_app_icon', 'settings', 'client'),
+  ('screen_delete_account', 'settings', 'client'),
+  ('screen_notifications', 'notifications', 'client'),
+  ('screen_follow_requests', 'notifications', 'client'),
+  ('screen_my_reports', 'moderation', 'client'),
+  ('report_opened', 'moderation', 'client')
+on conflict (name) do update set area = excluded.area, source = excluded.source;
+
+insert into public.usage_meta (key, value) values ('triggers_installed_at', now())
+on conflict (key) do nothing;
+
+-- Today in Europe/Zurich (the day of a counter).
+create or replace function public.usage_today()
+returns date
+language sql stable set search_path = ''
+as $$
+  select (now() at time zone 'Europe/Zurich')::date;
+$$;
+
+-- Adds to today's counter of an event. Internal (triggers and track_events).
+create or replace function public.bump_usage(p_event text, p_count bigint default 1)
+returns void
+language sql security definer set search_path = ''
+as $$
+  insert into public.usage_counters (day, event, count)
+  values (public.usage_today(), p_event, p_count)
+  on conflict (day, event) do update set count = public.usage_counters.count + excluded.count;
+$$;
+
+-- Trigger: count the row (event name as trigger argument). Never fails the insert/delete.
+create or replace function public.on_usage_event()
+returns trigger
+language plpgsql security definer set search_path = ''
+as $$
+begin
+  -- Only messages written by people (not server-made tag cards).
+  if tg_table_name = 'messages' then
+    if new.kind is not null then
+      return null;
+    end if;
+  end if;
+  begin
+    perform public.bump_usage(tg_argv[0]);
+  exception when others then
+    null; -- statistics must never block the app
+  end;
+  return null;
+end;
+$$;
+
+do $$
+declare
+  t record;
+begin
+  for t in
+    select * from (values
+      ('profiles', 'insert', 'account_created'),
+      ('profiles', 'delete', 'account_deleted'),
+      ('posts', 'insert', 'post_created'),
+      ('stories', 'insert', 'story_created'),
+      ('highlights', 'insert', 'highlight_created'),
+      ('comments', 'insert', 'comment_created'),
+      ('messages', 'insert', 'message_created'),
+      ('post_likes', 'insert', 'like_created'),
+      ('story_likes', 'insert', 'like_created'),
+      ('comment_likes', 'insert', 'like_created'),
+      ('follows', 'insert', 'follow_created'),
+      ('reports', 'insert', 'report_created')
+    ) as v(tbl, op, event)
+  loop
+    execute format('drop trigger if exists %I on public.%I', t.tbl || '_usage_' || t.op, t.tbl);
+    execute format(
+      'create trigger %I after %s on public.%I for each row execute function public.on_usage_event(%L)',
+      t.tbl || '_usage_' || t.op, t.op, t.tbl, t.event
+    );
+  end loop;
+end;
+$$;
+
+-- Client: screen views counted locally in the app and sent in batches, e.g.
+-- {"screen_feed": 4, "screen_chat": 2}. Stores nothing about the caller. Unknown names,
+-- server events, non-integers and counts outside 1..50 are ignored; at most 40 names per call.
+create or replace function public.track_events(events jsonb)
+returns integer
+language plpgsql security definer set search_path = ''
+as $$
+declare
+  item record;
+  amount integer;
+  accepted integer := 0;
+begin
+  if auth.uid() is null or not public.is_account_active() then
+    return 0;
+  end if;
+  if events is null or jsonb_typeof(events) <> 'object' then
+    return 0;
+  end if;
+  if (select count(*) from jsonb_object_keys(events)) > 40 then
+    raise exception 'too_many_events';
+  end if;
+  for item in select key, value from jsonb_each(events) loop
+    continue when jsonb_typeof(item.value) <> 'number';
+    continue when item.value::text !~ '^[0-9]{1,2}$';
+    amount := item.value::text::integer;
+    continue when amount < 1 or amount > 50;
+    continue when not exists (
+      select 1 from public.usage_event_types t where t.name = item.key and t.source = 'client'
+    );
+    perform public.bump_usage(item.key, amount);
+    accepted := accepted + 1;
+  end loop;
+  return accepted;
+end;
+$$;
+
+-- Admin: totals. Accounts by status and "present now" come from the tables, "published so far"
+-- from the counters (they keep deleted content).
+create or replace function public.admin_stats_overview()
+returns jsonb
+language plpgsql stable security definer set search_path = ''
+as $$
+declare
+  totals jsonb;
+begin
+  perform public.require_admin();
+  select coalesce(jsonb_object_agg(c.event, c.total), '{}'::jsonb) into totals
+  from (select event, sum(count) as total from public.usage_counters group by event) c;
+  return jsonb_build_object(
+    'accounts', jsonb_build_object(
+      'total', (select count(*) from public.profiles),
+      'active', (select count(*) from public.profiles p where public.account_is_active(p.id)),
+      'suspended', (select count(*) from public.profiles p
+                    where p.account_status = 'suspended' and not public.account_is_active(p.id)),
+      'banned', (select count(*) from public.profiles p where p.account_status = 'banned'),
+      'deleting', (select count(*) from public.profiles p where p.account_status = 'deleting')
+    ),
+    'published', totals,
+    'present', jsonb_build_object(
+      'posts', (select count(*) from public.posts),
+      'stories', (select count(*) from public.stories),
+      'highlights', (select count(*) from public.highlights),
+      'comments', (select count(*) from public.comments),
+      'messages', (select count(*) from public.messages m where m.kind is null),
+      'likes', (select count(*) from public.post_likes) + (select count(*) from public.story_likes)
+               + (select count(*) from public.comment_likes),
+      'plans', (select count(*) from public.training_plans)
+    )
+  );
+end;
+$$;
+
+-- Which counter event belongs to a metric of the dashboard.
+create or replace function public.usage_metric_event(p_metric text)
+returns text
+language sql immutable set search_path = ''
+as $$
+  select case p_metric
+    when 'accounts' then 'account_created'
+    when 'deleted_accounts' then 'account_deleted'
+    when 'posts' then 'post_created'
+    when 'stories' then 'story_created'
+    when 'highlights' then 'highlight_created'
+    when 'comments' then 'comment_created'
+    when 'messages' then 'message_created'
+    when 'likes' then 'like_created'
+    when 'follows' then 'follow_created'
+    when 'reports' then 'report_created'
+    when 'workouts' then 'workout_completed'
+    when 'plans' then 'plan_created'
+    when 'plans_adopted' then 'plan_adopted'
+    else null
+  end;
+$$;
+
+-- Days on which an account created something (posts, stories, comments, messages, likes,
+-- follows). An approximation of "active accounts": reading alone is not visible here.
+create or replace function public.usage_active_days(p_from date, p_to date)
+returns table (day date, user_id uuid)
+language sql stable security definer set search_path = ''
+as $$
+  select distinct (x.created_at at time zone 'Europe/Zurich')::date, x.user_id
+  from (
+    select user_id, created_at from public.posts
+    union all select user_id, created_at from public.stories
+    union all select user_id, created_at from public.comments
+    union all select sender_id, created_at from public.messages where kind is null
+    union all select user_id, created_at from public.post_likes
+    union all select user_id, created_at from public.story_likes
+    union all select user_id, created_at from public.comment_likes
+    union all select follower_id, created_at from public.follows
+  ) x
+  where x.created_at >= (p_from::timestamp at time zone 'Europe/Zurich')
+    and x.created_at < ((p_to + 1)::timestamp at time zone 'Europe/Zurich');
+$$;
+
+-- Time series of one metric, bucketed by day / week / month / year (gaps filled with 0).
+create or replace function public.admin_stats_timeseries(p_metric text, p_from date, p_to date, p_bucket text)
+returns table (bucket date, value bigint)
+language plpgsql stable security definer set search_path = ''
+as $$
+declare
+  event_name text := public.usage_metric_event(p_metric);
+begin
+  perform public.require_admin();
+  if p_bucket not in ('day', 'week', 'month', 'year') then
+    raise exception 'invalid_bucket';
+  end if;
+  if p_from is null or p_to is null or p_from > p_to or p_to - p_from > 3700 then
+    raise exception 'invalid_range';
+  end if;
+  if p_metric <> 'active_accounts' and event_name is null then
+    raise exception 'invalid_metric';
+  end if;
+  return query
+  with buckets as (
+    select distinct date_trunc(p_bucket, d)::date as b
+    from generate_series(p_from::timestamp, p_to::timestamp, interval '1 day') d
+  ),
+  vals as (
+    select date_trunc(p_bucket, c.day::timestamp)::date as b, sum(c.count)::bigint as v
+    from public.usage_counters c
+    where p_metric <> 'active_accounts' and c.event = event_name and c.day between p_from and p_to
+    group by 1
+    union all
+    select date_trunc(p_bucket, a.day::timestamp)::date, count(distinct a.user_id)::bigint
+    from public.usage_active_days(p_from, p_to) a
+    where p_metric = 'active_accounts'
+    group by 1
+  )
+  select buckets.b, coalesce(sum(vals.v), 0)::bigint
+  from buckets left join vals on vals.b = buckets.b
+  group by buckets.b
+  order by buckets.b;
+end;
+$$;
+
+-- Sums of the period and of the period just before it (same length), for the cards.
+create or replace function public.admin_stats_period(p_from date, p_to date)
+returns table (metric text, current_value bigint, previous_value bigint)
+language plpgsql stable security definer set search_path = ''
+as $$
+declare
+  span integer;
+begin
+  perform public.require_admin();
+  if p_from is null or p_to is null or p_from > p_to or p_to - p_from > 3700 then
+    raise exception 'invalid_range';
+  end if;
+  span := p_to - p_from + 1;
+  return query
+  select m.metric,
+    coalesce((select sum(c.count) from public.usage_counters c
+              where c.event = public.usage_metric_event(m.metric) and c.day between p_from and p_to), 0)::bigint,
+    coalesce((select sum(c.count) from public.usage_counters c
+              where c.event = public.usage_metric_event(m.metric) and c.day between p_from - span and p_from - 1), 0)::bigint
+  from unnest(array['accounts', 'deleted_accounts', 'posts', 'stories', 'highlights', 'comments', 'messages',
+                    'likes', 'follows', 'reports', 'workouts', 'plans', 'plans_adopted']) as m(metric)
+  union all
+  select 'active_accounts',
+    (select count(distinct a.user_id) from public.usage_active_days(p_from, p_to) a)::bigint,
+    (select count(distinct a.user_id) from public.usage_active_days(p_from - span, p_from - 1) a)::bigint;
+end;
+$$;
+
+-- Use by area and the top screens (client events only).
+create or replace function public.admin_stats_areas(p_from date, p_to date)
+returns table (area text, event text, total bigint)
+language plpgsql stable security definer set search_path = ''
+as $$
+begin
+  perform public.require_admin();
+  if p_from is null or p_to is null or p_from > p_to or p_to - p_from > 3700 then
+    raise exception 'invalid_range';
+  end if;
+  return query
+  select t.area, t.name, sum(c.count)::bigint
+  from public.usage_counters c
+  join public.usage_event_types t on t.name = c.event and t.source = 'client'
+  where c.day between p_from and p_to
+  group by t.area, t.name
+  order by 3 desc;
+end;
+$$;
+
+-- First day with any counter (for the period "Alles").
+create or replace function public.admin_stats_first_day()
+returns date
+language plpgsql stable security definer set search_path = ''
+as $$
+begin
+  perform public.require_admin();
+  return (select min(c.day) from public.usage_counters c);
+end;
+$$;
+
+revoke all on function public.usage_today() from public, anon, authenticated;
+revoke all on function public.bump_usage(text, bigint) from public, anon, authenticated;
+revoke all on function public.on_usage_event() from public, anon, authenticated;
+revoke all on function public.usage_metric_event(text) from public, anon, authenticated;
+revoke all on function public.usage_active_days(date, date) from public, anon, authenticated;
+revoke all on function public.track_events(jsonb) from public, anon;
+grant execute on function public.track_events(jsonb) to authenticated;
+do $$
+declare
+  f text;
+begin
+  foreach f in array array[
+    'public.admin_stats_overview()', 'public.admin_stats_timeseries(text, date, date, text)',
+    'public.admin_stats_period(date, date)', 'public.admin_stats_areas(date, date)',
+    'public.admin_stats_first_day()'
+  ] loop
+    execute format('revoke all on function %s from public, anon', f);
+    execute format('grant execute on function %s to authenticated', f);
+  end loop;
+end;
+$$;

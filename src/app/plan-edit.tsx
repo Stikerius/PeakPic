@@ -36,6 +36,7 @@ import {
   type TrainingPlan,
 } from "@/lib/planRepo";
 import { makeStyles, useTheme } from "@/lib/theme";
+import { useTrackScreen } from "@/lib/usage";
 
 /** A draft unit plus a key that stays stable while reordering. */
 type DraftRow = PlanDayDraft & { key: string };
@@ -72,6 +73,7 @@ function IconButton({
 }
 
 export default function PlanEditScreen() {
+  useTrackScreen("screen_plan_edit");
   const { colors } = useTheme();
   const styles = useStyles();
   const [plan, setPlan] = useState<TrainingPlan | null | undefined>(undefined);

@@ -29,12 +29,14 @@ import {
 } from "@/lib/highlightRepo";
 import { makeStyles, useTheme } from "@/lib/theme";
 import type { Story } from "@/types/social";
+import { useTrackScreen } from "@/lib/usage";
 
 const COLUMNS = 3;
 const GAP = spacing.sm;
 
 /** Edit one of my highlights: name, cover, which stories it contains, or delete it. */
 export default function HighlightEditScreen() {
+  useTrackScreen("screen_highlight");
   const { colors, scheme } = useTheme();
   const styles = useStyles();
   const { highlightId } = useLocalSearchParams<{ highlightId: string }>();

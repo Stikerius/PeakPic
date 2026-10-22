@@ -38,6 +38,7 @@ import {
   type PostThumbnail,
   type UserProfileSummary,
 } from "@/lib/userProfileRepo";
+import { useTrackScreen } from "@/lib/usage";
 
 const AVATAR_SIZE = 88;
 
@@ -76,6 +77,7 @@ function Stat({ value, label, icon, onPress }: StatProps) {
 }
 
 export default function UserProfileScreen() {
+  useTrackScreen("screen_user_profile");
   const { colors } = useTheme();
   const styles = useStyles();
   const { userId } = useLocalSearchParams<{ userId: string }>();

@@ -9,6 +9,7 @@ import { clearLocalData, deleteMyAccount, DELETION_NOT_ALLOWED, reauthenticate }
 import { useAccountStatus } from "@/lib/accountStatus";
 import { getMyProfile } from "@/lib/profileRepo";
 import { makeStyles } from "@/lib/theme";
+import { useTrackScreen } from "@/lib/usage";
 
 const DELETED = [
   "Profil, Username (wird wieder frei) und Anzeigename",
@@ -46,6 +47,7 @@ function Bullets({ items }: { items: string[] }) {
 
 /** "Konto löschen": final and immediate. Password again plus the own username as confirmation. */
 export default function DeleteAccountScreen() {
+  useTrackScreen("screen_delete_account");
   const styles = useStyles();
   const { refresh } = useAccountStatus();
   const [username, setUsername] = useState<string | null>(null);

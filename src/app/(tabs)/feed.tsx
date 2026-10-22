@@ -23,6 +23,7 @@ import { useFeed } from "@/hooks/use-feed";
 import { refreshStories } from "@/lib/storyStore";
 import { makeStyles, useTheme } from "@/lib/theme";
 import type { FeedPost } from "@/types/social";
+import { useTrackScreen } from "@/lib/usage";
 
 /** The bits of the tab navigator this screen needs; expo-router doesn't export its tab types. */
 type TabScreenNavigation = {
@@ -31,6 +32,7 @@ type TabScreenNavigation = {
 };
 
 export default function FeedScreen() {
+  useTrackScreen("screen_feed");
   const { colors } = useTheme();
   const styles = useStyles();
   const { posts, status, error, hasMore, refresh, loadMore, toggleLike, dismissError } = useFeed();
