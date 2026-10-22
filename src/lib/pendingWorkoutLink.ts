@@ -10,6 +10,11 @@ export type PendingWorkoutLink = {
   workoutId: string;
   planDayId: string | null;
   shareWithPost: boolean;
+  /**
+   * The training passed the plausibility rules. If not, its photos don't count for the streak
+   * either (post_counts_as_workout) and don't take the day's slideshow.
+   */
+  countsForStreak: boolean;
   createdAt: number;
 };
 

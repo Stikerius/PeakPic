@@ -87,14 +87,23 @@ export default function WorkoutFinishScreen() {
         <Text style={styles.text}>
           {saved.countsForStreak ? "Es zählt für deinen Streak." : saved.reason !== null ? reasonText(saved.reason) : "Es zählt nicht für deinen Streak."}
         </Text>
-        <Text style={styles.muted}>Du kannst optional Fotos dazu posten, wie bei einem normalen Beitrag.</Text>
+        <Text style={styles.muted}>
+          Du kannst optional Fotos dazu posten, wie bei einem normalen Beitrag.
+          {saved.countsForStreak ? "" : " Fotos zu diesem Training zählen ebenfalls nicht für den Streak."}
+        </Text>
         <View style={styles.actions}>
           <Button
             label="Fotos hinzufügen"
             icon="camera-outline"
             variant="secondary"
             onPress={() => {
-              setPendingWorkoutLink({ workoutId: saved.id, planDayId: saved.planDayId, shareWithPost: false, createdAt: Date.now() });
+              setPendingWorkoutLink({
+                workoutId: saved.id,
+                planDayId: saved.planDayId,
+                shareWithPost: false,
+                countsForStreak: saved.countsForStreak,
+                createdAt: Date.now(),
+              });
               track("workout_photo_added");
               router.dismissAll();
               router.navigate("/camera");

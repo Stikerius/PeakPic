@@ -1411,14 +1411,23 @@ $$;
 
 -- ---------------------------------------------------------------- workouts
 -- THE place that decides whether a post counts as a training proof (for its owner and for
--- linked people). Every post that wasn't removed by moderation counts; a later automatic
--- check plugs in here.
+-- linked people). Every post that wasn't removed by moderation counts, except the photos of a
+-- recorded training that didn't pass the plausibility rules (posted after that training was
+-- saved; an older slideshow they were added to keeps counting). A later automatic check plugs
+-- in here.
 create or replace function public.post_counts_as_workout(post uuid)
 returns boolean
 language sql stable security definer set search_path = ''
 as $$
   -- Removed or quarantined posts don't count.
-  select exists (select 1 from public.posts p where p.id = post and p.moderation_state is null);
+  select exists (
+    select 1 from public.posts p
+    where p.id = post and p.moderation_state is null
+      and not exists (
+        select 1 from public.workouts w
+        where w.post_id = p.id and not w.counts_for_streak and w.created_at <= p.created_at
+      )
+  );
 $$;
 
 -- Workout links can be answered until the end of the day after the workout (Europe/Zurich).

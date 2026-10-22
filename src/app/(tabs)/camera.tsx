@@ -104,7 +104,7 @@ function CameraScreenContent() {
   }
 
   /** "Nein" to the feed: store the photo as today's proof for streak and calendar only. */
-  async function saveProofOnly(photoUri: string, planDayId: string | null) {
+  async function saveProofOnly(photoUri: string, planDayId: string | null, isDayPost = true) {
     setSaving(true);
     setSaveError(null);
     try {
@@ -112,7 +112,7 @@ function CameraScreenContent() {
         photos: [{ existing: null, originalUri: photoUri, renderedUri: null, edits: null, changed: true }],
         caption: "",
         inFeed: false,
-        isDayPost: true,
+        isDayPost,
         showInProfile: true,
         tagIds: [],
         planDayId,
@@ -148,6 +148,21 @@ function CameraScreenContent() {
       return;
     } finally {
       setSaving(false);
+    }
+
+    // Photos of a training that doesn't count: they don't count either, and they don't take
+    // the day's slideshow (a later real proof of the day still can).
+    if (workoutLink !== null && !workoutLink.countsForStreak) {
+      Alert.alert(
+        "Auch im Feed veröffentlichen?",
+        "Dein Training zählt nicht für den Streak, und die Fotos dazu auch nicht.",
+        [
+          { text: "Nein, nur beim Training speichern", onPress: () => void saveProofOnly(photoUri, planDayId, false) },
+          { text: "Ja, bearbeiten und posten", onPress: () => openEditor(photoUri, "single", planDayId) },
+          { text: "Abbrechen", style: "cancel" },
+        ],
+      );
+      return;
     }
 
     if (dayPostId === null) {
