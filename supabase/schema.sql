@@ -54,6 +54,7 @@
 --                   by save_workout() (validated, atomic); counts_for_streak is decided there
 --                   (plausibility rules, workout_rules()) and never written by clients. A counting
 --                   workout is a training proof like a post, with or without a photo.
+--                   Readable per can_view_workout (visibility, linked post with share_with_post).
 --   * plan on posts posts.plan_day_id: a unit of the poster's own plan (checked by a trigger,
 --                   changeable only while the workout day is today or yesterday); title,
 --                   position and plan length are copied onto the post so the label survives
@@ -1412,9 +1413,10 @@ $$;
 -- ---------------------------------------------------------------- workouts
 -- THE place that decides whether a post counts as a training proof (for its owner and for
 -- linked people). Every post that wasn't removed by moderation counts, except the photos of a
--- recorded training that didn't pass the plausibility rules (posted after that training was
--- saved; an older slideshow they were added to keeps counting). A later automatic check plugs
--- in here.
+-- recorded training (posted after that training was saved): the training itself is the proof
+-- for its day, and its photos never make another day (or a training that didn't pass the
+-- plausibility rules) count. An older slideshow they were added to keeps counting. A later
+-- automatic check plugs in here.
 create or replace function public.post_counts_as_workout(post uuid)
 returns boolean
 language sql stable security definer set search_path = ''
@@ -1425,7 +1427,7 @@ as $$
     where p.id = post and p.moderation_state is null
       and not exists (
         select 1 from public.workouts w
-        where w.post_id = p.id and not w.counts_for_streak and w.created_at <= p.created_at
+        where w.post_id = p.id and w.created_at <= p.created_at
       )
   );
 $$;
@@ -2537,8 +2539,66 @@ begin
   if not exists (select 1 from public.posts p where p.id = p_post_id and p.user_id = auth.uid()) then
     raise exception 'post_not_found';
   end if;
+  if exists (
+    select 1 from public.workouts w
+    where w.id = p_workout_id and w.post_id is not null and w.post_id <> p_post_id
+  ) then
+    raise exception 'workout_has_post';
+  end if;
   update public.workouts
   set post_id = p_post_id, share_with_post = coalesce(p_share, false)
+  where id = p_workout_id and user_id = auth.uid() and moderation_state is null;
+  if not found then
+    raise exception 'workout_not_found';
+  end if;
+end;
+$$;
+
+-- Who may see a recorded training (report, sets, times): the owner always. Others only when it
+-- isn't removed, the owner's account is visible to them (active, no block) and they aren't
+-- hidden from the owner's posts; then 'followers' for confirmed followers, 'public' for
+-- everyone signed in while the owner's profile is public (otherwise followers only), and
+-- anyone who may see the linked post when "Trainingsbericht beim Beitrag zeigen" is on.
+create or replace function public.can_view_workout(workout uuid)
+returns boolean
+language sql stable security definer set search_path = ''
+as $$
+  select exists (
+    select 1 from public.workouts w
+    join public.profiles owner_profile on owner_profile.id = w.user_id
+    where w.id = workout
+      and w.moderation_state is null
+      and (
+        w.user_id = (select auth.uid())
+        or (
+          public.can_see_account(w.user_id)
+          and not public.is_hidden_from_me(w.user_id, 'posts')
+          and (
+            (w.visibility = 'followers' and public.is_following(w.user_id))
+            or (w.visibility = 'public' and (public.is_following(w.user_id) or not owner_profile.is_private))
+            or (w.share_with_post and w.post_id is not null and public.can_view_post(w.post_id))
+          )
+        )
+      )
+  );
+$$;
+
+-- Changes who sees one of my activities.
+create or replace function public.set_workout_visibility(p_workout_id uuid, p_visibility text)
+returns void
+language plpgsql security definer set search_path = ''
+as $$
+begin
+  if auth.uid() is null then
+    raise exception 'not authenticated';
+  end if;
+  if not public.is_account_active() then
+    raise exception 'account_inactive';
+  end if;
+  if p_visibility not in ('private', 'followers', 'public') then
+    raise exception 'invalid_visibility';
+  end if;
+  update public.workouts set visibility = p_visibility
   where id = p_workout_id and user_id = auth.uid() and moderation_state is null;
   if not found then
     raise exception 'workout_not_found';
@@ -2998,7 +3058,7 @@ begin
 end;
 $$;
 
--- Reports a post, story, comment, profile or plan. Only what the caller may see, never their own,
+-- Reports a post, story, comment, profile, plan or activity (workout). Only what the caller may see, never their own,
 -- one report per target. The owner of the target is looked up here, not taken from the app.
 create or replace function public.report_content(p_target_type text, p_target_id uuid, p_reason text, p_details text)
 returns uuid
@@ -3030,6 +3090,11 @@ begin
         raise exception 'report_target_not_found';
       end if;
       select tp.user_id into target_owner from public.training_plans tp where tp.id = p_target_id;
+    when 'workout' then
+      if not public.can_view_workout(p_target_id) then
+        raise exception 'report_target_not_found';
+      end if;
+      select w.user_id into target_owner from public.workouts w where w.id = p_target_id;
     else
       -- Messages go through report_message(); there are no sounds yet.
       raise exception 'report_type_not_supported';
@@ -3331,6 +3396,7 @@ begin
     when 'comment' then select c.user_id into target_owner from public.comments c where c.id = p_id;
     when 'message' then select m.sender_id into target_owner from public.messages m where m.id = p_id;
     when 'plan' then select tp.user_id into target_owner from public.training_plans tp where tp.id = p_id;
+    when 'workout' then select w.user_id into target_owner from public.workouts w where w.id = p_id;
     else raise exception 'unsupported_target_type';
   end case;
   if target_owner is null then
@@ -3353,6 +3419,7 @@ begin
     when 'comment' then select c.moderation_state into state from public.comments c where c.id = p_id;
     when 'message' then select m.moderation_state into state from public.messages m where m.id = p_id;
     when 'plan' then select tp.moderation_state into state from public.training_plans tp where tp.id = p_id;
+    when 'workout' then select w.moderation_state into state from public.workouts w where w.id = p_id;
     else raise exception 'unsupported_target_type';
   end case;
   return state;
@@ -3380,6 +3447,8 @@ begin
       update public.messages set moderation_state = p_state, removed_at = removed, removed_by = remover, removed_reason = why where id = p_id;
     when 'plan' then
       update public.training_plans set moderation_state = p_state, removed_at = removed, removed_by = remover, removed_reason = why where id = p_id;
+    when 'workout' then
+      update public.workouts set moderation_state = p_state, removed_at = removed, removed_by = remover, removed_reason = why where id = p_id;
     else raise exception 'unsupported_target_type';
   end case;
 end;
@@ -3671,7 +3740,7 @@ begin
     raise exception 'report_not_found';
   end if;
 
-  if report.target_type in ('post', 'story', 'comment', 'message', 'plan')
+  if report.target_type in ('post', 'story', 'comment', 'message', 'plan', 'workout')
     and public.moderation_state_of(report.target_type, report.target_id) = 'quarantined'
     and not public.is_admin() then
     hidden := true;
@@ -3725,6 +3794,18 @@ begin
         ) order by d.position)
         from public.plan_days d where d.plan_id = tp.id), '[]'::jsonb)
     ) into content from public.training_plans tp where tp.id = report.target_id;
+  elsif report.target_type = 'workout' then
+    select jsonb_build_object(
+      'id', w.id, 'title', w.title, 'plan_day_title', w.plan_day_title, 'note', w.note,
+      'workout_date', w.workout_date, 'active_seconds', w.active_seconds, 'visibility', w.visibility,
+      'post_id', w.post_id, 'moderation_state', w.moderation_state, 'removed_reason', w.removed_reason,
+      'exercises', coalesce((
+        select jsonb_agg(jsonb_build_object(
+          'name', e.name,
+          'sets', (select count(*) from public.workout_sets s where s.workout_exercise_id = e.id)
+        ) order by e.position)
+        from public.workout_exercises e where e.workout_id = w.id), '[]'::jsonb)
+    ) into content from public.workouts w where w.id = report.target_id;
   end if;
 
   if report.status = 'open' then
@@ -3881,6 +3962,7 @@ begin
                  + (select count(*) from public.comments c where c.moderation_state = 'quarantined')
                  + (select count(*) from public.messages m where m.moderation_state = 'quarantined')
                  + (select count(*) from public.training_plans tp where tp.moderation_state = 'quarantined')
+                 + (select count(*) from public.workouts w where w.moderation_state = 'quarantined')
   );
 end;
 $$;
@@ -4759,6 +4841,10 @@ revoke all on function public.duplicate_plan(uuid) from public, anon;
 grant execute on function public.duplicate_plan(uuid) to authenticated;
 revoke all on function public.delete_plan(uuid) from public, anon;
 grant execute on function public.delete_plan(uuid) to authenticated;
+revoke all on function public.can_view_workout(uuid) from public, anon;
+grant execute on function public.can_view_workout(uuid) to authenticated;
+revoke all on function public.set_workout_visibility(uuid, text) from public, anon;
+grant execute on function public.set_workout_visibility(uuid, text) to authenticated;
 revoke all on function public.save_workout(jsonb) from public, anon;
 grant execute on function public.save_workout(jsonb) to authenticated;
 revoke all on function public.link_workout_post(uuid, uuid, boolean) from public, anon;
@@ -5509,10 +5595,30 @@ create policy "plan_exercises: read with plan" on public.plan_exercises
     select 1 from public.plan_days d where d.id = plan_day_id and public.can_view_plan(d.plan_id)
   ));
 
--- workouts: the owner reads and deletes (the linked post stays). Others: see can_view_workout.
+-- workouts: the owner reads and deletes (the linked post stays); others per can_view_workout,
+-- checked on the row's own columns like the posts policy.
 drop policy if exists "workouts: owner reads" on public.workouts;
-create policy "workouts: owner reads" on public.workouts
-  for select to authenticated using (user_id = (select auth.uid()) and moderation_state is null);
+drop policy if exists "workouts: read" on public.workouts;
+create policy "workouts: read" on public.workouts
+  for select to authenticated
+  using (
+    moderation_state is null
+    and (
+      user_id = (select auth.uid())
+      or (
+        public.can_see_account(user_id)
+        and not public.is_hidden_from_me(user_id, 'posts')
+        and (
+          (visibility = 'followers' and public.is_following(user_id))
+          or (visibility = 'public' and (
+            public.is_following(user_id)
+            or exists (select 1 from public.profiles pr where pr.id = user_id and not pr.is_private)
+          ))
+          or (share_with_post and post_id is not null and public.can_view_post(post_id))
+        )
+      )
+    )
+  );
 
 drop policy if exists "workouts: owner deletes" on public.workouts;
 create policy "workouts: owner deletes" on public.workouts
@@ -5522,18 +5628,14 @@ create policy "workouts: owner deletes" on public.workouts
 drop policy if exists "workout_exercises: read with workout" on public.workout_exercises;
 create policy "workout_exercises: read with workout" on public.workout_exercises
   for select to authenticated
-  using (exists (
-    select 1 from public.workouts w
-    where w.id = workout_id and w.user_id = (select auth.uid()) and w.moderation_state is null
-  ));
+  using (public.can_view_workout(workout_id));
 
 drop policy if exists "workout_sets: read with exercise" on public.workout_sets;
 create policy "workout_sets: read with exercise" on public.workout_sets
   for select to authenticated
   using (exists (
     select 1 from public.workout_exercises we
-    join public.workouts w on w.id = we.workout_id
-    where we.id = workout_exercise_id and w.user_id = (select auth.uid()) and w.moderation_state is null
+    where we.id = workout_exercise_id and public.can_view_workout(we.workout_id)
   ));
 
 drop policy if exists "planned_rest_uses: owner reads" on public.planned_rest_uses;
@@ -5723,7 +5825,8 @@ begin
     or exists (select 1 from public.stories x where x.user_id = p_user and x.moderation_state = 'quarantined')
     or exists (select 1 from public.comments x where x.user_id = p_user and x.moderation_state = 'quarantined')
     or exists (select 1 from public.messages x where x.sender_id = p_user and x.moderation_state = 'quarantined')
-    or exists (select 1 from public.training_plans x where x.user_id = p_user and x.moderation_state = 'quarantined') then
+    or exists (select 1 from public.training_plans x where x.user_id = p_user and x.moderation_state = 'quarantined')
+    or exists (select 1 from public.workouts x where x.user_id = p_user and x.moderation_state = 'quarantined') then
     return 'quarantined';
   end if;
   return null;
@@ -5960,6 +6063,10 @@ insert into public.usage_event_types (name, area, source) values
   ('workout_started', 'workout', 'client'),
   ('workout_discarded', 'workout', 'client'),
   ('workout_photo_added', 'workout', 'client'),
+  ('screen_workout_report', 'workout', 'client'),
+  ('screen_activities', 'workout', 'client'),
+  ('activity_visibility_changed', 'workout', 'client'),
+  ('activity_deleted', 'workout', 'client'),
   ('screen_search', 'search', 'client'),
   ('screen_hashtag', 'search', 'client'),
   ('screen_settings', 'settings', 'client'),

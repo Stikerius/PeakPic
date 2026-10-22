@@ -31,6 +31,7 @@ import {
 } from "@/lib/streak";
 import { adoptPlan, fetchPlansOf, type TrainingPlan } from "@/lib/planRepo";
 import { useSession } from "@/lib/session";
+import { fetchWorkoutsOf } from "@/lib/trainingRepo";
 import { makeStyles, useTheme } from "@/lib/theme";
 import {
   fetchProfileGrid,
@@ -91,6 +92,8 @@ export default function UserProfileScreen() {
   // Plans have their own visibility (followers / everyone), independent of posts and stories.
   const [plans, setPlans] = useState<TrainingPlan[]>([]);
   const [adoptingId, setAdoptingId] = useState<string | null>(null);
+  // Whether I may see at least one activity (the database decides).
+  const [hasActivities, setHasActivities] = useState(false);
   const myId = useSession().session?.user.id ?? null;
 
   const today = toDayKey(new Date());
@@ -101,6 +104,9 @@ export default function UserProfileScreen() {
     fetchPlansOf(userId)
       .then(setPlans)
       .catch(() => setPlans([]));
+    fetchWorkoutsOf(userId, 1)
+      .then((items) => setHasActivities(items.length > 0))
+      .catch(() => setHasActivities(false));
     try {
       const result = await fetchUserProfile(userId);
       setSummary(result);
@@ -303,6 +309,16 @@ export default function UserProfileScreen() {
 
       {error !== null && <Text style={styles.error}>{error}</Text>}
 
+      {hasActivities && (
+        <View style={styles.plans}>
+          <Button
+            label="Aktivitäten"
+            icon="barbell-outline"
+            variant="secondary"
+            onPress={() => router.push({ pathname: "/activities/[userId]", params: { userId } })}
+          />
+        </View>
+      )}
       {plans.length > 0 && (
         <View style={styles.plans}>
           {plans.map((plan) => (

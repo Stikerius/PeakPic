@@ -75,6 +75,12 @@ Bricht etwas ab, bleibt der Status `deleting`. Die App zeigt dann „Löschung w
 - Pläne sind meldbar (`target_type = 'plan'`). Die Moderation kann sie entfernen oder in Quarantäne setzen: dann sieht und übernimmt sie niemand mehr, der Besitzer behält seinen Plan mit einem Hinweis.
 - Übernehmen (`adopt_plan`) erzeugt eine private Kopie ohne Zielgewichte und Notizen. Höchstens 10 Übernahmen pro Tag und 10 eigene Pläne. Der Ersteller bekommt (abschaltbar) eine Mitteilung pro Übernehmer und Plan, aber keine Liste der Übernehmer. `plan_adoptions` ist für Clients nicht lesbar.
 
+## Aktivitäten (aufgezeichnete Trainings)
+
+- Sichtbarkeit pro Aktivität: „Nur ich“ (Standard, einstellbar unter Einstellungen → Training), „Follower“ oder „Alle“ (nur bei öffentlichem Profil). Zusätzlich sieht den Trainingsbericht, wer den verknüpften Beitrag sehen darf, wenn „Trainingsbericht beim Beitrag zeigen“ an ist (`can_view_workout`). Gesperrte, blockierte und verborgene Personen sehen nichts.
+- Aktivitäten sind meldbar (`target_type = 'workout'`) und können entfernt oder in Quarantäne gesetzt werden. Entfernte Aktivitäten zählen nicht mehr für den Streak und sind auch für den Besitzer nicht mehr sichtbar.
+- Fotos zu einem Training zählen nie selbst als Nachweis; der Nachweis ist das Training (mit den Plausibilitätsregeln). So machen nachträgliche Fotos keinen anderen Tag und kein unplausibles Training zum Trainingstag.
+
 ## Möglicherweise illegale Inhalte
 
 - **Quarantäne** (`mod_quarantine_content`): Inhalt sofort für alle ausser Admins verbergen. Nichts löschen, keine Dateien entfernen.

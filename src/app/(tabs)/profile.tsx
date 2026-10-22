@@ -46,6 +46,7 @@ export default function ProfileScreen() {
   const styles = useStyles();
   // Session can briefly be null while signing out, before the route guard unmounts us.
   const email = useSession().session?.user.email;
+  const myId = useSession().session?.user.id ?? null;
   const { days, restDays } = useWorkoutDays();
   const [planProofs, setPlanProofs] = useState<PlanProof[]>([]);
   const [profile, setProfile] = useState<Profile | null>(null);
@@ -246,6 +247,21 @@ export default function ProfileScreen() {
         </View>
       </View>
 
+      {myId !== null && (
+        <View style={styles.padded}>
+          <Pressable
+            onPress={() => router.push({ pathname: "/activities/[userId]", params: { userId: myId } })}
+            accessibilityRole="button"
+            accessibilityLabel="Aktivitäten: aufgezeichnete Trainings"
+            style={({ pressed }) => [styles.activitiesRow, pressed && styles.activitiesPressed]}
+          >
+            <Ionicons name="barbell-outline" size={20} color={colors.textSecondary} />
+            <Text style={styles.activitiesText}>Aktivitäten</Text>
+            <Ionicons name="chevron-forward" size={18} color={colors.textTertiary} />
+          </Pressable>
+        </View>
+      )}
+
       <Text style={[styles.sectionTitle, styles.padded]}>Beiträge</Text>
       {posts === null ? (
         <ActivityIndicator color={colors.accent} />
@@ -265,6 +281,25 @@ const useStyles = makeStyles(({ colors }) =>
     content: {
       paddingVertical: spacing.md,
       gap: spacing.lg,
+    },
+    activitiesRow: {
+      minHeight: 48,
+      flexDirection: "row",
+      alignItems: "center",
+      gap: spacing.ms,
+      paddingHorizontal: spacing.md,
+      borderRadius: radius.md,
+      borderWidth: StyleSheet.hairlineWidth,
+      borderColor: colors.border,
+      backgroundColor: colors.surface,
+    },
+    activitiesPressed: {
+      backgroundColor: colors.surfaceRaised,
+    },
+    activitiesText: {
+      ...typography.body,
+      flex: 1,
+      color: colors.text,
     },
     padded: {
       paddingHorizontal: spacing.md,

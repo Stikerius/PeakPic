@@ -694,6 +694,7 @@ export type Database = {
       };
       save_workout: { Args: { payload: Json }; Returns: { [key: string]: Json } };
       link_workout_post: { Args: { p_workout_id: Uuid; p_post_id: Uuid; p_share: boolean }; Returns: undefined };
+      set_workout_visibility: { Args: { p_workout_id: Uuid; p_visibility: PlanVisibility }; Returns: undefined };
     };
     Enums: Record<string, never>;
     CompositeTypes: Record<string, never>;

@@ -3,11 +3,12 @@ import { router, useFocusEffect } from "expo-router";
 import { useCallback, useEffect, useState } from "react";
 import { ActivityIndicator, Alert, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 
+import { ActivityRow } from "@/components/training/activity-row";
 import { Button } from "@/components/ui/button";
 import { Divider } from "@/components/ui/divider";
 import { SectionFooter, SectionHeader } from "@/components/ui/section-header";
 import { radius, spacing, typography } from "@/constants/theme";
-import { formatDate } from "@/lib/format";
+import { useActivityActions } from "@/hooks/use-activity-actions";
 import { randomUuid } from "@/lib/ids";
 import { fetchMyPlan, fetchPlanProofs, planEntries, type TrainingPlan } from "@/lib/planRepo";
 import { nextPlanDayIndex, nextTrainingIndex } from "@/lib/streak";
@@ -15,7 +16,7 @@ import { makeStyles, useTheme } from "@/lib/theme";
 import { clearTrainingDraft, setTrainingDraft, useTrainingDraft } from "@/lib/trainingDraft";
 import { fetchMyWorkouts, type WorkoutListItem } from "@/lib/trainingRepo";
 import { track, useTrackScreen } from "@/lib/usage";
-import { activeMs, exercisesFromPlan, formatDuration, isStale, newDraft, newExercise, reasonText } from "@/lib/workout";
+import { activeMs, exercisesFromPlan, formatDuration, isStale, newDraft, newExercise } from "@/lib/workout";
 
 /** Starts a training: a day of the active plan (with its exercises) or a free training. */
 function startTraining(plan: TrainingPlan | null, dayId: string | null) {
@@ -87,6 +88,7 @@ export default function TrainingScreen() {
   }, []);
 
   useFocusEffect(load);
+  const activityActions = useActivityActions(() => void load());
 
   // The running time on the card (computed from timestamps; the interval only re-renders).
   useEffect(() => {
@@ -201,21 +203,12 @@ export default function TrainingScreen() {
           {history.map((item, index) => (
             <View key={item.id}>
               {index > 0 && <Divider />}
-              <View style={styles.historyRow}>
-                <View style={styles.flex}>
-                  <Text style={styles.dayTitle}>{item.title}</Text>
-                  <Text style={styles.daySubtitle}>
-                    {formatDate(item.startedAt)} · {formatDuration(item.activeSeconds * 1000)}
-                  </Text>
-                  {!item.countsForStreak && item.reason !== null && <Text style={styles.reason}>{reasonText(item.reason)}</Text>}
-                </View>
-                <Ionicons
-                  name={item.countsForStreak ? "flame" : "flame-outline"}
-                  size={20}
-                  color={item.countsForStreak ? colors.accent : colors.textTertiary}
-                  accessibilityLabel={item.countsForStreak ? "Zählt für den Streak" : "Zählt nicht für den Streak"}
-                />
-              </View>
+              <ActivityRow
+                item={item}
+                showStreakHint
+                onMenu={() => activityActions.openMenu(item)}
+                onPress={() => router.push({ pathname: "/workout/[id]", params: { id: item.id } })}
+              />
             </View>
           ))}
         </View>
@@ -289,21 +282,10 @@ const useStyles = makeStyles(({ colors }) =>
       ...typography.caption,
       color: colors.textSecondary,
     },
-    reason: {
-      ...typography.caption,
-      color: colors.textSecondary,
-    },
     actions: {
       gap: spacing.sm,
       paddingHorizontal: spacing.md,
       paddingTop: spacing.sm,
-    },
-    historyRow: {
-      flexDirection: "row",
-      alignItems: "center",
-      gap: spacing.ms,
-      paddingHorizontal: spacing.md,
-      paddingVertical: spacing.ms,
     },
     empty: {
       ...typography.caption,

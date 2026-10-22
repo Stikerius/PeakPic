@@ -150,12 +150,14 @@ function CameraScreenContent() {
       setSaving(false);
     }
 
-    // Photos of a training that doesn't count: they don't count either, and they don't take
-    // the day's slideshow (a later real proof of the day still can).
-    if (workoutLink !== null && !workoutLink.countsForStreak) {
+    // Photos of a recorded training: the training is the proof, the photos don't count on their
+    // own and don't take the day's slideshow (a later real proof of the day still can).
+    if (workoutLink !== null) {
       Alert.alert(
         "Auch im Feed veröffentlichen?",
-        "Dein Training zählt nicht für den Streak, und die Fotos dazu auch nicht.",
+        workoutLink.countsForStreak
+          ? "Dein Training zählt schon für den Streak, die Fotos werden dazu gespeichert."
+          : "Dein Training zählt nicht für den Streak, und die Fotos dazu auch nicht.",
         [
           { text: "Nein, nur beim Training speichern", onPress: () => void saveProofOnly(photoUri, planDayId, false) },
           { text: "Ja, bearbeiten und posten", onPress: () => openEditor(photoUri, "single", planDayId) },

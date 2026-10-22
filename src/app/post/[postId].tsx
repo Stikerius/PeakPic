@@ -21,6 +21,7 @@ import { answerWorkoutLink, getMyWorkoutLink } from "@/lib/workoutLinkRepo";
 import type { WorkoutShareStatus } from "@/types/database";
 import type { FeedPost } from "@/types/social";
 import { useTrackScreen } from "@/lib/usage";
+import { fetchWorkoutIdForPost } from "@/lib/trainingRepo";
 
 type LoadState = { status: "loading" } | { status: "missing" } | { status: "error" } | { status: "ready"; post: FeedPost };
 
@@ -41,6 +42,20 @@ export default function PostScreen() {
   // My workout link to this post (someone else's) and whether I reposted it.
   const [link, setLink] = useState<{ id: string; status: WorkoutShareStatus; reposted: boolean } | null>(null);
   const [answering, setAnswering] = useState(false);
+  // The recorded training shown with this post, if I may see it.
+  const [workoutId, setWorkoutId] = useState<string | null>(null);
+
+  useEffect(() => {
+    let active = true;
+    fetchWorkoutIdForPost(postId)
+      .then((found) => {
+        if (active) setWorkoutId(found);
+      })
+      .catch(() => undefined);
+    return () => {
+      active = false;
+    };
+  }, [postId]);
 
   useEffect(() => {
     let active = true;
@@ -165,12 +180,25 @@ export default function PostScreen() {
         onShare={(id) => router.push({ pathname: "/share/[postId]", params: { postId: id } })}
         onMore={state.post.author.id === myId ? showPostActions : showOtherPostActions}
       />
+      {workoutId !== null && (
+        <View style={styles.reportButton}>
+          <Button
+            label="Trainingsbericht"
+            icon="barbell-outline"
+            variant="secondary"
+            onPress={() => router.push({ pathname: "/workout/[id]", params: { id: workoutId } })}
+          />
+        </View>
+      )}
     </ScrollView>
   );
 }
 
 const useStyles = makeStyles(({ colors }) =>
   StyleSheet.create({
+    reportButton: {
+      padding: spacing.md,
+    },
     screen: {
       flex: 1,
       backgroundColor: colors.background,

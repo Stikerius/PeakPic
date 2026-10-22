@@ -1,6 +1,7 @@
 import { requireUserId } from "@/lib/session";
 import { supabase } from "@/lib/supabase";
 import type { ActivityVisibility, NotCountingReason, WorkoutPayload } from "@/lib/workout";
+import { reportVolume, type ReportExercise } from "@/lib/workoutReport";
 import type { Json } from "@/types/database";
 
 export type SaveWorkoutResult = {
@@ -32,6 +33,10 @@ export function workoutErrorMessage(error: RpcError): string {
       return "Höchstens 40 Sätze pro Übung.";
     case "plan_day_not_yours":
       return "Der Plantag gehört nicht zu deinen Plänen.";
+    case "workout_has_post":
+      return "Dieses Training hat schon einen Beitrag.";
+    case "workout_not_found":
+      return "Training nicht gefunden.";
     default:
       return error.message ?? "Etwas ist schiefgelaufen.";
   }
@@ -62,6 +67,7 @@ export async function linkWorkoutPost(workoutId: string, postId: string, shareWi
 
 export type WorkoutListItem = {
   id: string;
+  userId: string;
   title: string;
   workoutDate: string;
   startedAt: string;
@@ -70,6 +76,8 @@ export type WorkoutListItem = {
   countsForStreak: boolean;
   reason: NotCountingReason | null;
   postId: string | null;
+  planDayId: string | null;
+  volumeKg: number | null;
 };
 
 /** "Wie das Training heisst": own title, plan day or "Freies Training". */
@@ -77,18 +85,50 @@ export function workoutTitle(title: string | null, planDayTitle: string | null):
   return title ?? planDayTitle ?? "Freies Training";
 }
 
-/** My recorded trainings, newest first. */
-export async function fetchMyWorkouts(limit = 30): Promise<WorkoutListItem[]> {
-  const userId = await requireUserId();
-  const { data, error } = await supabase
-    .from("workouts")
-    .select("id, title, plan_day_title, workout_date, started_at, active_seconds, visibility, counts_for_streak, not_counting_reason, post_id")
-    .eq("user_id", userId)
-    .order("started_at", { ascending: false })
-    .limit(limit);
-  if (error) throw error;
-  return data.map((row) => ({
+type SetRow = { reps: number | null; weight_kg: number | string | null; seconds: number | null; completed_at: string | null };
+type ExerciseRow = { name: string; position: number; sets: (SetRow & { position: number })[] };
+
+function toExercises(rows: ExerciseRow[]): ReportExercise[] {
+  return [...rows]
+    .sort((a, b) => a.position - b.position)
+    .map((e) => ({
+      name: e.name,
+      sets: [...e.sets]
+        .sort((a, b) => a.position - b.position)
+        .map((s) => ({
+          reps: s.reps,
+          // numeric arrives as a string from PostgREST.
+          weightKg: s.weight_kg === null ? null : Number(s.weight_kg),
+          seconds: s.seconds,
+          completedAt: s.completed_at,
+        })),
+    }));
+}
+
+const LIST_SELECT =
+  "id, user_id, title, plan_day_id, plan_day_title, workout_date, started_at, active_seconds, visibility, counts_for_streak, not_counting_reason, post_id, " +
+  "exercises:workout_exercises(name, position, sets:workout_sets(position, reps, weight_kg, seconds, completed_at))";
+
+type ListRow = {
+  id: string;
+  user_id: string;
+  title: string | null;
+  plan_day_id: string | null;
+  plan_day_title: string | null;
+  workout_date: string;
+  started_at: string;
+  active_seconds: number;
+  visibility: ActivityVisibility;
+  counts_for_streak: boolean;
+  not_counting_reason: string | null;
+  post_id: string | null;
+  exercises: ExerciseRow[];
+};
+
+function toListItem(row: ListRow): WorkoutListItem {
+  return {
     id: row.id,
+    userId: row.user_id,
     title: workoutTitle(row.title, row.plan_day_title),
     workoutDate: row.workout_date,
     startedAt: row.started_at,
@@ -97,7 +137,85 @@ export async function fetchMyWorkouts(limit = 30): Promise<WorkoutListItem[]> {
     countsForStreak: row.counts_for_streak,
     reason: isReason(row.not_counting_reason) ? row.not_counting_reason : null,
     postId: row.post_id,
-  }));
+    planDayId: row.plan_day_id,
+    volumeKg: reportVolume(toExercises(row.exercises)),
+  };
+}
+
+/** Trainings of `userId` the caller may see (the database decides), newest first. */
+export async function fetchWorkoutsOf(userId: string, limit = 50): Promise<WorkoutListItem[]> {
+  const { data, error } = await supabase
+    .from("workouts")
+    .select(LIST_SELECT)
+    .eq("user_id", userId)
+    .order("started_at", { ascending: false })
+    .limit(limit);
+  if (error) throw error;
+  return (data as unknown as ListRow[]).map(toListItem);
+}
+
+/** My recorded trainings, newest first. */
+export async function fetchMyWorkouts(limit = 30): Promise<WorkoutListItem[]> {
+  return fetchWorkoutsOf(await requireUserId(), limit);
+}
+
+export type WorkoutReport = WorkoutListItem & {
+  note: string | null;
+  planDayTitle: string | null;
+  endedAt: string;
+  shareWithPost: boolean;
+  exercises: ReportExercise[];
+};
+
+/** One training with all exercises and sets, or null if it doesn't exist or I may not see it. */
+export async function fetchWorkoutReport(id: string): Promise<WorkoutReport | null> {
+  const { data, error } = await supabase
+    .from("workouts")
+    .select(`${LIST_SELECT}, note, ended_at, share_with_post`)
+    .eq("id", id)
+    .maybeSingle();
+  if (error) throw error;
+  if (data === null) return null;
+  const row = data as unknown as ListRow & { note: string | null; ended_at: string; share_with_post: boolean };
+  return {
+    ...toListItem(row),
+    note: row.note,
+    planDayTitle: row.plan_day_title,
+    endedAt: row.ended_at,
+    shareWithPost: row.share_with_post,
+    exercises: toExercises(row.exercises),
+  };
+}
+
+/** Earlier trainings of the same person (newest first), for "zur letzten Einheit". */
+export async function fetchEarlierWorkouts(userId: string, before: string, limit = 30): Promise<{ exercises: ReportExercise[] }[]> {
+  const { data, error } = await supabase
+    .from("workouts")
+    .select("started_at, exercises:workout_exercises(name, position, sets:workout_sets(position, reps, weight_kg, seconds, completed_at))")
+    .eq("user_id", userId)
+    .lt("started_at", before)
+    .order("started_at", { ascending: false })
+    .limit(limit);
+  if (error) throw error;
+  return (data as unknown as { exercises: ExerciseRow[] }[]).map((row) => ({ exercises: toExercises(row.exercises) }));
+}
+
+/** The training shown with a post ("Trainingsbericht beim Beitrag zeigen"), if I may see it. */
+export async function fetchWorkoutIdForPost(postId: string): Promise<string | null> {
+  const { data, error } = await supabase.from("workouts").select("id").eq("post_id", postId).limit(1).maybeSingle();
+  if (error) throw error;
+  return data?.id ?? null;
+}
+
+export async function setWorkoutVisibility(id: string, visibility: ActivityVisibility): Promise<void> {
+  const { error } = await supabase.rpc("set_workout_visibility", { p_workout_id: id, p_visibility: visibility });
+  if (error) throw new Error(workoutErrorMessage(error));
+}
+
+/** Deletes one of my trainings (a linked post stays). */
+export async function deleteWorkout(id: string): Promise<void> {
+  const { error } = await supabase.from("workouts").delete().eq("id", id);
+  if (error) throw error;
 }
 
 /** Counting trainings I already have on `day` (for showing the rule before saving). */
