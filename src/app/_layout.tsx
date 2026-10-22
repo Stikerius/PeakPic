@@ -27,9 +27,7 @@ export default function RootLayout() {
           <AccountStatusProvider>
             <LegalGateProvider>
               <OnboardingProvider>
-                <ReportProvider>
-                  <RootNavigator />
-                </ReportProvider>
+                <RootNavigator />
               </OnboardingProvider>
             </LegalGateProvider>
           </AccountStatusProvider>
@@ -57,6 +55,14 @@ function ThemedRoot({ children }: { children: ReactNode }) {
       </NavigationThemeProvider>
     </GestureHandlerRootView>
   );
+}
+
+/**
+ * Every screen gets its own report sheet. A sheet at the root can't appear over a screen that is
+ * itself a modal (post, training report, stories, comments) on iOS: it stayed invisible and blocked touches.
+ */
+function reportScope({ children }: { children: ReactNode }) {
+  return <ReportProvider>{children}</ReportProvider>;
 }
 
 function RootNavigator() {
@@ -92,6 +98,7 @@ function RootNavigator() {
 
   return (
     <Stack
+      screenLayout={reportScope}
       screenOptions={{
         headerStyle: { backgroundColor: colors.background },
         headerTintColor: colors.text,
