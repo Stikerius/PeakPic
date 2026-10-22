@@ -13,6 +13,8 @@ type LegalGateState = {
   needed: boolean;
   /** "Später": hidden until the next app start. */
   postpone: (documentIds: string[]) => void;
+  /** Right after a successful confirmation: updates the state at once, then reloads. */
+  markConfirmed: (documentIds: string[]) => void;
   refresh: () => void;
 };
 
@@ -63,6 +65,24 @@ export function LegalGateProvider({ children }: { children: ReactNode }) {
     pending,
     needed,
     postpone: (ids) => setPostponed((current) => new Set([...current, ...ids])),
+    markConfirmed: (ids) => {
+      // Without this the gate would keep the old status until the reload is back, and the
+      // router guards would still block the app.
+      const now = new Date().toISOString();
+      setResult((current) =>
+        current === null
+          ? current
+          : {
+              ...current,
+              status: current.status.map((doc) =>
+                ids.includes(doc.documentId)
+                  ? { ...doc, confirmedAt: now, lastConfirmedVersion: doc.version, lastConfirmedAt: now }
+                  : doc,
+              ),
+            },
+      );
+      load();
+    },
     refresh: () => void load(),
   };
   return <LegalGateContext value={value}>{children}</LegalGateContext>;

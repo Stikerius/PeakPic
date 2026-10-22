@@ -20,7 +20,7 @@ type PendingLegalListProps = {
   pending: LegalStatus[];
   /** Offer "Später" where the text allows it (not on the suspended screen). */
   allowPostpone: boolean;
-  onConfirmed: () => void;
+  onConfirmed: (documentId: string) => void;
   onPostpone?: (documentId: string) => void;
 };
 
@@ -49,7 +49,7 @@ export function PendingLegalList({ pending, allowPostpone, onConfirmed, onPostpo
     setError(null);
     try {
       await confirmLegalDocuments([id]);
-      onConfirmed();
+      onConfirmed(id);
     } catch (confirmError) {
       setError(describeError(confirmError));
     } finally {

@@ -66,8 +66,8 @@ export default function AccountLockedScreen() {
           <PendingLegalList
             pending={legal.pending}
             allowPostpone={false}
-            onConfirmed={() => {
-              legal.refresh();
+            onConfirmed={(id) => {
+              legal.markConfirmed([id]);
               refresh();
             }}
           />

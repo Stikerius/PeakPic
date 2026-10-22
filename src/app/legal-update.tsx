@@ -1,5 +1,5 @@
 import { router } from "expo-router";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { ScrollView, StyleSheet, Text, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
@@ -18,17 +18,23 @@ import { makeStyles } from "@/lib/theme";
 export default function LegalUpdateScreen() {
   const styles = useStyles();
   const insets = useSafeAreaInsets();
-  const { pending, postpone, refresh } = useLegalGate();
+  const { pending, postpone, markConfirmed } = useLegalGate();
   const [signingOut, setSigningOut] = useState(false);
-  const mustConfirm = pending.some((doc) => !doc.canPostpone);
+  // Postponed on this screen: hidden here. Texts postponed earlier still show when the screen
+  // is opened from the notice.
+  const [skipped, setSkipped] = useState<ReadonlySet<string>>(new Set());
+  const remaining = pending.filter((doc) => !skipped.has(doc.documentId));
+  const mustConfirm = remaining.some((doc) => !doc.canPostpone);
+  const done = remaining.length === 0;
 
-  // Opened from a notification: back. As the gate after login: on into the app (the router
+  // Leave only after the gate state has changed, so the router guards already let the app
+  // through. Opened from a notice: back. As the gate after login: on into the app (the router
   // then shows the intro or the app, whichever comes next).
-  function leaveIfDone(nextPending: number) {
-    if (nextPending > 0) return;
+  useEffect(() => {
+    if (!done) return;
     if (router.canGoBack()) router.back();
     else router.replace("/");
-  }
+  }, [done]);
 
   return (
     <ScrollView
@@ -43,15 +49,12 @@ export default function LegalUpdateScreen() {
         Richtlinien nimmst du zur Kenntnis.
       </Text>
       <PendingLegalList
-        pending={pending}
+        pending={remaining}
         allowPostpone
-        onConfirmed={() => {
-          refresh();
-          leaveIfDone(pending.length - 1);
-        }}
+        onConfirmed={(id) => markConfirmed([id])}
         onPostpone={(id) => {
           postpone([id]);
-          leaveIfDone(pending.length - 1);
+          setSkipped((current) => new Set([...current, id]));
         }}
       />
       {mustConfirm && (
