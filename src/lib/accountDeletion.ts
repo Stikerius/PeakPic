@@ -14,8 +14,10 @@ export type DeletionResult =
   | { status: "error"; message: string };
 
 export const DELETION_NOT_ALLOWED = `Löschung gerade nicht möglich, bitte wende dich an den Support (${SUPPORT_EMAIL}).`;
+// Only after step 1 ran on the server (status 'deleting').
 const INCOMPLETE =
   "Die Löschung wurde nicht abgeschlossen. Dein Konto ist bereits unsichtbar. Versuche es erneut; bereits Gelöschtes bleibt gelöscht.";
+const NOT_STARTED = "Die Löschung konnte nicht gestartet werden. Es wurde nichts gelöscht. Versuche es später erneut.";
 const NETWORK =
   "Keine Verbindung zum Server. Es wurde nichts oder nur ein Teil gelöscht. Versuche es erneut, sobald du online bist.";
 // The function deletes at most 20 000 files per call and then asks to be called again.
@@ -31,17 +33,17 @@ export async function reauthenticate(password: string): Promise<string | null> {
   return error.code === "invalid_credentials" ? "Das Passwort ist falsch." : authErrorMessage(error);
 }
 
-async function errorCode(error: unknown): Promise<string | null> {
-  if (!(error instanceof FunctionsHttpError)) return null;
+/** Error code from the function's JSON answer, or `http_<status>` (e.g. 404: not deployed). */
+async function errorCode(error: FunctionsHttpError): Promise<string> {
   const context: unknown = error.context;
-  if (!(context instanceof Response)) return null;
+  if (!(context instanceof Response)) return "unknown";
   try {
-    const body: unknown = await context.json();
+    const body: unknown = await context.clone().json();
     if (typeof body === "object" && body !== null && "error" in body && typeof body.error === "string") return body.error;
   } catch {
     // no JSON body
   }
-  return null;
+  return `http_${context.status}`;
 }
 
 /**
@@ -52,11 +54,12 @@ export async function deleteMyAccount(): Promise<DeletionResult> {
   for (let round = 0; round < MAX_ROUNDS; round += 1) {
     const { data, error } = await supabase.functions.invoke("delete_account", { body: {} });
     if (error) {
+      if (!(error instanceof FunctionsHttpError)) return { status: "error", message: NETWORK };
       const code = await errorCode(error);
       if (code === "reauth_required") return { status: "reauth" };
       if (code === "deletion_not_allowed") return { status: "error", message: DELETION_NOT_ALLOWED };
-      if (code === null && !(error instanceof FunctionsHttpError)) return { status: "error", message: NETWORK };
-      return { status: "error", message: INCOMPLETE };
+      if (code === "incomplete") return { status: "error", message: INCOMPLETE };
+      return { status: "error", message: `${NOT_STARTED} (Fehler: ${code})` };
     }
     const status: unknown = typeof data === "object" && data !== null && "status" in data ? data.status : null;
     if (status === "deleted") return { status: "deleted" };

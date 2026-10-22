@@ -150,6 +150,8 @@ Deno.serve(async (request) => {
     if (payload === null || !isFreshSignIn(payload)) return json(401, { error: "reauth_required" });
     const { error } = await caller.rpc("request_account_deletion");
     if (error) {
+      // Database error text only (e.g. function missing: schema.sql not run); no user data.
+      if (error.message !== "deletion_not_allowed") console.error("[delete_account] request failed:", error.code, error.message);
       return error.message === "deletion_not_allowed"
         ? json(409, { error: "deletion_not_allowed" })
         : json(500, { error: "request_failed" });

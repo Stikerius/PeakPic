@@ -94,6 +94,7 @@ export default function DeleteAccountScreen() {
       setError(result.message);
       // Started but not finished: the account is now "deleting"; the app shows the screen to
       // finish the deletion.
+      // (If it never started, the status is still active and nothing changes.)
       if (result.message !== DELETION_NOT_ALLOWED) refresh();
     } finally {
       setBusy(false);
