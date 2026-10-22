@@ -60,6 +60,7 @@ Es gibt bewusst keine Oberfläche, um Rollen zu vergeben.
 - **Audit-Log** (nur Admins): durchsuchbar, nur lesend.
 - **Rechtstexte** (nur Admins): Versionen pro Text mit Zahlen (bestätigt, ausstehend, überfällig). Entwürfe in Markdown bearbeiten, mit Vorschau (gleicher Parser wie die App) und Vergleich zur Vorversion. Veröffentlichen zeigt die Zahl betroffener Konten und fragt Bestätigungspflicht und „blockierend“ noch einmal ab. Veröffentlichte Versionen sind unveränderlich.
 - **Offene Bestätigungen** (nur Admins): Konten, deren Prüfung fällig ist (5 Tage nach Ankündigung, danach 5 Tage nach jeder Aktion). Pro Zeile erinnern, E-Mail, zurückstellen (mit Notiz) oder sperren (einzeln, mit Begründung). Sammelaktionen nur für Erinnerungen.
+- **Konto endgültig löschen** (nur Admins, im Nutzer-Detail): mit Begründung und Username als Bestätigung, protokolliert. Nicht für das eigene Konto und nicht für Moderatoren oder Admins. Läuft über die Edge Function `delete_account` (`npx supabase functions deploy delete_account`).
 - Auf der **Übersicht** sehen Admins zusätzlich „Konten überfällig“, im **Nutzer-Detail** die Bestätigungs-Historie (Abruf wird protokolliert).
 
 Sounds gibt es in der App noch nicht, deshalb hat das Dashboard dafür keine Warteschlange.

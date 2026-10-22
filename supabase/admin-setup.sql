@@ -28,7 +28,10 @@
 -- join public.profiles p on p.id = r.user_id
 -- join auth.users u on u.id = r.user_id;
 
--- 5) Remove a role. Staff accounts can't delete themselves in the app: remove the role first.
+-- 5) Remove a role. Staff accounts (moderator or admin) can't delete themselves in the app, and
+--    admins can't delete them in the dashboard either (request_account_deletion() and
+--    admin_request_account_deletion() refuse). To delete such an account: remove the role with
+--    the statement below first, then delete the account in the app or as another admin.
 -- delete from public.admin_roles
 -- where user_id = (select u.id from auth.users u where u.email = 'ADRESSE@example.com');
 

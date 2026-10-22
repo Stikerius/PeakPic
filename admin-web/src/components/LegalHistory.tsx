@@ -54,6 +54,7 @@ export function LegalHistory({ userId }: { userId: string }) {
                   <th>Art</th>
                   <th>Am</th>
                   <th>App-Version</th>
+                  <th>Hash</th>
                 </tr>
               </thead>
               <tbody>
@@ -65,6 +66,9 @@ export function LegalHistory({ userId }: { userId: string }) {
                     <td>{str(row.confirmation_type) === "accept" ? "Akzeptiert" : "Zur Kenntnis genommen"}</td>
                     <td>{formatDateTime(strOrNull(row.confirmed_at))}</td>
                     <td>{strOrNull(row.app_version) ?? "–"}</td>
+                    <td>
+                      <code title={str(row.content_hash)}>{str(row.content_hash).slice(0, 12)}</code>
+                    </td>
                   </tr>
                 ))}
               </tbody>

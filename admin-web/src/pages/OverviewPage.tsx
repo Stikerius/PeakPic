@@ -50,7 +50,9 @@ export function OverviewPage() {
           {legal !== null && (
             <a className="card" href={href({ page: "pending" })}>
               <span className="card-value">{legal.overdue}</span>
-              <span className="card-label">Konten überfällig (Rechtstexte)</span>
+              <span className="card-label">
+                Konten überfällig (Rechtstexte){legal.oldestDueAt !== null ? `, älteste seit ${formatAge(legal.oldestDueAt)}` : ""}
+              </span>
             </a>
           )}
         </div>

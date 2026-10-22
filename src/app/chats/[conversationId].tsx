@@ -451,7 +451,7 @@ export default function ChatScreen() {
             ListEmptyComponent={
               <View style={styles.empty}>
                 <Text style={styles.emptyText}>
-                  {partner !== null ? `Schreib @${partner.username} die erste Nachricht.` : ""}
+                  {partnerAvailable ? `Schreib @${partner.username} die erste Nachricht.` : ""}
                 </Text>
               </View>
             }

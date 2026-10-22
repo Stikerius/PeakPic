@@ -4,11 +4,11 @@ import { AccountHistory } from "../components/AccountHistory";
 import { ActionPanel, type PanelAction } from "../components/ActionPanel";
 import { ConfirmDialog } from "../components/ConfirmDialog";
 import { LegalHistory } from "../components/LegalHistory";
-import { banUser, fetchUserDetail, fetchUserEmail, suspendUser, unbanUser, warnUser, type UserDetail } from "../lib/api";
+import { banUser, deleteAccountAsAdmin, fetchUserDetail, fetchUserEmail, suspendUser, unbanUser, warnUser, type UserDetail } from "../lib/api";
 import { useAuth } from "../lib/auth";
 import { str, strOrNull } from "../lib/decode";
 import { ACCOUNT_STATUS_LABELS, formatDateTime, label } from "../lib/format";
-import { href } from "../lib/router";
+import { href, navigate } from "../lib/router";
 
 export function UserDetailPage({ id }: { id: string }) {
   const { state } = useAuth();
@@ -19,6 +19,11 @@ export function UserDetailPage({ id }: { id: string }) {
   const [emailReason, setEmailReason] = useState("");
   const [email, setEmail] = useState<string | null>(null);
   const [emailError, setEmailError] = useState<string | null>(null);
+  const [deleteOpen, setDeleteOpen] = useState(false);
+  const [deleteReason, setDeleteReason] = useState("");
+  const [deleteUsername, setDeleteUsername] = useState("");
+  const [deleteError, setDeleteError] = useState<string | null>(null);
+  const [deleting, setDeleting] = useState(false);
 
   const load = useCallback(() => {
     fetchUserDetail(id)
@@ -139,6 +144,26 @@ export function UserDetailPage({ id }: { id: string }) {
           ) : (
             <ActionPanel actions={actions} maxDays={isAdmin ? null : 7} onDone={load} />
           )}
+          {isAdmin && staffRole === null && (
+            <section className="panel">
+              <h3>Konto endgültig löschen</h3>
+              <p className="muted">
+                Löscht Profil, Inhalte, Dateien und Anmeldung sofort und unwiderruflich. Protokolle bleiben pseudonymisiert.
+              </p>
+              <button
+                type="button"
+                className="button danger"
+                onClick={() => {
+                  setDeleteReason("");
+                  setDeleteUsername("");
+                  setDeleteError(null);
+                  setDeleteOpen(true);
+                }}
+              >
+                Konto endgültig löschen …
+              </button>
+            </section>
+          )}
         </div>
       </div>
       <ConfirmDialog
@@ -162,6 +187,44 @@ export function UserDetailPage({ id }: { id: string }) {
           <input value={emailReason} onChange={(e) => setEmailReason(e.target.value)} maxLength={500} />
         </label>
         {emailError !== null && <p className="error">{emailError}</p>}
+      </ConfirmDialog>
+      <ConfirmDialog
+        open={deleteOpen}
+        title={`@${str(profile.username)} endgültig löschen`}
+        confirmLabel="Endgültig löschen"
+        danger
+        busy={deleting}
+        onCancel={() => setDeleteOpen(false)}
+        onConfirm={() => {
+          if (deleteReason.trim().length < 10) {
+            setDeleteError("Begründung: mindestens 10 Zeichen.");
+            return;
+          }
+          if (deleteUsername.trim().toLowerCase() !== str(profile.username)) {
+            setDeleteError("Der Username stimmt nicht.");
+            return;
+          }
+          setDeleting(true);
+          setDeleteError(null);
+          deleteAccountAsAdmin(id, deleteUsername.trim(), deleteReason.trim())
+            .then(() => {
+              setDeleteOpen(false);
+              navigate({ page: "users" });
+            })
+            .catch((e: unknown) => setDeleteError(e instanceof Error ? e.message : "Fehler"))
+            .finally(() => setDeleting(false));
+        }}
+      >
+        <p>Das kann nicht rückgängig gemacht werden. Die Aktion wird mit Begründung protokolliert.</p>
+        <label className="field">
+          <span>Begründung (mindestens 10 Zeichen)</span>
+          <input value={deleteReason} onChange={(e) => setDeleteReason(e.target.value)} maxLength={500} />
+        </label>
+        <label className="field">
+          <span>Username zur Bestätigung ({str(profile.username)})</span>
+          <input value={deleteUsername} onChange={(e) => setDeleteUsername(e.target.value)} maxLength={40} autoComplete="off" />
+        </label>
+        {deleteError !== null && <p className="error">{deleteError}</p>}
       </ConfirmDialog>
     </>
   );

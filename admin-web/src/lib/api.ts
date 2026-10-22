@@ -440,3 +440,43 @@ export async function sendLegalEmails(userIds: string[], documentId: string): Pr
   const d = asRecord(data);
   return { sent: num(d.sent), failed: num(d.failed), skipped: num(d.skipped) };
 }
+
+// ------------------------------------------------------------------ account deletion (Edge Function)
+
+const DELETION_ERRORS: Record<string, string> = {
+  not_authorized: "Nur Admins mit Zwei-Faktor-Anmeldung.",
+  cannot_delete_self: "Das eigene Konto lässt sich hier nicht löschen.",
+  cannot_delete_staff: "Moderatoren und Admins lassen sich nicht löschen. Zuerst die Rolle per SQL entfernen.",
+  username_mismatch: "Der Username stimmt nicht.",
+  not_found: "Konto nicht gefunden.",
+  invalid_reason: "Begründung: mindestens 10 Zeichen.",
+  incomplete: "Löschung nicht abgeschlossen. Das Konto ist bereits unsichtbar; bitte erneut versuchen.",
+};
+
+/**
+ * Deletes an account for good (files, auth user, all rows). The Edge Function checks admin role
+ * and two-factor in the database, logs the action and refuses the own account and staff.
+ */
+export async function deleteAccountAsAdmin(userId: string, username: string, reason: string): Promise<void> {
+  for (let round = 0; round < 10; round += 1) {
+    const { data, error } = await supabase.functions.invoke("delete_account", {
+      body: { target_user_id: userId, username, reason },
+    });
+    if (error) {
+      const context: unknown = (error as { context?: unknown }).context;
+      let code = "";
+      if (context instanceof Response) {
+        try {
+          code = str(asRecord(await context.json()).error);
+        } catch {
+          code = "";
+        }
+      }
+      throw new ApiError(DELETION_ERRORS[code] ?? "Löschung fehlgeschlagen. Ist die Edge Function delete_account deployt?");
+    }
+    const status = asRecord(data).status;
+    if (status === "deleted") return;
+    if (status !== "partial") break;
+  }
+  throw new ApiError(DELETION_ERRORS.incomplete);
+}

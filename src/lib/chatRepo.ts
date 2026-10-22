@@ -4,7 +4,7 @@ import type {
 } from "@supabase/supabase-js";
 
 import { getSignedPhotoUrls } from "@/lib/photoUpload";
-import { PROFILE_COLUMNS, toPublicProfiles, unavailableProfile } from "@/lib/profiles";
+import { deletedProfile, PROFILE_COLUMNS, toPublicProfiles, unavailableProfile } from "@/lib/profiles";
 import { requireUserId } from "@/lib/session";
 import { supabase } from "@/lib/supabase";
 import type {
@@ -146,8 +146,8 @@ export async function listConversations(): Promise<ConversationSummary[]> {
 
   return details
     .flatMap(({ membership, last, unreadCount }): ConversationSummary[] => {
-      const partner = partnerByConversation.get(membership.conversation_id);
-      if (partner === undefined) return []; // partner deleted their account
+      // No other member left: the partner deleted their account. The chat stays, read-only.
+      const partner = partnerByConversation.get(membership.conversation_id) ?? deletedProfile();
       return [
         {
           id: membership.conversation_id,
@@ -173,7 +173,7 @@ export async function getConversationPartner(conversationId: string): Promise<Pu
     .neq("user_id", userId)
     .maybeSingle();
   if (error) throw error;
-  if (data === null) return null;
+  if (data === null) return deletedProfile();
   if (data.profile === null) return unavailableProfile(data.user_id);
   return (await toPublicProfiles([data.profile])).get(data.user_id) ?? unavailableProfile(data.user_id);
 }

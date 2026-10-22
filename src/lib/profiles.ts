@@ -14,6 +14,11 @@ export function unavailableProfile(id: string): PublicProfile {
   return { id, username: "", displayName: "Konto nicht verfügbar", avatarUrl: null };
 }
 
+/** Stand-in for a chat partner who deleted their account (no member row left). */
+export function deletedProfile(): PublicProfile {
+  return { id: "", username: "", displayName: "Gelöschtes Konto", avatarUrl: null };
+}
+
 /** Turns profile rows into PublicProfiles with signed avatar URLs (one batch request). */
 export async function toPublicProfiles(rows: ProfileRow[]): Promise<Map<string, PublicProfile>> {
   const avatarPaths = rows.flatMap((r) => (r.avatar_path !== null ? [r.avatar_path] : []));

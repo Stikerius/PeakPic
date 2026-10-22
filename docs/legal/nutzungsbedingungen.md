@@ -17,7 +17,7 @@ PeakPic ist eine App, in der du Fotos deiner Trainings teilst, einen Streak und 
 - Du musst mindestens {{MINDESTALTER}} Jahre alt sein. TODO: Mindestalter rechtlich klären; muss zu MIN_AGE_YEARS in der App passen.
 - Du brauchst eine gültige E-Mail-Adresse und ein Passwort. Halte dein Passwort geheim.
 - Pro Person ein Konto. Der Username muss eindeutig sein und darf niemanden nachahmen.
-- Du kannst dein Konto jederzeit in den Einstellungen löschen. TODO: erst nach Umsetzung der Kontolöschung so stehen lassen.
+- Du kannst dein Konto jederzeit löschen (siehe Abschnitt 7).
 
 ## 4. Deine Inhalte
 
@@ -37,20 +37,29 @@ Es gelten die Community-Richtlinien. Insbesondere verboten sind: Belästigung, D
 - Gegen eine Entscheidung kannst du dich an {{KONTAKT_EMAIL}} wenden. TODO: Beschwerdeverfahren nach DSA klären (Frist, Ablauf).
 - Akzeptierst du geänderte Nutzungsbedingungen nicht, können wir dein Konto sperren, bis du sie akzeptierst.
 
-## 7. Verfügbarkeit
+## 7. Konto löschen
+
+- Du löschst dein Konto in der App unter Einstellungen → Konto → Konto löschen. Zur Bestätigung gibst du dein Passwort und deinen Username ein.
+- Die Löschung ist sofort und endgültig. Es gibt keine Wartefrist und keine Wiederherstellung.
+- Gelöscht werden dein Profil, deine Beiträge, Storys, Highlights, Kommentare, Likes, Follows, deine Chat-Nachrichten, alle hochgeladenen Fotos, dein Trainingsplan, deine Einstellungen und deine Bestätigungen der Rechtstexte. Dein Username wird wieder frei.
+- Ohne Bezug zu deinem Namen bleiben: Meldungen und Entscheidungen der Moderation, Kopien gemeldeter Nachrichten und ein Löschprotokoll (siehe Datenschutzerklärung).
+- Ist dein Konto gesperrt oder sind Inhalte von dir in Prüfung, kannst du es nicht selbst löschen. Wende dich dann an {{KONTAKT_EMAIL}}.
+- Wir können ein Konto löschen, wenn es schwer oder wiederholt gegen diese Bedingungen verstösst.
+
+## 8. Verfügbarkeit
 
 Wir bemühen uns um einen stabilen Betrieb, garantieren aber keine ständige Verfügbarkeit. Wir können Funktionen ändern oder einstellen.
 
-## 8. Haftung
+## 9. Haftung
 
 {{HAFTUNGSKLAUSEL}}
 
 TODO: von einer Fachperson formulieren lassen (Schweiz und EU, Verbraucherrecht).
 
-## 9. Änderungen
+## 10. Änderungen
 
 Wir können diese Bedingungen ändern. Über Änderungen informieren wir in der App. Du siehst, was sich geändert hat, und entscheidest, ob du akzeptierst. Ältere Versionen findest du in der App unter Einstellungen → Rechtliches.
 
-## 10. Recht und Gerichtsstand
+## 11. Recht und Gerichtsstand
 
 Es gilt {{ANWENDBARES_RECHT}}. Gerichtsstand ist {{GERICHTSSTAND}}, soweit gesetzlich zulässig. TODO: prüfen.

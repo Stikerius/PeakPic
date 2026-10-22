@@ -69,7 +69,7 @@ export default function ChatListScreen() {
                   router.push({ pathname: "/chats/[conversationId]", params: { conversationId: item.id } })
                 }
                 accessibilityRole="button"
-                accessibilityLabel={`Chat mit ${item.partner.username}${unread ? `, ${item.unreadCount} ungelesen` : ""}`}
+                accessibilityLabel={`Chat mit ${item.partner.username || item.partner.displayName}${unread ? `, ${item.unreadCount} ungelesen` : ""}`}
                 style={({ pressed }) => [styles.row, pressed && styles.pressed]}
               >
                 <Avatar uri={item.partner.avatarUrl} username={item.partner.username} size={52} />

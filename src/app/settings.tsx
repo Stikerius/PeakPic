@@ -229,6 +229,13 @@ export default function SettingsScreen() {
           subtitle={requestCount > 0 ? `${requestCount} offen` : "Keine offenen Anfragen"}
           onPress={() => router.push("/follow-requests")}
         />
+        <View style={styles.separator} />
+        <SettingsRow
+          icon="trash-outline"
+          title="Konto löschen"
+          subtitle="Endgültig, mit allen Daten"
+          onPress={() => router.push("/delete-account")}
+        />
       </View>
       <Text style={styles.footnote}>
         {privacy?.isPrivate !== false

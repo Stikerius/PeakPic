@@ -3,6 +3,7 @@ import { useState } from "react";
 import { ScrollView, StyleSheet, Text, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
+import { DeletionPending } from "@/components/account/deletion-pending";
 import { PendingLegalList } from "@/components/legal/pending-legal-list";
 import { Button } from "@/components/ui/button";
 import { SUPPORT_EMAIL } from "@/constants/app";
@@ -29,8 +30,10 @@ export default function AccountLockedScreen() {
 
   const status = account?.status ?? "suspended";
   const temporary = status === "suspended" && account?.suspendedUntil !== null && account?.suspendedUntil !== undefined;
+  // A deletion was started but not finished: only "try again" or sign out.
+  if (status === "deleting") return <DeletionPending />;
   const title =
-    status === "banned" ? "Konto dauerhaft gesperrt" : status === "deleting" ? "Konto wird gelöscht" : "Konto gesperrt";
+    status === "banned" ? "Konto dauerhaft gesperrt" : "Konto gesperrt";
 
   return (
     <ScrollView
@@ -55,9 +58,7 @@ export default function AccountLockedScreen() {
         </View>
       ) : (
         <Text style={styles.text}>
-          {status === "deleting"
-            ? "Dein Konto wird gerade gelöscht."
-            : "Dein Konto wurde wegen eines Verstosses gegen unsere Regeln gesperrt."}
+          Dein Konto wurde wegen eines Verstosses gegen unsere Regeln gesperrt.
         </Text>
       )}
       {termsPending && legal.pending.length > 0 && (

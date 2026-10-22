@@ -25,7 +25,7 @@ PeakPic ist eine App, in der du Fotos deiner Trainings teilst, einen Streak und 
 - Du musst mindestens {{MINDESTALTER}} Jahre alt sein. TODO: Mindestalter rechtlich klären; muss zu MIN_AGE_YEARS in der App passen.
 - Du brauchst eine gültige E-Mail-Adresse und ein Passwort. Halte dein Passwort geheim.
 - Pro Person ein Konto. Der Username muss eindeutig sein und darf niemanden nachahmen.
-- Du kannst dein Konto jederzeit in den Einstellungen löschen. TODO: erst nach Umsetzung der Kontolöschung so stehen lassen.
+- Du kannst dein Konto jederzeit löschen (siehe Abschnitt 7).
 
 ## 4. Deine Inhalte
 
@@ -45,21 +45,30 @@ Es gelten die Community-Richtlinien. Insbesondere verboten sind: Belästigung, D
 - Gegen eine Entscheidung kannst du dich an {{KONTAKT_EMAIL}} wenden. TODO: Beschwerdeverfahren nach DSA klären (Frist, Ablauf).
 - Akzeptierst du geänderte Nutzungsbedingungen nicht, können wir dein Konto sperren, bis du sie akzeptierst.
 
-## 7. Verfügbarkeit
+## 7. Konto löschen
+
+- Du löschst dein Konto in der App unter Einstellungen → Konto → Konto löschen. Zur Bestätigung gibst du dein Passwort und deinen Username ein.
+- Die Löschung ist sofort und endgültig. Es gibt keine Wartefrist und keine Wiederherstellung.
+- Gelöscht werden dein Profil, deine Beiträge, Storys, Highlights, Kommentare, Likes, Follows, deine Chat-Nachrichten, alle hochgeladenen Fotos, dein Trainingsplan, deine Einstellungen und deine Bestätigungen der Rechtstexte. Dein Username wird wieder frei.
+- Ohne Bezug zu deinem Namen bleiben: Meldungen und Entscheidungen der Moderation, Kopien gemeldeter Nachrichten und ein Löschprotokoll (siehe Datenschutzerklärung).
+- Ist dein Konto gesperrt oder sind Inhalte von dir in Prüfung, kannst du es nicht selbst löschen. Wende dich dann an {{KONTAKT_EMAIL}}.
+- Wir können ein Konto löschen, wenn es schwer oder wiederholt gegen diese Bedingungen verstösst.
+
+## 8. Verfügbarkeit
 
 Wir bemühen uns um einen stabilen Betrieb, garantieren aber keine ständige Verfügbarkeit. Wir können Funktionen ändern oder einstellen.
 
-## 8. Haftung
+## 9. Haftung
 
 {{HAFTUNGSKLAUSEL}}
 
 TODO: von einer Fachperson formulieren lassen (Schweiz und EU, Verbraucherrecht).
 
-## 9. Änderungen
+## 10. Änderungen
 
 Wir können diese Bedingungen ändern. Über Änderungen informieren wir in der App. Du siehst, was sich geändert hat, und entscheidest, ob du akzeptierst. Ältere Versionen findest du in der App unter Einstellungen → Rechtliches.
 
-## 10. Recht und Gerichtsstand
+## 11. Recht und Gerichtsstand
 
 Es gilt {{ANWENDBARES_RECHT}}. Gerichtsstand ist {{GERICHTSSTAND}}, soweit gesetzlich zulässig. TODO: prüfen.
 $legal$, 'draft', 'accept', true, false, 5)
@@ -125,22 +134,41 @@ TODO: Auftragsverarbeitungsverträge und Übermittlung ins Ausland (zum Beispiel
 ## 5. Wie lange
 
 - Solange dein Konto besteht. Storys sind nach 24 Stunden nicht mehr sichtbar.
-- Nach dem Löschen deines Kontos löschen wir deine Daten. Einträge im Moderationsprotokoll und Meldungen bleiben ohne Bezug zu deiner Person (pseudonymisiert) für {{AUFBEWAHRUNG_MODERATION}} erhalten.
-- Bestätigungen von Rechtstexten: {{AUFBEWAHRUNG_BESTAETIGUNGEN}}.
+- Bestätigungen von Rechtstexten: solange dein Konto besteht.
 
-TODO: Werden Story-Dateien nach 24 Stunden gelöscht? Ablauf festlegen. Absatz zur Kontolöschung erst nach deren Umsetzung so stehen lassen.
+TODO: Werden Story-Dateien nach 24 Stunden gelöscht? Ablauf festlegen.
 
-## 6. Deine Rechte
+## 6. Konto löschen
+
+Du kannst dein Konto jederzeit in der App löschen (Einstellungen → Konto → Konto löschen). Die Löschung ist sofort und endgültig.
+
+**Was gelöscht wird:** dein Konto und deine Anmeldedaten, Profil, Beiträge, Storys, Highlights, Kommentare, Likes, Follows und Follow-Anfragen, Markierungen und Erwähnungen, deine Chat-Nachrichten, alle hochgeladenen Fotos und Dateien, Trainingsplan, Streak und Ruhetage, Einstellungen, Blockierungen, Mitteilungen und deine Bestätigungen der Rechtstexte. Auf deinem Gerät entfernt die App die gespeicherten Daten und die Anmeldung.
+
+**Was ohne Bezug zu deinem Namen bleibt (pseudonymisiert):**
+
+- Meldungen und Entscheidungen der Moderation, mit einer zufälligen Kennung statt deines Namens. Namen und Nachrichten an dich werden aus diesen Einträgen entfernt.
+- Kopien gemeldeter Nachrichten samt Kontext, als Nachweis für die Moderation.
+- Ein Löschprotokoll mit Zeitpunkt und einem nicht umkehrbaren Prüfwert (Hash) der alten Kennung.
+
+Diese Einträge bewahren wir {{AUFBEWAHRUNG_MODERATION}} auf.
+
+Chats bleiben für die anderen Mitglieder sichtbar; du erscheinst dort als „Gelöschtes Konto“. Was andere über dich geschrieben haben (zum Beispiel ein @Username in einem Kommentar), bleibt in deren Texten stehen.
+
+Ist dein Konto gesperrt oder sind Inhalte von dir in Prüfung, kannst du es nicht selbst löschen. Schreib dann an {{KONTAKT_EMAIL}}.
+
+TODO: Unser Hosting-Anbieter führt eigene Anmeldeprotokolle (zum Beispiel Zeitpunkt der Anmeldung). Deren Aufbewahrung bei {{SUPABASE_REGION}} prüfen und hier angeben.
+
+## 7. Deine Rechte
 
 Du kannst Auskunft, Berichtigung, Löschung, Einschränkung und Datenübertragung verlangen und der Bearbeitung widersprechen. Schreib an {{KONTAKT_EMAIL}}. Du kannst dich bei der zuständigen Aufsichtsbehörde beschweren ({{AUFSICHTSBEHOERDE}}).
 
 TODO: Ein Datenexport ist in der App noch nicht umgesetzt.
 
-## 7. Sicherheit
+## 8. Sicherheit
 
 Die Verbindung ist verschlüsselt. Wer welche Daten sehen darf, ist in der Datenbank selbst geregelt. Zugänge für Moderation und Administration brauchen eine Zwei-Faktor-Anmeldung.
 
-## 8. Änderungen
+## 9. Änderungen
 
 Wir informieren in der App über Änderungen. Ältere Versionen findest du unter Einstellungen → Rechtliches.
 $legal$, 'draft', 'acknowledge', true, false, 5)

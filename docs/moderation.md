@@ -38,8 +38,25 @@
 ## Protokoll (`moderation_actions`)
 
 - Jede Aktion und jedes Öffnen privater Inhalte (Meldung, Konto-Verlauf, E-Mail) erzeugt einen Eintrag in derselben Transaktion.
-- Unveränderlich: Update, Delete und Truncate werden per Trigger abgelehnt, auch für Admins.
+- Unveränderlich: Update, Delete und Truncate werden per Trigger abgelehnt, auch für Admins. Einzige Ausnahme: Beim Löschen eines Kontos entfernt `finish_account_deletion()` in derselben Transaktion Klartext über die Person (Text an den Nutzer, Namen in der Begründung). Alle anderen Spalten bleiben gleich, Zeilen lassen sich nie löschen.
 - Referenzen auf Konten sind reine UUIDs ohne Fremdschlüssel, damit das Löschen eines Kontos nicht blockiert wird.
+
+## Konto löschen
+
+Sofort und endgültig, ohne Karenzfrist. Ablauf in der Edge Function `delete_account` (jeder Schritt wiederholbar):
+
+1. Prüfen und `account_status = 'deleting'` setzen. Das Konto ist sofort unsichtbar und kann nichts mehr schreiben. Selbstlöschung: frische Anmeldung (Token und letzte Anmeldung höchstens 5 Minuten alt), Ziel immer das eigene Konto aus dem JWT. Admin-Löschung: Admin mit Zwei-Faktor, Begründung, Username als Bestätigung, protokolliert als `delete_account`.
+2. Alle Dateien unter `{user_id}/` in allen Buckets löschen (in Batches).
+3. `finish_account_deletion()`: Logs pseudonymisieren, Eintrag in `account_deletions` (nur SHA-256 der alten ID, Zeitpunkt, wer gelöscht hat).
+4. Auth-Nutzer löschen; alle Zeilen des Kontos verschwinden per `on delete cascade`.
+
+Bricht etwas ab, bleibt der Status `deleting`. Die App zeigt dann „Löschung wird abgeschlossen“ mit „Erneut versuchen“ und „Abmelden“; Admins wiederholen die Aktion im Dashboard.
+
+**Nicht selbst löschbar** (Meldung „Löschung gerade nicht möglich, bitte wende dich an den Support“): laufende Sperre, Bann, Inhalte in Quarantäne. Diese Konten löscht bei Bedarf ein Admin (Nutzer-Detail → „Konto endgültig löschen“). Moderatoren- und Admin-Konten lassen sich gar nicht löschen, bis die Rolle per SQL entfernt ist (`supabase/admin-setup.sql`).
+
+**Was bleibt (pseudonymisiert):** `moderation_actions` (UUID, Texte zum Nutzer entfernt, Namen in Begründungen ersetzt durch „[gelöschtes Konto]“), `reports` mit `target_user_id` (Melder wird `null`, Namen in Details und Notizen ersetzt), `report_snapshots` (Kopien gemeldeter Nachrichten mit `sender_id`, Namen ersetzt), `account_deletions` (nur Hash). Entfernte Inhalte des Kontos werden mitgelöscht, auch ihre Dateien.
+
+**Prüfen nach dem Löschen:** `supabase/check-deleted-user.sql` durchsucht alle Tabellen nach der alten ID.
 
 ## Möglicherweise illegale Inhalte
 
@@ -93,7 +110,11 @@ Drei Texte: **Nutzungsbedingungen** (werden akzeptiert), **Datenschutzerklärung
 - Reicht eine Mitteilung in der App für Änderungen der Nutzungsbedingungen, oder braucht es zusätzlich eine E-Mail? Ist die Sperre bis zur Annahme zulässig, oder braucht es ein Kündigungsrecht beziehungsweise eine Frist?
 - Aufbewahrungsdauer der Bestätigungen (Nachweis) und Umgang damit nach dem Löschen eines Kontos.
 - Wird das Alter nur bestätigt (wie jetzt) oder muss es geprüft werden?
+- Kontolöschung: Ist es zulässig, `moderation_actions`, Meldungen und Kopien gemeldeter Nachrichten nach dem Löschen pseudonymisiert (UUID statt Name) aufzubewahren, und wie lange? Ist die UUID zusammen mit anderen Daten noch personenbezogen? Reicht das Entfernen von Namen in Freitexten?
+- Kontolöschung: Inhalte, die als Beweis gesichert werden müssten (Quarantäne), blockieren die Selbstlöschung. Ist das zulässig, und wie lange darf eine Löschung so aufgeschoben werden?
+- Supabase führt eigene Auth-Protokolle (`auth.audit_log_entries`, mit Nutzer-ID und teils E-Mail). Aufbewahrung und Löschung dort klären.
+- Erwähnungen (@username) in Texten anderer bleiben stehen. Weil der Username frei wird, kann er später auf ein neues Konto zeigen.
 
 ## Spätere Phasen
 
-- Datenexport für Nutzer (nicht umgesetzt).
+- Datenexport für Nutzer (Auskunft und Datenübertragbarkeit; nicht umgesetzt).

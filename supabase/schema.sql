@@ -366,9 +366,14 @@ create index if not exists audience_restrictions_hidden_idx
 
 create table if not exists public.conversations (
   id         uuid primary key default gen_random_uuid(),
-  created_by uuid not null references public.profiles (id) on delete cascade,
+  created_by uuid references public.profiles (id) on delete set null,
   created_at timestamptz not null default now()
 );
+-- Deleting the account of whoever started a chat must not delete the chat of the others.
+alter table public.conversations alter column created_by drop not null;
+alter table public.conversations drop constraint if exists conversations_created_by_fkey;
+alter table public.conversations add constraint conversations_created_by_fkey
+  foreign key (created_by) references public.profiles (id) on delete set null;
 
 create table if not exists public.conversation_members (
   conversation_id uuid not null references public.conversations (id) on delete cascade,
@@ -2103,7 +2108,8 @@ end;
 $$;
 
 -- ---------------------------------------------------------------- blocks, reports, status
--- Is there a block between the caller and another member of the chat? Then nobody writes in it.
+-- Is there a block between the caller and another member of the chat, or is nobody else left
+-- (the partner deleted their account)? Then nobody writes in it.
 create or replace function public.conversation_has_block(conversation uuid)
 returns boolean
 language sql stable security definer set search_path = ''
@@ -2113,6 +2119,9 @@ as $$
     where cm.conversation_id = conversation
       and cm.user_id <> (select auth.uid())
       and public.is_blocked_between((select auth.uid()), cm.user_id)
+  ) or not exists (
+    select 1 from public.conversation_members cm
+    where cm.conversation_id = conversation and cm.user_id <> (select auth.uid())
   );
 $$;
 
@@ -2401,6 +2410,34 @@ returns trigger
 language plpgsql set search_path = ''
 as $$
 begin
+  raise exception '% is append-only', tg_table_name;
+end;
+$$;
+
+-- The one change ever allowed on moderation_actions: when an account is deleted,
+-- finish_account_deletion() removes plain text about that person (text to the user, names in
+-- the reason). It marks the person for its own transaction (peakpic.pseudonymize); every other
+-- column has to stay exactly as it was. Deleting rows stays impossible.
+create or replace function public.guard_moderation_actions()
+returns trigger
+language plpgsql set search_path = ''
+as $$
+declare
+  marked text := coalesce(current_setting('peakpic.pseudonymize', true), '');
+begin
+  if tg_op = 'UPDATE' and marked <> '' and old.target_user_id::text = marked
+    and new.id = old.id
+    and new.actor_id is not distinct from old.actor_id
+    and new.action = old.action
+    and new.target_type is not distinct from old.target_type
+    and new.target_id is not distinct from old.target_id
+    and new.target_user_id is not distinct from old.target_user_id
+    and new.report_id is not distinct from old.report_id
+    and new.details = old.details
+    and new.created_at = old.created_at
+    and new.user_message is null then
+    return new;
+  end if;
   raise exception '% is append-only', tg_table_name;
 end;
 $$;
@@ -3811,7 +3848,7 @@ create trigger legal_confirmations_guard
 drop trigger if exists moderation_actions_append_only on public.moderation_actions;
 create trigger moderation_actions_append_only
   before update or delete on public.moderation_actions
-  for each row execute function public.forbid_change();
+  for each row execute function public.guard_moderation_actions();
 drop trigger if exists moderation_actions_no_truncate on public.moderation_actions;
 create trigger moderation_actions_no_truncate
   before truncate on public.moderation_actions
@@ -3961,7 +3998,7 @@ begin
   foreach f in array array[
     'public.require_moderator()', 'public.require_admin()', 'public.checked_reason(text)',
     'public.log_moderation_action(text, text, uuid, uuid, uuid, text, text, jsonb)',
-    'public.forbid_change()', 'public.guard_content_moderation()',
+    'public.forbid_change()', 'public.guard_moderation_actions()', 'public.guard_content_moderation()',
     'public.moderation_target_owner(text, uuid)', 'public.moderation_state_of(text, uuid)',
     'public.set_moderation_state(text, uuid, text, text)', 'public.check_moderation_target(uuid)',
     'public.add_moderation_notice(uuid, uuid, text, text)'
@@ -4723,3 +4760,221 @@ create policy "photos: delete own" on storage.objects
     and public.is_account_active()
     and not public.is_moderated_photo(name)
   );
+
+-- ================================================================ account deletion
+-- Deleting an account is final and immediate (no grace period). It runs in the Edge Function
+-- delete_account, step by step and safe to repeat:
+--   1) request_account_deletion() / admin_request_account_deletion(): checks, then
+--      account_status = 'deleting' (the account is hidden at once and can't write anything)
+--   2) the function deletes all files under {user_id}/ in every storage bucket
+--   3) finish_account_deletion(): removes plain text about the person from the logs and writes
+--      the pseudonymous entry in account_deletions
+--   4) the function deletes the auth user; profiles and everything that belongs to the account
+--      go with it (on delete cascade). Logs keep plain uuids without foreign keys.
+-- If a step fails the status stays 'deleting' and the app offers "Erneut versuchen".
+
+-- Pseudonymous record of deletions: no name, no e-mail, only a hash of the old id.
+create table if not exists public.account_deletions (
+  id           uuid primary key default gen_random_uuid(),
+  user_hash    text not null unique check (user_hash ~ '^[0-9a-f]{64}$'),
+  deleted_at   timestamptz not null default now(),
+  initiated_by text not null check (initiated_by in ('self', 'admin')),
+  admin_id     uuid
+);
+alter table public.account_deletions enable row level security;
+revoke all on public.account_deletions from public, anon, authenticated;
+grant select on public.account_deletions to authenticated;
+drop policy if exists "account_deletions: admins read" on public.account_deletions;
+create policy "account_deletions: admins read" on public.account_deletions
+  for select to authenticated using (public.is_admin());
+
+drop trigger if exists account_deletions_append_only on public.account_deletions;
+create trigger account_deletions_append_only
+  before update or delete on public.account_deletions
+  for each row execute function public.forbid_change();
+drop trigger if exists account_deletions_no_truncate on public.account_deletions;
+create trigger account_deletions_no_truncate
+  before truncate on public.account_deletions
+  for each statement execute function public.forbid_change();
+
+-- Why an account can't delete itself right now, or null. Suspended (still running) and banned
+-- accounts, and accounts with content in quarantine, go through an admin; staff accounts need
+-- their role removed by hand first (supabase/admin-setup.sql).
+create or replace function public.account_deletion_blocker(p_user uuid)
+returns text
+language plpgsql stable security definer set search_path = ''
+as $$
+declare
+  target public.profiles%rowtype;
+begin
+  select * into target from public.profiles p where p.id = p_user;
+  if not found then
+    return 'not_found';
+  end if;
+  if exists (select 1 from public.admin_roles r where r.user_id = p_user) then
+    return 'staff';
+  end if;
+  if target.account_status = 'banned' then
+    return 'banned';
+  end if;
+  if target.account_status = 'suspended' and (target.suspended_until is null or target.suspended_until > now()) then
+    return 'suspended';
+  end if;
+  if exists (select 1 from public.posts x where x.user_id = p_user and x.moderation_state = 'quarantined')
+    or exists (select 1 from public.stories x where x.user_id = p_user and x.moderation_state = 'quarantined')
+    or exists (select 1 from public.comments x where x.user_id = p_user and x.moderation_state = 'quarantined')
+    or exists (select 1 from public.messages x where x.sender_id = p_user and x.moderation_state = 'quarantined') then
+    return 'quarantined';
+  end if;
+  return null;
+end;
+$$;
+
+-- Step 1 of deleting my own account (called by the Edge Function with my session). Repeating
+-- it while the status is already 'deleting' is fine.
+create or replace function public.request_account_deletion()
+returns void
+language plpgsql security definer set search_path = ''
+as $$
+declare
+  me uuid := auth.uid();
+  blocker text;
+begin
+  if me is null then
+    raise exception 'not authenticated';
+  end if;
+  perform 1 from public.profiles p where p.id = me for update;
+  blocker := public.account_deletion_blocker(me);
+  if blocker is not null then
+    raise exception 'deletion_not_allowed' using detail = blocker;
+  end if;
+  update public.profiles
+  set account_status = 'deleting', suspended_until = null, suspension_reason_code = null,
+      moderation_updated_at = now()
+  where id = me and account_status <> 'deleting';
+end;
+$$;
+
+-- Step 1 of an admin deleting someone else's account (dashboard). Admin with two-factor,
+-- written reason, the username typed as confirmation. Never the own account, never staff.
+create or replace function public.admin_request_account_deletion(p_user_id uuid, p_username text, p_reason text)
+returns void
+language plpgsql security definer set search_path = ''
+as $$
+declare
+  why text := public.checked_reason(p_reason);
+  target_name text;
+begin
+  perform public.require_admin();
+  if p_user_id is null or p_user_id = auth.uid() then
+    raise exception 'cannot_delete_self';
+  end if;
+  select p.username into target_name from public.profiles p where p.id = p_user_id for update;
+  if not found then
+    raise exception 'not_found';
+  end if;
+  if exists (select 1 from public.admin_roles r where r.user_id = p_user_id) then
+    raise exception 'cannot_delete_staff';
+  end if;
+  if lower(btrim(coalesce(p_username, ''))) <> target_name then
+    raise exception 'username_mismatch';
+  end if;
+  update public.profiles
+  set account_status = 'deleting', suspended_until = null, suspension_reason_code = null,
+      moderation_updated_at = now()
+  where id = p_user_id;
+  perform public.log_moderation_action('delete_account', 'profile', p_user_id, p_user_id, null, why, null, '{}');
+end;
+$$;
+
+-- Replaces the given names (whole words, with or without @) in a text.
+create or replace function public.redact_names(p_text text, p_names text[])
+returns text
+language plpgsql immutable set search_path = ''
+as $$
+declare
+  result text := p_text;
+  n text;
+begin
+  if result is null then
+    return null;
+  end if;
+  foreach n in array coalesce(p_names, '{}') loop
+    if char_length(btrim(n)) >= 3 then
+      result := regexp_replace(
+        result,
+        '(?<![[:alnum:]_.])@?' || regexp_replace(btrim(n), '([.*+?^${}()|\[\]\\])', '\\\1', 'g') || '(?![[:alnum:]_])',
+        '[gelöschtes Konto]',
+        'gi'
+      );
+    end if;
+  end loop;
+  return result;
+end;
+$$;
+
+-- Step 3 (service role only, from the Edge Function): pseudonymise what stays, write the
+-- deletion record. Repeatable; does nothing once the profile is gone.
+create or replace function public.finish_account_deletion(p_user_id uuid, p_initiated_by text, p_admin_id uuid)
+returns void
+language plpgsql security definer set search_path = ''
+as $$
+declare
+  target_name text;
+  target_display text;
+  names text[];
+begin
+  if p_initiated_by not in ('self', 'admin') then
+    raise exception 'invalid_initiator';
+  end if;
+  select p.username, p.display_name into target_name, target_display
+  from public.profiles p where p.id = p_user_id and p.account_status = 'deleting' for update;
+  if not found then
+    if not exists (select 1 from public.profiles p where p.id = p_user_id) then
+      return;
+    end if;
+    raise exception 'not_marked_for_deletion';
+  end if;
+  names := array(select h.username from public.username_history h where h.user_id = p_user_id)
+    || array[target_name, target_display];
+
+  -- Logs keep the plain uuid but lose every text about the person.
+  perform set_config('peakpic.pseudonymize', p_user_id::text, true);
+  update public.moderation_actions m
+  set user_message = null, reason = public.redact_names(m.reason, names)
+  where m.target_user_id = p_user_id;
+  perform set_config('peakpic.pseudonymize', '', true);
+
+  update public.reports r
+  set details = public.redact_names(r.details, names),
+      resolution_note = public.redact_names(r.resolution_note, names)
+  where r.target_user_id = p_user_id;
+  update public.report_snapshots s
+  set body = public.redact_names(s.body, names)
+  where s.body is not null
+    and (s.sender_id = p_user_id
+      or s.report_id in (select r.id from public.reports r where r.target_user_id = p_user_id));
+
+  -- Mentions in other people's stories point at nobody any more.
+  update public.stories st
+  set mentioned_user_ids = array_remove(st.mentioned_user_ids, p_user_id),
+      mention_positions = coalesce((
+        select jsonb_agg(e) from jsonb_array_elements(st.mention_positions) e
+        where e ->> 'user_id' is distinct from p_user_id::text
+      ), '[]'::jsonb)
+  where p_user_id = any (st.mentioned_user_ids);
+
+  insert into public.account_deletions (user_hash, initiated_by, admin_id)
+  values (encode(pg_catalog.sha256(convert_to(p_user_id::text, 'UTF8')), 'hex'), p_initiated_by, p_admin_id)
+  on conflict (user_hash) do nothing;
+end;
+$$;
+
+revoke all on function public.request_account_deletion() from public, anon;
+grant execute on function public.request_account_deletion() to authenticated;
+revoke all on function public.admin_request_account_deletion(uuid, text, text) from public, anon;
+grant execute on function public.admin_request_account_deletion(uuid, text, text) to authenticated;
+revoke all on function public.account_deletion_blocker(uuid) from public, anon, authenticated;
+revoke all on function public.redact_names(text, text[]) from public, anon, authenticated;
+revoke all on function public.finish_account_deletion(uuid, text, uuid) from public, anon, authenticated;
+grant execute on function public.finish_account_deletion(uuid, text, uuid) to service_role;
