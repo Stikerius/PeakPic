@@ -58,8 +58,27 @@ Es gibt bewusst keine Oberfläche, um Rollen zu vergeben.
 - **Meldungs-Detail**: Inhalt mit Bildern, Melder, betroffenes Konto mit Verlauf und die Aktionen. Jede Aktion verlangt eine Begründung (mindestens 10 Zeichen). Bann, Wiederherstellen und Quarantäne fragen noch einmal nach.
 - **Nutzer**: Suche nach Username, Anzeigename oder ID; Konto-Detail mit Verlauf. Die E-Mail-Adresse sehen nur Admins, mit Begründung und Protokoll.
 - **Audit-Log** (nur Admins): durchsuchbar, nur lesend.
+- **Rechtstexte** (nur Admins): Versionen pro Text mit Zahlen (bestätigt, ausstehend, überfällig). Entwürfe in Markdown bearbeiten, mit Vorschau (gleicher Parser wie die App) und Vergleich zur Vorversion. Veröffentlichen zeigt die Zahl betroffener Konten und fragt Bestätigungspflicht und „blockierend“ noch einmal ab. Veröffentlichte Versionen sind unveränderlich.
+- **Offene Bestätigungen** (nur Admins): Konten, deren Prüfung fällig ist (5 Tage nach Ankündigung, danach 5 Tage nach jeder Aktion). Pro Zeile erinnern, E-Mail, zurückstellen (mit Notiz) oder sperren (einzeln, mit Begründung). Sammelaktionen nur für Erinnerungen.
+- Auf der **Übersicht** sehen Admins zusätzlich „Konten überfällig“, im **Nutzer-Detail** die Bestätigungs-Historie (Abruf wird protokolliert).
 
 Sounds gibt es in der App noch nicht, deshalb hat das Dashboard dafür keine Warteschlange.
+
+## E-Mail-Anbieter anbinden (Erinnerungen zu Rechtstexten)
+
+Erinnerungs-E-Mails verschickt die Edge Function `supabase/functions/send_legal_notice_email`. Sie nutzt **nicht** den Supabase-Standardversand (der ist nur für Anmelde-Mails gedacht und stark begrenzt), sondern einen eigenen Anbieter. Vorgesehen ist [Resend](https://resend.com); jeder Anbieter mit gleicher HTTP-API geht über `EMAIL_API_URL`.
+
+1. Beim Anbieter ein Konto anlegen, die Absender-Domain verifizieren (SPF/DKIM) und einen API-Key erstellen.
+2. Secrets in Supabase setzen (Dashboard → Edge Functions → Secrets, oder per CLI):
+   ```bash
+   npx supabase secrets set EMAIL_API_KEY=... EMAIL_FROM="PeakPic <noreply@deine-domain.ch>" ADMIN_ORIGIN=http://127.0.0.1:5174
+   ```
+   Optional `EMAIL_API_URL` (Standard: `https://api.resend.com/emails`).
+3. Deployen: `npx supabase functions deploy send_legal_notice_email`
+
+`SUPABASE_URL`, `SUPABASE_ANON_KEY` und `SUPABASE_SERVICE_ROLE_KEY` stellt Supabase der Function selbst bereit. Der service_role-Key wird nur dort verwendet, um die E-Mail-Adresse über die Auth-Admin-API zu lesen. Er gehört nie in `admin-web/.env` oder ins Repo.
+
+Die Function prüft das JWT und die Admin-Rolle (`is_admin()`, mit Zwei-Faktor), nimmt höchstens 50 Empfänger pro Aufruf, schickt nur an Konten, die tatsächlich offen sind, und protokolliert jede Mail als Aktion. Der Text ist neutral und enthält keine Links (Schutz vor Phishing-Verwechslung). Adressen werden nicht geloggt. Ist nichts eingerichtet, sind die E-Mail-Knöpfe deaktiviert und zeigen den Grund.
 
 ## Vor einem Online-Betrieb
 

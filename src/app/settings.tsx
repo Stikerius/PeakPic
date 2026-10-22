@@ -13,6 +13,9 @@ import { loadAppIconLibrary } from "@/lib/appIcon";
 import { signOut } from "@/lib/auth";
 import { describeError } from "@/lib/errors";
 import { emitAppEvent } from "@/lib/events";
+import { formatDate } from "@/lib/format";
+import { useLegalGate } from "@/lib/legalGate";
+import { LEGAL_TYPE_LABELS } from "@/lib/legalRepo";
 import { listHiddenUserIds } from "@/lib/privacyRepo";
 import {
   getMyProfile,
@@ -108,6 +111,7 @@ export default function SettingsScreen() {
   const [privacy, setPrivacy] = useState<PrivacySettings | null>(null);
   const [tags, setTags] = useState<TagSettings | null>(null);
   const requestCount = useFollowRequestCount();
+  const legal = useLegalGate();
 
   useFocusEffect(
     useCallback(() => {
@@ -336,6 +340,47 @@ export default function SettingsScreen() {
         Verborgene Personen sehen deine Storys bzw. Workout-Beiträge und deinen Kalender nicht mehr. Sie
         erfahren davon nichts.
       </Text>
+
+      <Text style={[styles.sectionTitle, styles.sectionSpacing]}>Rechtliches</Text>
+      <View style={styles.card}>
+        {(legal.status ?? []).map((doc, index) => (
+          <View key={doc.documentId}>
+            {index > 0 && <View style={styles.separator} />}
+            <SettingsRow
+              icon="document-text-outline"
+              title={LEGAL_TYPE_LABELS[doc.docType]}
+              subtitle={`Version ${doc.version} · ${
+                doc.confirmedAt !== null
+                  ? `${doc.confirmationType === "accept" ? "Akzeptiert" : "Zur Kenntnis genommen"} am ${formatDate(doc.confirmedAt)}`
+                  : doc.requiresConfirmation
+                    ? "Noch nicht bestätigt"
+                    : "Zur Information"
+              }`}
+              onPress={() => router.push({ pathname: "/legal/[docType]", params: { docType: doc.docType } })}
+            />
+          </View>
+        ))}
+        {legal.pending.length > 0 && (
+          <>
+            <View style={styles.separator} />
+            <SettingsRow
+              icon="checkmark-circle-outline"
+              title="Ausstehende Bestätigungen"
+              subtitle={`${legal.pending.length} ${legal.pending.length === 1 ? "Text" : "Texte"} zu bestätigen`}
+              onPress={() => router.push("/legal-update")}
+            />
+          </>
+        )}
+        {(legal.status ?? []).length === 0 && (
+          <SettingsRow
+            icon="document-text-outline"
+            title="Datenschutzerklärung"
+            subtitle="Lesen"
+            onPress={() => router.push({ pathname: "/legal/[docType]", params: { docType: "privacy" } })}
+          />
+        )}
+      </View>
+      <Text style={styles.footnote}>Ältere Versionen findest du am Ende des jeweiligen Texts.</Text>
 
       <View style={styles.signOut}>
         <Button label="Abmelden" variant="secondary" onPress={confirmSignOut} />

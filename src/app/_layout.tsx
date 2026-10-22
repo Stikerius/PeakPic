@@ -8,6 +8,7 @@ import { GestureHandlerRootView } from "react-native-gesture-handler";
 import { ReportProvider } from "@/components/moderation/report-provider";
 import { navigationThemeFor } from "@/constants/theme";
 import { AccountStatusProvider, useAccountStatus } from "@/lib/accountStatus";
+import { LegalGateProvider, useLegalGate } from "@/lib/legalGate";
 import { OnboardingProvider, useOnboarding } from "@/lib/onboarding";
 import { SessionProvider, useSession } from "@/lib/session";
 import { ThemeProvider, makeStyles, useTheme } from "@/lib/theme";
@@ -21,11 +22,13 @@ export default function RootLayout() {
       <ThemedRoot>
         <SessionProvider>
           <AccountStatusProvider>
-            <OnboardingProvider>
-              <ReportProvider>
-                <RootNavigator />
-              </ReportProvider>
-            </OnboardingProvider>
+            <LegalGateProvider>
+              <OnboardingProvider>
+                <ReportProvider>
+                  <RootNavigator />
+                </ReportProvider>
+              </OnboardingProvider>
+            </LegalGateProvider>
           </AccountStatusProvider>
         </SessionProvider>
       </ThemedRoot>
@@ -59,12 +62,17 @@ function RootNavigator() {
   const { session, loading } = useSession();
   const { needed: onboardingNeeded } = useOnboarding();
   const { account } = useAccountStatus();
+  const legal = useLegalGate();
   const signedIn = session !== null;
   // A suspended, banned or deleting account only gets the "Konto gesperrt" screen.
   const locked = signedIn && account !== null && account.status !== "active";
   // Splash stays up until we know the account status and whether the intro comes first
   // (each check gives up after a few seconds).
-  const ready = !loading && !(signedIn && (account === null || (!locked && onboardingNeeded === null)));
+  // Current legal texts that still need a confirmation come before the intro and the app.
+  const legalNeeded = signedIn && !locked && legal.needed;
+  const ready =
+    !loading &&
+    !(signedIn && (account === null || (!locked && (legal.status === null || onboardingNeeded === null))));
 
   useEffect(() => {
     if (ready) void SplashScreen.hideAsync();
@@ -89,7 +97,7 @@ function RootNavigator() {
       }}
     >
       {/* Login first, then the account status, then the intro (if not done yet), then the app. */}
-      <Stack.Protected guard={signedIn && !locked && onboardingNeeded !== true}>
+      <Stack.Protected guard={signedIn && !locked && !legalNeeded && onboardingNeeded !== true}>
         <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
         <Stack.Screen name="search" options={{ title: "Leute finden", presentation: "modal" }} />
         <Stack.Screen
@@ -137,16 +145,22 @@ function RootNavigator() {
           options={{ headerShown: false, presentation: "fullScreenModal", animation: "fade" }}
         />
       </Stack.Protected>
-      <Stack.Protected guard={signedIn && locked}>
-        <Stack.Screen name="account-locked" options={{ headerShown: false, gestureEnabled: false }} />
-      </Stack.Protected>
-      <Stack.Protected guard={signedIn && !locked}>
+      <Stack.Protected guard={signedIn && !locked && !legalNeeded}>
         {/* Also reachable later from the settings ("Einführung nochmal ansehen"). */}
         <Stack.Screen name="onboarding" options={{ headerShown: false, gestureEnabled: false, animation: "fade" }} />
+      </Stack.Protected>
+      <Stack.Protected guard={signedIn && !locked}>
+        {/* The gate after login, and reachable from the legal update notice. */}
+        <Stack.Screen name="legal-update" options={{ headerShown: false, gestureEnabled: false, animation: "fade" }} />
+      </Stack.Protected>
+      <Stack.Protected guard={signedIn && locked}>
+        <Stack.Screen name="account-locked" options={{ headerShown: false, gestureEnabled: false }} />
       </Stack.Protected>
       <Stack.Protected guard={!signedIn}>
         <Stack.Screen name="login" options={{ headerShown: false }} />
       </Stack.Protected>
+      {/* Legal texts are readable in every state: signed out, in the gate, while suspended. */}
+      <Stack.Screen name="legal/[docType]" options={{ title: "", presentation: "modal" }} />
     </Stack>
   );
 }

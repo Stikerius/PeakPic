@@ -8,7 +8,9 @@ export type Visibility = "everyone" | "followers";
 export type FollowRowStatus = "pending" | "accepted";
 export type TagPermission = "everyone" | "connections" | "nobody";
 export type WorkoutShareStatus = "pending" | "accepted" | "declined";
-export type NotificationType = "tag" | "workout_tag_request" | "workout_tag_accepted" | "follow_request";
+export type NotificationType = "tag" | "workout_tag_request" | "workout_tag_accepted" | "follow_request" | "legal_update";
+export type LegalDocType = "terms" | "privacy" | "guidelines";
+export type LegalConfirmationType = "accept" | "acknowledge";
 export type Json = string | number | boolean | null | Json[] | { [key: string]: Json };
 export type AudienceScope = "stories" | "posts";
 export type AccountStatus = "active" | "suspended" | "banned" | "deleting";
@@ -430,7 +432,7 @@ export type Database = {
         Row: {
           id: Uuid;
           user_id: Uuid;
-          actor_id: Uuid;
+          actor_id: Uuid | null;
           type: NotificationType;
           post_id: Uuid | null;
           story_id: Uuid | null;
@@ -480,6 +482,57 @@ export type Database = {
       username_available: { Args: { name: string }; Returns: boolean };
       mark_moderation_notices_read: { Args: Record<string, never>; Returns: undefined };
       conversation_has_block: { Args: { conversation: Uuid }; Returns: boolean };
+      get_current_legal_documents: {
+        Args: Record<string, never>;
+        Returns: {
+          id: Uuid;
+          doc_type: LegalDocType;
+          version: number;
+          title: string;
+          body_md: string;
+          change_summary: string | null;
+          confirmation_type: LegalConfirmationType;
+          requires_confirmation: boolean;
+          blocking: boolean;
+          grace_days: number;
+          published_at: Timestamp;
+          content_hash: string;
+        }[];
+      };
+      get_legal_document_versions: {
+        Args: { p_doc_type: LegalDocType };
+        Returns: { id: Uuid; version: number; title: string; published_at: Timestamp; status: string }[];
+      };
+      get_legal_document: {
+        Args: { p_id: Uuid };
+        Returns: {
+          id: Uuid;
+          doc_type: LegalDocType;
+          version: number;
+          title: string;
+          body_md: string;
+          change_summary: string | null;
+          confirmation_type: LegalConfirmationType;
+          published_at: Timestamp;
+          status: string;
+        }[];
+      };
+      get_my_legal_status: {
+        Args: Record<string, never>;
+        Returns: {
+          document_id: Uuid;
+          doc_type: LegalDocType;
+          version: number;
+          title: string;
+          requires_confirmation: boolean;
+          confirmation_type: LegalConfirmationType;
+          confirmed_at: Timestamp | null;
+          last_confirmed_version: number | null;
+          last_confirmed_at: Timestamp | null;
+          can_postpone: boolean;
+        }[];
+      };
+      confirm_legal_documents: { Args: { p_document_ids: Uuid[]; p_app_version: string }; Returns: number };
       get_my_account_status: {
         Args: Record<string, never>;
         Returns: { status: AccountStatus; suspended_until: Timestamp | null; reason_code: string | null; message: string | null }[];

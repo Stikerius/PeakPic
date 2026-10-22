@@ -78,6 +78,12 @@
 --   * moderation    posts, stories, comments and messages can be 'removed' or 'quarantined'
 --                   (moderation_state): hidden from everyone including the owner, never
 --                   deleted, files stay. Moderators see chats only through report_snapshots.
+--   * legal texts   legal_documents (terms are accepted, privacy policy and guidelines only
+--                   acknowledged). Users only ever see published versions; published versions
+--                   can't change (corrections are new versions). legal_confirmations are
+--                   written only by confirm_legal_documents() (server time, type and hash) and
+--                   never changed or deleted, except together with the account. Admins
+--                   publish, remind and suspend through admin_legal_* functions (aal2, logged).
 --   * storage       bucket "photos" (private), objects live under {user_id}/{kind}/...;
 --                   a photo is readable exactly when its post/story is (avatars: everyone)
 -- =============================================================================
@@ -658,6 +664,63 @@ create table if not exists public.moderation_notices (
   read_at    timestamptz
 );
 create index if not exists moderation_notices_user_idx on public.moderation_notices (user_id, created_at desc);
+
+-- Legal texts. Every type ('terms' | 'privacy' | 'guidelines') has numbered versions; the newest
+-- published version is the current one. Published versions are frozen (legal_documents_guard).
+create table if not exists public.legal_documents (
+  id                    uuid primary key default gen_random_uuid(),
+  doc_type              text not null check (doc_type in ('terms', 'privacy', 'guidelines')),
+  version               integer not null check (version >= 1),
+  title                 text not null check (char_length(title) between 1 and 120),
+  body_md               text not null check (char_length(body_md) between 1 and 200000),
+  change_summary        text check (char_length(change_summary) <= 2000),
+  status                text not null default 'draft' check (status in ('draft', 'published', 'archived')),
+  -- Terms are accepted; the privacy policy and guidelines are only acknowledged (information,
+  -- not consent).
+  confirmation_type     text not null check (confirmation_type in ('accept', 'acknowledge')),
+  requires_confirmation boolean not null default true,
+  blocking              boolean not null default false,
+  grace_days            integer not null default 5 check (grace_days between 0 and 60),
+  content_hash          text,
+  published_at          timestamptz,
+  announced_at          timestamptz,
+  created_by            uuid,
+  created_at            timestamptz not null default now(),
+  unique (doc_type, version)
+);
+
+-- Who confirmed which version. Only confirm_legal_documents() writes here; nothing changes or
+-- deletes rows, except deleting the account (cascade). No IP addresses, no device ids.
+create table if not exists public.legal_confirmations (
+  user_id                 uuid not null references public.profiles (id) on delete cascade,
+  document_id             uuid not null references public.legal_documents (id),
+  confirmation_type       text not null check (confirmation_type in ('accept', 'acknowledge')),
+  confirmed_at            timestamptz not null default now(),
+  app_version             text check (char_length(app_version) <= 32),
+  content_hash_at_confirm text not null,
+  primary key (user_id, document_id)
+);
+create index if not exists legal_confirmations_document_idx on public.legal_confirmations (document_id);
+
+-- Reminder rhythm per user and version (every 5 days until confirmed; computed when read).
+create table if not exists public.confirmation_followups (
+  user_id        uuid not null references public.profiles (id) on delete cascade,
+  document_id    uuid not null references public.legal_documents (id) on delete cascade,
+  last_action    text,
+  last_action_at timestamptz,
+  next_review_at timestamptz not null,
+  action_count   integer not null default 0,
+  note           text check (char_length(note) <= 500),
+  primary key (user_id, document_id)
+);
+create index if not exists confirmation_followups_due_idx on public.confirmation_followups (document_id, next_review_at);
+
+-- Legal update notices have no sender: notifications may come without an actor.
+alter table public.notifications alter column actor_id drop not null;
+alter table public.notifications drop constraint if exists notifications_type_check;
+alter table public.notifications
+  add constraint notifications_type_check
+  check (type in ('tag', 'workout_tag_request', 'workout_tag_accepted', 'follow_request', 'legal_update'));
 
 -- Removed instead of deleted: content stays as evidence, files stay in storage.
 -- moderation_state: null = visible, 'removed' or 'quarantined' (possibly illegal, admins only).
@@ -2974,6 +3037,602 @@ as $$
   where user_id = (select auth.uid()) and read_at is null;
 $$;
 
+-- ---------------------------------------------------------------- legal texts
+-- SHA-256 of a text (hex). Used for the hash of a published version and of each confirmation.
+create or replace function public.legal_hash(content text)
+returns text
+language sql immutable set search_path = ''
+as $$
+  select encode(pg_catalog.sha256(convert_to(content, 'UTF8')), 'hex');
+$$;
+
+-- Published versions are frozen: only published -> archived and setting announced_at once.
+-- Drafts change only through the admin functions (clients have no table rights).
+create or replace function public.guard_legal_document()
+returns trigger
+language plpgsql set search_path = ''
+as $$
+begin
+  if tg_op = 'DELETE' then
+    if old.status <> 'draft' then
+      raise exception 'published legal documents can not be deleted';
+    end if;
+    return old;
+  end if;
+  if old.status = 'draft' then
+    return new;
+  end if;
+  if new.doc_type is distinct from old.doc_type or new.version is distinct from old.version
+    or new.title is distinct from old.title or new.body_md is distinct from old.body_md
+    or new.change_summary is distinct from old.change_summary
+    or new.confirmation_type is distinct from old.confirmation_type
+    or new.requires_confirmation is distinct from old.requires_confirmation
+    or new.blocking is distinct from old.blocking or new.grace_days is distinct from old.grace_days
+    or new.content_hash is distinct from old.content_hash or new.published_at is distinct from old.published_at
+    or new.created_by is distinct from old.created_by or new.created_at is distinct from old.created_at
+    or (old.announced_at is not null and new.announced_at is distinct from old.announced_at)
+    or (new.status <> old.status and not (old.status = 'published' and new.status = 'archived')) then
+    raise exception 'published legal documents are immutable; publish a new version instead';
+  end if;
+  return new;
+end;
+$$;
+
+-- Confirmations: never changed; deleted only together with the account (the profile row is
+-- already gone when the cascade reaches this table).
+create or replace function public.guard_legal_confirmation()
+returns trigger
+language plpgsql set search_path = ''
+as $$
+begin
+  if tg_op = 'UPDATE' then
+    raise exception 'legal confirmations can not be changed';
+  end if;
+  if exists (select 1 from public.profiles p where p.id = old.user_id) then
+    raise exception 'legal confirmations are deleted only together with the account';
+  end if;
+  return old;
+end;
+$$;
+
+-- The current version of each type (newest published).
+create or replace function public.current_legal_documents()
+returns setof public.legal_documents
+language sql stable security definer set search_path = ''
+as $$
+  select distinct on (d.doc_type) d.*
+  from public.legal_documents d
+  where d.status = 'published'
+  order by d.doc_type, d.version desc;
+$$;
+
+-- For everyone, also without login and for suspended accounts: the current published texts.
+create or replace function public.get_current_legal_documents()
+returns table (
+  id uuid, doc_type text, version integer, title text, body_md text, change_summary text,
+  confirmation_type text, requires_confirmation boolean, blocking boolean, grace_days integer,
+  published_at timestamptz, content_hash text
+)
+language sql stable security definer set search_path = ''
+as $$
+  select d.id, d.doc_type, d.version, d.title, d.body_md, d.change_summary, d.confirmation_type,
+         d.requires_confirmation, d.blocking, d.grace_days, d.published_at, d.content_hash
+  from public.current_legal_documents() d
+  order by array_position(array['terms', 'privacy', 'guidelines'], d.doc_type);
+$$;
+
+-- Older versions of one type, read-only (published and archived; never drafts).
+create or replace function public.get_legal_document_versions(p_doc_type text)
+returns table (id uuid, version integer, title text, published_at timestamptz, status text)
+language sql stable security definer set search_path = ''
+as $$
+  select d.id, d.version, d.title, d.published_at, d.status
+  from public.legal_documents d
+  where d.doc_type = p_doc_type and d.status in ('published', 'archived')
+  order by d.version desc;
+$$;
+
+create or replace function public.get_legal_document(p_id uuid)
+returns table (
+  id uuid, doc_type text, version integer, title text, body_md text, change_summary text,
+  confirmation_type text, published_at timestamptz, status text
+)
+language sql stable security definer set search_path = ''
+as $$
+  select d.id, d.doc_type, d.version, d.title, d.body_md, d.change_summary, d.confirmation_type, d.published_at, d.status
+  from public.legal_documents d
+  where d.id = p_id and d.status in ('published', 'archived');
+$$;
+
+-- My status per current document: confirmed (this version) or not, my last confirmation of
+-- this type, and whether "Später" is possible (only for an update of a text I confirmed in an
+-- earlier version, and only if the version isn't blocking). Also for suspended accounts.
+create or replace function public.get_my_legal_status()
+returns table (
+  document_id uuid, doc_type text, version integer, title text, requires_confirmation boolean,
+  confirmation_type text, confirmed_at timestamptz, last_confirmed_version integer,
+  last_confirmed_at timestamptz, can_postpone boolean
+)
+language sql stable security definer set search_path = ''
+as $$
+  select d.id, d.doc_type, d.version, d.title, d.requires_confirmation, d.confirmation_type,
+         mine.confirmed_at, prev.version, prev.confirmed_at,
+         not d.blocking and prev.version is not null
+  from public.current_legal_documents() d
+  left join public.legal_confirmations mine
+    on mine.document_id = d.id and mine.user_id = (select auth.uid())
+  left join lateral (
+    select od.version, c.confirmed_at
+    from public.legal_confirmations c
+    join public.legal_documents od on od.id = c.document_id
+    where c.user_id = (select auth.uid()) and od.doc_type = d.doc_type
+    order by od.version desc limit 1
+  ) prev on true
+  where (select auth.uid()) is not null
+  order by array_position(array['terms', 'privacy', 'guidelines'], d.doc_type);
+$$;
+
+-- Confirms current versions for the caller (also while suspended). The server sets time, type
+-- and hash. A suspension with reason 'terms_pending' ends once nothing required is missing
+-- (logged); suspensions for other reasons stay.
+create or replace function public.confirm_legal_documents(p_document_ids uuid[], p_app_version text default null)
+returns integer
+language plpgsql security definer set search_path = ''
+as $$
+declare
+  me uuid := auth.uid();
+  doc public.legal_documents%rowtype;
+  added integer := 0;
+  profile_status text;
+  profile_reason text;
+begin
+  if me is null then
+    raise exception 'not authenticated';
+  end if;
+  if p_document_ids is null or cardinality(p_document_ids) = 0 or cardinality(p_document_ids) > 10 then
+    raise exception 'invalid_documents';
+  end if;
+  for doc in
+    select d.* from public.current_legal_documents() d where d.id = any (p_document_ids)
+  loop
+    insert into public.legal_confirmations (user_id, document_id, confirmation_type, confirmed_at, app_version, content_hash_at_confirm)
+    values (me, doc.id, doc.confirmation_type, now(), left(btrim(coalesce(p_app_version, '')), 32), doc.content_hash)
+    on conflict (user_id, document_id) do nothing;
+    if found then
+      added := added + 1;
+    end if;
+    delete from public.confirmation_followups where user_id = me and document_id = doc.id;
+  end loop;
+  if added = 0 and not exists (
+    select 1 from public.current_legal_documents() d where d.id = any (p_document_ids)
+  ) then
+    raise exception 'documents_not_current';
+  end if;
+  update public.notifications set read_at = coalesce(read_at, now())
+  where user_id = me and type = 'legal_update';
+
+  select p.account_status, p.suspension_reason_code into profile_status, profile_reason
+  from public.profiles p where p.id = me for update;
+  if profile_status = 'suspended' and profile_reason = 'terms_pending' and not exists (
+    select 1 from public.current_legal_documents() d
+    where d.requires_confirmation
+      and not exists (select 1 from public.legal_confirmations c where c.user_id = me and c.document_id = d.id)
+  ) then
+    update public.profiles
+    set account_status = 'active', suspended_until = null, suspension_reason_code = null,
+        moderation_message = null, moderation_updated_at = now()
+    where id = me;
+    perform public.log_moderation_action(
+      'auto_unsuspend_terms', 'profile', me, me, null,
+      'Rechtstexte bestätigt, Sperre terms_pending automatisch aufgehoben', null, '{}'
+    );
+  end if;
+  return added;
+end;
+$$;
+
+-- Accounts that count for announcements and reminders: active (or an expired suspension).
+-- Internal.
+create or replace function public.legal_due_at(doc public.legal_documents, f_next timestamptz)
+returns timestamptz
+language sql immutable set search_path = ''
+as $$
+  select coalesce(f_next, doc.announced_at + make_interval(days => doc.grace_days));
+$$;
+
+-- Announces a published version: in-app notice for every active account and a reminder entry
+-- due after grace_days. Runs once per version. Admin, logged.
+create or replace function public.admin_announce_legal_update(p_document_id uuid)
+returns integer
+language plpgsql security definer set search_path = ''
+as $$
+declare
+  doc public.legal_documents%rowtype;
+  affected integer;
+begin
+  perform public.require_admin();
+  select * into doc from public.legal_documents d where d.id = p_document_id for update;
+  if not found or doc.status <> 'published' then
+    raise exception 'document_not_published';
+  end if;
+  if doc.announced_at is not null then
+    raise exception 'already_announced';
+  end if;
+  update public.legal_documents set announced_at = now() where id = doc.id returning * into doc;
+  if doc.requires_confirmation then
+    insert into public.notifications (user_id, actor_id, type, payload)
+    select p.id, null, 'legal_update',
+           jsonb_build_object('document_id', doc.id, 'doc_type', doc.doc_type, 'version', doc.version)
+    from public.profiles p
+    where public.account_is_active(p.id)
+      and not exists (select 1 from public.legal_confirmations c where c.user_id = p.id and c.document_id = doc.id);
+    get diagnostics affected = row_count;
+    insert into public.confirmation_followups (user_id, document_id, next_review_at)
+    select p.id, doc.id, doc.announced_at + make_interval(days => doc.grace_days)
+    from public.profiles p
+    where public.account_is_active(p.id)
+      and not exists (select 1 from public.legal_confirmations c where c.user_id = p.id and c.document_id = doc.id)
+    on conflict (user_id, document_id) do nothing;
+  else
+    affected := 0;
+  end if;
+  perform public.log_moderation_action(
+    'legal_announce', 'legal_document', doc.id, null, null,
+    format('Version %s von %s angekündigt', doc.version, doc.doc_type), null,
+    jsonb_build_object('doc_type', doc.doc_type, 'version', doc.version, 'affected_users', affected)
+  );
+  return affected;
+end;
+$$;
+
+-- Creates (p_id null: next version number) or updates a draft. Admin, logged.
+create or replace function public.admin_legal_save_draft(
+  p_id uuid, p_doc_type text, p_title text, p_body_md text, p_change_summary text,
+  p_confirmation_type text, p_requires_confirmation boolean, p_blocking boolean, p_grace_days integer
+)
+returns uuid
+language plpgsql security definer set search_path = ''
+as $$
+declare
+  draft uuid;
+  next_version integer;
+begin
+  perform public.require_admin();
+  if p_id is null then
+    select coalesce(max(d.version), 0) + 1 into next_version from public.legal_documents d where d.doc_type = p_doc_type;
+    insert into public.legal_documents
+      (doc_type, version, title, body_md, change_summary, confirmation_type, requires_confirmation, blocking, grace_days, created_by)
+    values (p_doc_type, next_version, btrim(p_title), p_body_md, nullif(btrim(coalesce(p_change_summary, '')), ''),
+            p_confirmation_type, coalesce(p_requires_confirmation, true), coalesce(p_blocking, false),
+            coalesce(p_grace_days, 5), auth.uid())
+    returning id into draft;
+  else
+    update public.legal_documents
+    set title = btrim(p_title), body_md = p_body_md, change_summary = nullif(btrim(coalesce(p_change_summary, '')), ''),
+        confirmation_type = p_confirmation_type, requires_confirmation = coalesce(p_requires_confirmation, true),
+        blocking = coalesce(p_blocking, false), grace_days = coalesce(p_grace_days, 5)
+    where id = p_id and status = 'draft'
+    returning id into draft;
+    if draft is null then
+      raise exception 'draft_not_found';
+    end if;
+  end if;
+  perform public.log_moderation_action(
+    'legal_save_draft', 'legal_document', draft, null, null, 'Entwurf eines Rechtstexts gespeichert', null,
+    jsonb_build_object('doc_type', p_doc_type)
+  );
+  return draft;
+end;
+$$;
+
+create or replace function public.admin_legal_delete_draft(p_id uuid, p_reason text)
+returns void
+language plpgsql security definer set search_path = ''
+as $$
+declare
+  why text := public.checked_reason(p_reason);
+begin
+  perform public.require_admin();
+  delete from public.legal_documents where id = p_id and status = 'draft';
+  if not found then
+    raise exception 'draft_not_found';
+  end if;
+  perform public.log_moderation_action('legal_delete_draft', 'legal_document', p_id, null, null, why, null, '{}');
+end;
+$$;
+
+-- How many accounts a publication concerns (active accounts), for the publish dialog.
+create or replace function public.admin_legal_affected_count()
+returns integer
+language plpgsql stable security definer set search_path = ''
+as $$
+begin
+  perform public.require_admin();
+  return (select count(*) from public.profiles p where public.account_is_active(p.id));
+end;
+$$;
+
+-- Publishes a draft: hash, published_at, the previous version is archived, and the version is
+-- announced right away (notices and reminders). New sign-ups need it immediately. Admin, logged.
+create or replace function public.admin_legal_publish(p_id uuid, p_reason text)
+returns integer
+language plpgsql security definer set search_path = ''
+as $$
+declare
+  why text := public.checked_reason(p_reason);
+  doc public.legal_documents%rowtype;
+begin
+  perform public.require_admin();
+  select * into doc from public.legal_documents d where d.id = p_id for update;
+  if not found or doc.status <> 'draft' then
+    raise exception 'draft_not_found';
+  end if;
+  if exists (
+    select 1 from public.legal_documents d
+    where d.doc_type = doc.doc_type and d.status in ('published', 'archived') and d.version > doc.version
+  ) then
+    raise exception 'newer_version_exists';
+  end if;
+  update public.legal_documents set status = 'archived'
+  where doc_type = doc.doc_type and status = 'published';
+  update public.legal_documents
+  set status = 'published', published_at = now(), content_hash = public.legal_hash(body_md)
+  where id = doc.id;
+  perform public.log_moderation_action(
+    'legal_publish', 'legal_document', doc.id, null, null, why, null,
+    jsonb_build_object('doc_type', doc.doc_type, 'version', doc.version,
+                       'requires_confirmation', doc.requires_confirmation, 'blocking', doc.blocking)
+  );
+  return public.admin_announce_legal_update(doc.id);
+end;
+$$;
+
+-- All versions with numbers (confirmed, pending, overdue). Admin.
+create or replace function public.admin_legal_list()
+returns table (
+  id uuid, doc_type text, version integer, title text, status text, confirmation_type text,
+  requires_confirmation boolean, blocking boolean, grace_days integer, change_summary text,
+  published_at timestamptz, announced_at timestamptz, created_at timestamptz, content_hash text,
+  confirmed bigint, pending bigint, overdue bigint
+)
+language plpgsql stable security definer set search_path = ''
+as $$
+begin
+  perform public.require_admin();
+  return query
+  select d.id, d.doc_type, d.version, d.title, d.status, d.confirmation_type, d.requires_confirmation,
+         d.blocking, d.grace_days, d.change_summary, d.published_at, d.announced_at, d.created_at, d.content_hash,
+         (select count(*) from public.legal_confirmations c where c.document_id = d.id),
+         case when d.status = 'published' and d.requires_confirmation then
+           (select count(*) from public.profiles p
+            where public.account_is_active(p.id)
+              and not exists (select 1 from public.legal_confirmations c where c.user_id = p.id and c.document_id = d.id))
+         else 0 end,
+         case when d.status = 'published' and d.requires_confirmation and d.announced_at is not null then
+           (select count(*) from public.profiles p
+            left join public.confirmation_followups f on f.user_id = p.id and f.document_id = d.id
+            where p.account_status = 'active'
+              and not exists (select 1 from public.legal_confirmations c where c.user_id = p.id and c.document_id = d.id)
+              and public.legal_due_at(d, f.next_review_at) <= now())
+         else 0 end
+  from public.legal_documents d
+  order by d.doc_type, d.version desc;
+end;
+$$;
+
+-- One version including its text (also drafts). Admin.
+create or replace function public.admin_legal_document(p_id uuid)
+returns setof public.legal_documents
+language plpgsql stable security definer set search_path = ''
+as $$
+begin
+  perform public.require_admin();
+  return query select * from public.legal_documents d where d.id = p_id;
+end;
+$$;
+
+-- "Offene Bestätigungen": active accounts (not suspended, banned or deleting) that haven't
+-- confirmed a current, required version and whose review date has come. Computed now. Admin.
+create or replace function public.admin_legal_pending(p_limit integer default 100, p_offset integer default 0)
+returns table (
+  user_id uuid, username text, display_name text, document_id uuid, doc_type text, version integer,
+  announced_at timestamptz, days_since_announce integer, action_count integer, last_action text,
+  last_action_at timestamptz, due_at timestamptz, note text
+)
+language plpgsql stable security definer set search_path = ''
+as $$
+begin
+  perform public.require_admin();
+  return query
+  select p.id, p.username, p.display_name, d.id, d.doc_type, d.version, d.announced_at,
+         floor(extract(epoch from now() - d.announced_at) / 86400)::integer,
+         coalesce(f.action_count, 0), f.last_action, f.last_action_at,
+         public.legal_due_at(d, f.next_review_at), f.note
+  from public.current_legal_documents() d
+  join public.profiles p on p.account_status = 'active'
+  left join public.confirmation_followups f on f.user_id = p.id and f.document_id = d.id
+  where d.requires_confirmation and d.announced_at is not null
+    and not exists (select 1 from public.legal_confirmations c where c.user_id = p.id and c.document_id = d.id)
+    and public.legal_due_at(d, f.next_review_at) <= now()
+  order by public.legal_due_at(d, f.next_review_at), p.username
+  limit least(greatest(coalesce(p_limit, 100), 1), 500) offset greatest(coalesce(p_offset, 0), 0);
+end;
+$$;
+
+-- Internal: records a reminder step and moves the next review 5 days ahead.
+create or replace function public.legal_followup_step(p_user uuid, p_document uuid, p_action text, p_note text)
+returns void
+language sql security definer set search_path = ''
+as $$
+  insert into public.confirmation_followups (user_id, document_id, last_action, last_action_at, next_review_at, action_count, note)
+  values (p_user, p_document, p_action, now(), now() + interval '5 days', 1, nullif(btrim(coalesce(p_note, '')), ''))
+  on conflict (user_id, document_id) do update
+    set last_action = excluded.last_action, last_action_at = excluded.last_action_at,
+        next_review_at = excluded.next_review_at,
+        action_count = public.confirmation_followups.action_count + 1,
+        note = coalesce(excluded.note, public.confirmation_followups.note);
+$$;
+
+-- Is this user still missing this current, required version? Internal.
+create or replace function public.legal_is_pending(p_user uuid, p_document uuid)
+returns boolean
+language sql stable security definer set search_path = ''
+as $$
+  select exists (
+    select 1 from public.current_legal_documents() d
+    where d.id = p_document and d.requires_confirmation
+      and not exists (select 1 from public.legal_confirmations c where c.user_id = p_user and c.document_id = d.id)
+  );
+$$;
+
+-- One reminder step for one user: 'notify' (new in-app notice), 'email' (recorded by the
+-- e-mail Edge Function after sending) or 'defer' (with a note). Admin, logged.
+create or replace function public.admin_legal_followup(p_user_id uuid, p_document_id uuid, p_action text, p_note text default null)
+returns void
+language plpgsql security definer set search_path = ''
+as $$
+declare
+  doc public.legal_documents%rowtype;
+begin
+  perform public.require_admin();
+  if p_action not in ('notify', 'email', 'defer') then
+    raise exception 'invalid_action';
+  end if;
+  if p_action = 'defer' and nullif(btrim(coalesce(p_note, '')), '') is null then
+    raise exception 'note_required';
+  end if;
+  if not public.legal_is_pending(p_user_id, p_document_id) then
+    raise exception 'not_pending';
+  end if;
+  select * into doc from public.legal_documents d where d.id = p_document_id;
+  if p_action = 'notify' then
+    insert into public.notifications (user_id, actor_id, type, payload)
+    values (p_user_id, null, 'legal_update',
+            jsonb_build_object('document_id', doc.id, 'doc_type', doc.doc_type, 'version', doc.version, 'reminder', true));
+  end if;
+  perform public.legal_followup_step(p_user_id, p_document_id, p_action, p_note);
+  perform public.log_moderation_action(
+    'legal_' || p_action, 'legal_document', p_document_id, p_user_id, null,
+    case p_action when 'notify' then 'Erinnerung an Rechtstext in der App'
+                  when 'email' then 'Erinnerung an Rechtstext per E-Mail'
+                  else 'Erinnerung an Rechtstext zurückgestellt' end,
+    null, jsonb_build_object('doc_type', doc.doc_type, 'version', doc.version, 'note', nullif(btrim(coalesce(p_note, '')), ''))
+  );
+end;
+$$;
+
+-- Reminders for a selection of overdue users (the only bulk action), at most 200. Admin, logged.
+create or replace function public.admin_legal_bulk_notify(p_user_ids uuid[], p_document_id uuid)
+returns integer
+language plpgsql security definer set search_path = ''
+as $$
+declare
+  target uuid;
+  done integer := 0;
+begin
+  perform public.require_admin();
+  if p_user_ids is null or cardinality(p_user_ids) = 0 or cardinality(p_user_ids) > 200 then
+    raise exception 'invalid_selection';
+  end if;
+  foreach target in array p_user_ids loop
+    if public.legal_is_pending(target, p_document_id)
+      and exists (select 1 from public.profiles p where p.id = target and p.account_status = 'active') then
+      perform public.admin_legal_followup(target, p_document_id, 'notify', null);
+      done := done + 1;
+    end if;
+  end loop;
+  return done;
+end;
+$$;
+
+-- Suspends one user until they confirm (reason code 'terms_pending'; lifted automatically by
+-- confirm_legal_documents). Single users only. Admin, logged.
+create or replace function public.admin_legal_suspend(p_user_id uuid, p_document_id uuid, p_reason text, p_user_message text)
+returns uuid
+language plpgsql security definer set search_path = ''
+as $$
+declare
+  action uuid;
+begin
+  perform public.require_admin();
+  if not public.legal_is_pending(p_user_id, p_document_id) then
+    raise exception 'not_pending';
+  end if;
+  if nullif(btrim(coalesce(p_user_message, '')), '') is null then
+    raise exception 'user_message_required';
+  end if;
+  action := public.mod_suspend_user(p_user_id, null, p_reason, p_user_message, 'terms_pending', null);
+  perform public.legal_followup_step(p_user_id, p_document_id, 'suspend', null);
+  return action;
+end;
+$$;
+
+-- For the e-mail Edge Function: which of these users are still pending and active (at most 50).
+create or replace function public.admin_legal_email_targets(p_user_ids uuid[], p_document_id uuid)
+returns table (user_id uuid)
+language plpgsql stable security definer set search_path = ''
+as $$
+begin
+  perform public.require_admin();
+  if p_user_ids is null or cardinality(p_user_ids) > 50 then
+    raise exception 'invalid_selection';
+  end if;
+  return query
+  select p.id from public.profiles p
+  where p.id = any (p_user_ids) and p.account_status = 'active' and public.legal_is_pending(p.id, p_document_id);
+end;
+$$;
+
+-- Overview card: overdue accounts and the oldest overdue date. Admin.
+create or replace function public.admin_legal_overview()
+returns jsonb
+language plpgsql stable security definer set search_path = ''
+as $$
+begin
+  perform public.require_admin();
+  return (
+    select jsonb_build_object('overdue', count(*), 'oldest_due_at', min(public.legal_due_at(d, f.next_review_at)))
+    from public.current_legal_documents() d
+    join public.profiles p on p.account_status = 'active'
+    left join public.confirmation_followups f on f.user_id = p.id and f.document_id = d.id
+    where d.requires_confirmation and d.announced_at is not null
+      and not exists (select 1 from public.legal_confirmations c where c.user_id = p.id and c.document_id = d.id)
+      and public.legal_due_at(d, f.next_review_at) <= now()
+  );
+end;
+$$;
+
+-- Confirmation history and reminders of one user. Admin, logged.
+create or replace function public.admin_legal_user_history(p_user_id uuid)
+returns jsonb
+language plpgsql security definer set search_path = ''
+as $$
+declare
+  result jsonb;
+begin
+  perform public.require_admin();
+  result := jsonb_build_object(
+    'confirmations', coalesce((
+      select jsonb_agg(jsonb_build_object(
+        'doc_type', d.doc_type, 'version', d.version, 'confirmation_type', c.confirmation_type,
+        'confirmed_at', c.confirmed_at, 'content_hash', c.content_hash_at_confirm, 'app_version', c.app_version
+      ) order by c.confirmed_at desc)
+      from public.legal_confirmations c join public.legal_documents d on d.id = c.document_id
+      where c.user_id = p_user_id), '[]'::jsonb),
+    'followups', coalesce((
+      select jsonb_agg(jsonb_build_object(
+        'doc_type', d.doc_type, 'version', d.version, 'last_action', f.last_action, 'last_action_at', f.last_action_at,
+        'next_review_at', f.next_review_at, 'action_count', f.action_count, 'note', f.note
+      ) order by d.doc_type)
+      from public.confirmation_followups f join public.legal_documents d on d.id = f.document_id
+      where f.user_id = p_user_id), '[]'::jsonb)
+  );
+  perform public.log_moderation_action('view_legal_history', 'profile', p_user_id, p_user_id, null,
+    'Bestätigungs-Historie im Dashboard geöffnet', null, '{}');
+  return result;
+end;
+$$;
+
 -- Returns the 1:1 conversation with `other_user`, creating it if needed.
 -- Only allowed with people you follow. Conversations and members are created
 -- exclusively through this function.
@@ -3138,6 +3797,16 @@ drop trigger if exists workout_shares_training_added on public.workout_shares;
 create trigger workout_shares_training_added
   after update of status on public.workout_shares
   for each row execute function public.on_training_added();
+
+drop trigger if exists legal_documents_guard on public.legal_documents;
+create trigger legal_documents_guard
+  before update or delete on public.legal_documents
+  for each row execute function public.guard_legal_document();
+
+drop trigger if exists legal_confirmations_guard on public.legal_confirmations;
+create trigger legal_confirmations_guard
+  before update or delete on public.legal_confirmations
+  for each row execute function public.guard_legal_confirmation();
 
 drop trigger if exists moderation_actions_append_only on public.moderation_actions;
 create trigger moderation_actions_append_only
@@ -3308,6 +3977,40 @@ begin
   end loop;
 end;
 $$;
+-- Legal texts: published texts for everyone (also signed out); the rest for signed-in users.
+do $$
+declare
+  f text;
+begin
+  foreach f in array array[
+    'public.get_current_legal_documents()', 'public.get_legal_document_versions(text)', 'public.get_legal_document(uuid)'
+  ] loop
+    execute format('revoke all on function %s from public', f);
+    execute format('grant execute on function %s to anon, authenticated', f);
+  end loop;
+  foreach f in array array[
+    'public.get_my_legal_status()', 'public.confirm_legal_documents(uuid[], text)',
+    'public.admin_announce_legal_update(uuid)',
+    'public.admin_legal_save_draft(uuid, text, text, text, text, text, boolean, boolean, integer)',
+    'public.admin_legal_delete_draft(uuid, text)', 'public.admin_legal_affected_count()',
+    'public.admin_legal_publish(uuid, text)', 'public.admin_legal_list()', 'public.admin_legal_document(uuid)',
+    'public.admin_legal_pending(integer, integer)', 'public.admin_legal_followup(uuid, uuid, text, text)',
+    'public.admin_legal_bulk_notify(uuid[], uuid)', 'public.admin_legal_suspend(uuid, uuid, text, text)',
+    'public.admin_legal_email_targets(uuid[], uuid)', 'public.admin_legal_overview()',
+    'public.admin_legal_user_history(uuid)'
+  ] loop
+    execute format('revoke all on function %s from public, anon', f);
+    execute format('grant execute on function %s to authenticated', f);
+  end loop;
+  foreach f in array array[
+    'public.legal_hash(text)', 'public.guard_legal_document()', 'public.guard_legal_confirmation()',
+    'public.current_legal_documents()', 'public.legal_due_at(public.legal_documents, timestamptz)',
+    'public.legal_followup_step(uuid, uuid, text, text)', 'public.legal_is_pending(uuid, uuid)'
+  ] loop
+    execute format('revoke all on function %s from public, anon, authenticated', f);
+  end loop;
+end;
+$$;
 revoke all on function public.get_my_reports() from public, anon;
 grant execute on function public.get_my_reports() to authenticated;
 
@@ -3335,6 +4038,8 @@ grant select on public.rest_budgets, public.rest_day_uses to authenticated;
 -- Blocks: the blocker reads, adds and removes their own (RLS below). No updates.
 revoke all on public.user_blocks from anon, authenticated;
 grant select, insert, delete on public.user_blocks to authenticated;
+-- Legal texts, confirmations, reminders: no table rights (functions only).
+revoke all on public.legal_documents, public.legal_confirmations, public.confirmation_followups from anon, authenticated;
 -- Staff tables: no client access at all (functions only). Notices: owners read their own.
 revoke all on public.admin_roles, public.moderation_actions from anon, authenticated;
 revoke all on public.moderation_notices from anon, authenticated;
@@ -3384,6 +4089,9 @@ alter table public.report_snapshots     enable row level security;
 alter table public.admin_roles          enable row level security;
 alter table public.moderation_actions   enable row level security;
 alter table public.moderation_notices   enable row level security;
+alter table public.legal_documents      enable row level security;
+alter table public.legal_confirmations  enable row level security;
+alter table public.confirmation_followups enable row level security;
 alter table public.hashtags             enable row level security;
 alter table public.content_hashtags     enable row level security;
 
@@ -3926,6 +4634,8 @@ create policy "reports: reporter reads own" on public.reports
   for select to authenticated using (reporter_id = (select auth.uid()));
 -- report_snapshots: no policies, no client access.
 
+-- legal_documents, legal_confirmations, confirmation_followups: no policies, no table rights;
+-- everything goes through the legal functions.
 -- admin_roles, moderation_actions: no policies, no client access (staff use the functions).
 -- moderation_notices: the affected person reads their own; marking read via function.
 drop policy if exists "moderation_notices: owner reads" on public.moderation_notices;
@@ -3935,7 +4645,8 @@ create policy "moderation_notices: owner reads" on public.moderation_notices
 -- notifications: only the recipient, only reading and marking as read.
 drop policy if exists "notifications: recipient reads" on public.notifications;
 create policy "notifications: recipient reads" on public.notifications
-  for select to authenticated using (user_id = (select auth.uid()) and public.can_see_account(actor_id));
+  for select to authenticated
+  using (user_id = (select auth.uid()) and (actor_id is null or public.can_see_account(actor_id)));
 
 drop policy if exists "notifications: recipient marks read" on public.notifications;
 create policy "notifications: recipient marks read" on public.notifications

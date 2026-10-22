@@ -244,3 +244,199 @@ export async function signedPhotoUrl(path: string): Promise<string | null> {
   if (error) return null;
   return data.signedUrl;
 }
+
+// ------------------------------------------------------------------ legal texts (admins)
+
+export type LegalDocType = "terms" | "privacy" | "guidelines";
+export type LegalConfirmation = "accept" | "acknowledge";
+
+export type LegalVersionRow = {
+  id: string;
+  docType: LegalDocType;
+  version: number;
+  title: string;
+  status: "draft" | "published" | "archived";
+  confirmationType: LegalConfirmation;
+  requiresConfirmation: boolean;
+  blocking: boolean;
+  graceDays: number;
+  changeSummary: string | null;
+  publishedAt: string | null;
+  announcedAt: string | null;
+  createdAt: string;
+  contentHash: string | null;
+  confirmed: number;
+  pending: number;
+  overdue: number;
+};
+
+function legalType(value: unknown): LegalDocType {
+  return value === "privacy" || value === "guidelines" ? value : "terms";
+}
+
+function legalStatus(value: unknown): LegalVersionRow["status"] {
+  return value === "published" || value === "archived" ? value : "draft";
+}
+
+export async function fetchLegalList(): Promise<LegalVersionRow[]> {
+  return asArray(await rpc("admin_legal_list", {})).map((value) => {
+    const r = asRecord(value);
+    return {
+      id: str(r.id),
+      docType: legalType(r.doc_type),
+      version: num(r.version),
+      title: str(r.title),
+      status: legalStatus(r.status),
+      confirmationType: r.confirmation_type === "accept" ? "accept" : "acknowledge",
+      requiresConfirmation: bool(r.requires_confirmation),
+      blocking: bool(r.blocking),
+      graceDays: num(r.grace_days),
+      changeSummary: strOrNull(r.change_summary),
+      publishedAt: strOrNull(r.published_at),
+      announcedAt: strOrNull(r.announced_at),
+      createdAt: str(r.created_at),
+      contentHash: strOrNull(r.content_hash),
+      confirmed: num(r.confirmed),
+      pending: num(r.pending),
+      overdue: num(r.overdue),
+    };
+  });
+}
+
+export type LegalDraft = {
+  id: string | null;
+  docType: LegalDocType;
+  title: string;
+  bodyMd: string;
+  changeSummary: string;
+  confirmationType: LegalConfirmation;
+  requiresConfirmation: boolean;
+  blocking: boolean;
+  graceDays: number;
+};
+
+export async function fetchLegalDocumentBody(id: string): Promise<{ draft: LegalDraft; status: string; version: number }> {
+  const r = asRecord(asArray(await rpc("admin_legal_document", { p_id: id }))[0]);
+  return {
+    status: str(r.status),
+    version: num(r.version),
+    draft: {
+      id: str(r.id),
+      docType: legalType(r.doc_type),
+      title: str(r.title),
+      bodyMd: str(r.body_md),
+      changeSummary: str(r.change_summary),
+      confirmationType: r.confirmation_type === "accept" ? "accept" : "acknowledge",
+      requiresConfirmation: bool(r.requires_confirmation),
+      blocking: bool(r.blocking),
+      graceDays: num(r.grace_days),
+    },
+  };
+}
+
+export async function saveLegalDraft(draft: LegalDraft): Promise<string> {
+  return str(
+    await rpc("admin_legal_save_draft", {
+      p_id: draft.id,
+      p_doc_type: draft.docType,
+      p_title: draft.title,
+      p_body_md: draft.bodyMd,
+      p_change_summary: draft.changeSummary,
+      p_confirmation_type: draft.confirmationType,
+      p_requires_confirmation: draft.requiresConfirmation,
+      p_blocking: draft.blocking,
+      p_grace_days: draft.graceDays,
+    }),
+  );
+}
+
+export function deleteLegalDraft(id: string, reason: string) {
+  return rpc("admin_legal_delete_draft", { p_id: id, p_reason: reason });
+}
+
+export async function fetchAffectedCount(): Promise<number> {
+  return num(await rpc("admin_legal_affected_count", {}));
+}
+
+/** Publishes and announces (notices and reminders); returns the number of notified users. */
+export async function publishLegalDocument(id: string, reason: string): Promise<number> {
+  return num(await rpc("admin_legal_publish", { p_id: id, p_reason: reason }));
+}
+
+export type PendingRow = {
+  userId: string;
+  username: string;
+  displayName: string;
+  documentId: string;
+  docType: LegalDocType;
+  version: number;
+  announcedAt: string | null;
+  daysSinceAnnounce: number;
+  actionCount: number;
+  lastAction: string | null;
+  lastActionAt: string | null;
+  dueAt: string | null;
+  note: string | null;
+};
+
+export async function fetchPendingConfirmations(offset: number): Promise<PendingRow[]> {
+  return asArray(await rpc("admin_legal_pending", { p_limit: 100, p_offset: offset })).map((value) => {
+    const r = asRecord(value);
+    return {
+      userId: str(r.user_id),
+      username: str(r.username),
+      displayName: str(r.display_name),
+      documentId: str(r.document_id),
+      docType: legalType(r.doc_type),
+      version: num(r.version),
+      announcedAt: strOrNull(r.announced_at),
+      daysSinceAnnounce: num(r.days_since_announce),
+      actionCount: num(r.action_count),
+      lastAction: strOrNull(r.last_action),
+      lastActionAt: strOrNull(r.last_action_at),
+      dueAt: strOrNull(r.due_at),
+      note: strOrNull(r.note),
+    };
+  });
+}
+
+export function legalFollowup(userId: string, documentId: string, action: "notify" | "defer", note: string | null) {
+  return rpc("admin_legal_followup", { p_user_id: userId, p_document_id: documentId, p_action: action, p_note: note });
+}
+
+export async function legalBulkNotify(userIds: string[], documentId: string): Promise<number> {
+  return num(await rpc("admin_legal_bulk_notify", { p_user_ids: userIds, p_document_id: documentId }));
+}
+
+export function legalSuspend(userId: string, documentId: string, reason: string, userMessage: string) {
+  return rpc("admin_legal_suspend", { p_user_id: userId, p_document_id: documentId, p_reason: reason, p_user_message: userMessage });
+}
+
+export async function fetchLegalOverview(): Promise<{ overdue: number; oldestDueAt: string | null }> {
+  const d = asRecord(await rpc("admin_legal_overview", {}));
+  return { overdue: num(d.overdue), oldestDueAt: strOrNull(d.oldest_due_at) };
+}
+
+export async function fetchLegalUserHistory(userId: string): Promise<{ confirmations: Json[]; followups: Json[] }> {
+  const d = asRecord(await rpc("admin_legal_user_history", { p_user_id: userId }));
+  return { confirmations: asArray(d.confirmations).map(asRecord), followups: asArray(d.followups).map(asRecord) };
+}
+
+// ------------------------------------------------------------------ e-mail (Edge Function)
+
+const EMAIL_FUNCTION = "send_legal_notice_email";
+
+/** Whether the e-mail provider is set up (EMAIL_API_KEY and EMAIL_FROM secrets). */
+export async function fetchEmailConfigured(): Promise<{ configured: boolean; reason: string | null }> {
+  const { data, error } = await supabase.functions.invoke(EMAIL_FUNCTION, { body: { action: "status" } });
+  if (error) return { configured: false, reason: "Edge Function send_legal_notice_email ist nicht erreichbar (nicht deployt?)." };
+  const configured = bool(asRecord(data).configured);
+  return { configured, reason: configured ? null : "Secrets EMAIL_API_KEY und EMAIL_FROM fehlen in Supabase." };
+}
+
+export async function sendLegalEmails(userIds: string[], documentId: string): Promise<{ sent: number; failed: number; skipped: number }> {
+  const { data, error } = await supabase.functions.invoke(EMAIL_FUNCTION, { body: { user_ids: userIds, document_id: documentId } });
+  if (error) throw new ApiError("E-Mail-Versand fehlgeschlagen.");
+  const d = asRecord(data);
+  return { sent: num(d.sent), failed: num(d.failed), skipped: num(d.skipped) };
+}

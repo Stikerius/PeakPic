@@ -3,6 +3,7 @@ import { useCallback, useEffect, useState } from "react";
 import { AccountHistory } from "../components/AccountHistory";
 import { ActionPanel, type PanelAction } from "../components/ActionPanel";
 import { ConfirmDialog } from "../components/ConfirmDialog";
+import { LegalHistory } from "../components/LegalHistory";
 import { banUser, fetchUserDetail, fetchUserEmail, suspendUser, unbanUser, warnUser, type UserDetail } from "../lib/api";
 import { useAuth } from "../lib/auth";
 import { str, strOrNull } from "../lib/decode";
@@ -130,6 +131,7 @@ export function UserDetailPage({ id }: { id: string }) {
             </dl>
           </section>
           <AccountHistory reports={detail.reportsAgainst} actions={detail.actions} />
+          {isAdmin && <LegalHistory userId={id} />}
         </div>
         <div>
           {staffRole !== null ? (

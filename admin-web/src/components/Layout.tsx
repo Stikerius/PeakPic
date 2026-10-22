@@ -12,7 +12,13 @@ export function Layout({ route, children, theme, onToggleTheme }: LayoutProps) {
     { route: { page: "overview" }, label: "Übersicht", active: route.page === "overview" },
     { route: { page: "queue" }, label: "Warteschlange", active: route.page === "queue" || route.page === "report" },
     { route: { page: "users" }, label: "Nutzer", active: route.page === "users" || route.page === "user" },
-    ...(isAdmin ? [{ route: { page: "audit" } as Route, label: "Audit-Log", active: route.page === "audit" }] : []),
+    ...(isAdmin
+      ? [
+          { route: { page: "legal" } as Route, label: "Rechtstexte", active: route.page === "legal" || route.page === "legal-edit" },
+          { route: { page: "pending" } as Route, label: "Offene Bestätigungen", active: route.page === "pending" },
+          { route: { page: "audit" } as Route, label: "Audit-Log", active: route.page === "audit" },
+        ]
+      : []),
   ];
 
   return (

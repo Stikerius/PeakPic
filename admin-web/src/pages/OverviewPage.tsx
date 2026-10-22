@@ -1,18 +1,29 @@
 import { useEffect, useState } from "react";
 
-import { fetchOverview, type Overview } from "../lib/api";
+import { fetchLegalOverview, fetchOverview, type Overview } from "../lib/api";
+import { useAuth } from "../lib/auth";
 import { formatAge, formatDateTime } from "../lib/format";
 import { href } from "../lib/router";
 
 export function OverviewPage() {
   const [overview, setOverview] = useState<Overview | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const { state } = useAuth();
+  const isAdmin = state.step === "ready" && state.role === "admin";
+  const [legal, setLegal] = useState<{ overdue: number; oldestDueAt: string | null } | null>(null);
 
   useEffect(() => {
     fetchOverview()
       .then(setOverview)
       .catch((e: unknown) => setError(e instanceof Error ? e.message : "Fehler"));
   }, []);
+
+  useEffect(() => {
+    if (!isAdmin) return;
+    fetchLegalOverview()
+      .then(setLegal)
+      .catch(() => setLegal(null));
+  }, [isAdmin]);
 
   return (
     <>
@@ -36,6 +47,12 @@ export function OverviewPage() {
             <span className="card-value">{overview.quarantined}</span>
             <span className="card-label">Inhalte in Quarantäne</span>
           </div>
+          {legal !== null && (
+            <a className="card" href={href({ page: "pending" })}>
+              <span className="card-value">{legal.overdue}</span>
+              <span className="card-label">Konten überfällig (Rechtstexte)</span>
+            </a>
+          )}
         </div>
       )}
     </>

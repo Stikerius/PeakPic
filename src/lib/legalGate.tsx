@@ -1,0 +1,75 @@
+import { createContext, use, useCallback, useEffect, useState, type ReactNode } from "react";
+
+import { useAccountStatus } from "@/lib/accountStatus";
+import { fetchMyLegalStatus, type LegalStatus } from "@/lib/legalRepo";
+import { useSession } from "@/lib/session";
+
+type LegalGateState = {
+  /** null while checking. */
+  status: LegalStatus[] | null;
+  /** Current versions that still need my confirmation. */
+  pending: LegalStatus[];
+  /** True while something must be confirmed before the app opens (not postponed). */
+  needed: boolean;
+  /** "Später": hidden until the next app start. */
+  postpone: (documentIds: string[]) => void;
+  refresh: () => void;
+};
+
+const LegalGateContext = createContext<LegalGateState | null>(null);
+const CHECK_TIMEOUT_MS = 4000;
+
+function withTimeout<T>(promise: Promise<T>): Promise<T> {
+  return Promise.race([
+    promise,
+    new Promise<never>((_, reject) => setTimeout(() => reject(new Error("timeout")), CHECK_TIMEOUT_MS)),
+  ]);
+}
+
+/**
+ * After login: which current legal texts are still unconfirmed. If the check fails (offline),
+ * the app opens and the check runs again on the next start. Postponing lasts for this session.
+ */
+export function LegalGateProvider({ children }: { children: ReactNode }) {
+  const userId = useSession().session?.user.id ?? null;
+  const { account } = useAccountStatus();
+  const [result, setResult] = useState<{ userId: string; status: LegalStatus[] } | null>(null);
+  const [postponed, setPostponed] = useState<ReadonlySet<string>>(new Set());
+
+  const load = useCallback(() => {
+    if (userId === null) return () => undefined;
+    let active = true;
+    withTimeout(fetchMyLegalStatus())
+      .then((status) => {
+        if (active) setResult({ userId, status });
+      })
+      .catch(() => {
+        if (active) setResult({ userId, status: [] });
+      });
+    return () => {
+      active = false;
+    };
+  }, [userId]);
+
+  // Again when the account status changes (e.g. after confirming lifted a suspension).
+  useEffect(load, [load, account?.status]);
+
+  const status = userId === null ? [] : result?.userId === userId ? result.status : null;
+  const pending = (status ?? []).filter((doc) => doc.requiresConfirmation && doc.confirmedAt === null);
+  const needed = pending.some((doc) => !postponed.has(doc.documentId));
+
+  const value: LegalGateState = {
+    status,
+    pending,
+    needed,
+    postpone: (ids) => setPostponed((current) => new Set([...current, ...ids])),
+    refresh: () => void load(),
+  };
+  return <LegalGateContext value={value}>{children}</LegalGateContext>;
+}
+
+export function useLegalGate(): LegalGateState {
+  const value = use(LegalGateContext);
+  if (value === null) throw new Error("useLegalGate must be used inside <LegalGateProvider>");
+  return value;
+}

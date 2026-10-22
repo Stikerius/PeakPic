@@ -3,12 +3,14 @@ import { useState } from "react";
 import { ScrollView, StyleSheet, Text, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
+import { PendingLegalList } from "@/components/legal/pending-legal-list";
 import { Button } from "@/components/ui/button";
 import { SUPPORT_EMAIL } from "@/constants/app";
 import { radius, spacing, typography } from "@/constants/theme";
 import { useAccountStatus } from "@/lib/accountStatus";
 import { signOut } from "@/lib/auth";
 import { formatDate, formatTime } from "@/lib/format";
+import { useLegalGate } from "@/lib/legalGate";
 import { makeStyles, useTheme } from "@/lib/theme";
 
 /**
@@ -20,6 +22,9 @@ export default function AccountLockedScreen() {
   const styles = useStyles();
   const insets = useSafeAreaInsets();
   const { account, refresh } = useAccountStatus();
+  const legal = useLegalGate();
+  // Suspended until the current legal texts are confirmed: confirming lifts it (server side).
+  const termsPending = account?.reasonCode === "terms_pending";
   const [signingOut, setSigningOut] = useState(false);
 
   const status = account?.status ?? "suspended";
@@ -54,6 +59,19 @@ export default function AccountLockedScreen() {
             ? "Dein Konto wird gerade gelöscht."
             : "Dein Konto wurde wegen eines Verstosses gegen unsere Regeln gesperrt."}
         </Text>
+      )}
+      {termsPending && legal.pending.length > 0 && (
+        <>
+          <Text style={styles.text}>Bestätige die folgenden Texte, dann ist dein Konto wieder aktiv.</Text>
+          <PendingLegalList
+            pending={legal.pending}
+            allowPostpone={false}
+            onConfirmed={() => {
+              legal.refresh();
+              refresh();
+            }}
+          />
+        </>
       )}
       <Text style={styles.text}>
         Während der Sperre kannst du nichts posten, kommentieren oder schreiben. Dein Profil ist für andere nicht

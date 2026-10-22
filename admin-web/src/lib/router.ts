@@ -1,13 +1,19 @@
 import { useEffect, useState } from "react";
 
-/** Tiny hash router: #/queue, #/reports/<id>, #/users, #/users/<id>, #/audit, #/ (overview). */
+/**
+ * Tiny hash router: #/queue, #/reports/<id>, #/users, #/users/<id>, #/audit, #/legal,
+ * #/legal/<id>, #/pending, #/ (overview).
+ */
 export type Route =
   | { page: "overview" }
   | { page: "queue" }
   | { page: "report"; id: string }
   | { page: "users" }
   | { page: "user"; id: string }
-  | { page: "audit" };
+  | { page: "audit" }
+  | { page: "legal" }
+  | { page: "legal-edit"; id: string }
+  | { page: "pending" };
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -19,6 +25,9 @@ export function parseRoute(hash: string): Route {
   if (first === "users" && second !== undefined && UUID.test(second)) return { page: "user", id: second };
   if (first === "users") return { page: "users" };
   if (first === "audit") return { page: "audit" };
+  if (first === "legal" && second !== undefined && UUID.test(second)) return { page: "legal-edit", id: second };
+  if (first === "legal") return { page: "legal" };
+  if (first === "pending") return { page: "pending" };
   return { page: "overview" };
 }
 
@@ -36,6 +45,12 @@ export function href(route: Route): string {
       return `#/users/${route.id}`;
     case "audit":
       return "#/audit";
+    case "legal":
+      return "#/legal";
+    case "legal-edit":
+      return `#/legal/${route.id}`;
+    case "pending":
+      return "#/pending";
   }
 }
 

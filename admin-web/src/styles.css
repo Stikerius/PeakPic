@@ -14,6 +14,8 @@
   --success: #248a3d;
   --warn-bg: #fff1d6;
   --warn-text: #7a4b00;
+  --diff-added: #dcf5e3;
+  --diff-removed: #fbe1e1;
   --radius: 8px;
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
   font-size: 14px;
@@ -33,6 +35,8 @@
   --success: #30d158;
   --warn-bg: #3a2d10;
   --warn-text: #ffd27a;
+  --diff-added: #12331c;
+  --diff-removed: #3a1616;
 }
 
 * { box-sizing: border-box; }
@@ -139,3 +143,20 @@ textarea { resize: vertical; }
 .dialog::backdrop { background: rgba(0, 0, 0, 0.45); }
 .dialog-body { display: flex; flex-direction: column; gap: 10px; margin-bottom: 16px; }
 .dialog-actions { display: flex; justify-content: flex-end; gap: 8px; }
+
+/* Legal texts */
+.panel h3 { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.tabs { margin-bottom: 8px; }
+.editor { width: 100%; min-height: 480px; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 13px; line-height: 1.5; resize: vertical; }
+.markdown { max-width: 70ch; line-height: 1.55; }
+.markdown h2 { font-size: 20px; margin: 16px 0 8px; }
+.markdown h3 { font-size: 16px; margin: 14px 0 6px; display: block; }
+.markdown h4 { font-size: 14px; margin: 12px 0 4px; }
+.markdown p, .markdown ul, .markdown ol { margin: 0 0 10px; }
+.markdown blockquote { margin: 0 0 10px; padding-left: 12px; border-left: 3px solid var(--border); color: var(--text-2); }
+.markdown hr { border: none; border-top: 1px solid var(--border); margin: 16px 0; }
+.diff { margin: 0; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; white-space: pre-wrap; word-break: break-word; }
+.diff-added { background: var(--diff-added); }
+.diff-removed { background: var(--diff-removed); text-decoration: line-through; }
+.diff-same { color: var(--text-2); }
+.plain-list { list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: 8px; }

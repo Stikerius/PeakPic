@@ -33,6 +33,9 @@ function sentence(item: InboxItem): string {
       return "möchte dich fürs Workout verlinken. Zu deinem Streak hinzufügen?";
     case "workout_tag_accepted":
       return "hat deine Workout-Verlinkung angenommen";
+    case "legal_update":
+      // Shown separately (no sender); the inbox query only returns notifications with an actor.
+      return "Rechtstexte wurden aktualisiert";
   }
 }
 

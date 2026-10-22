@@ -4,8 +4,11 @@ import { Layout } from "./components/Layout";
 import { useAuth } from "./lib/auth";
 import { useRoute } from "./lib/router";
 import { AuditPage } from "./pages/AuditPage";
+import { LegalEditPage } from "./pages/LegalEditPage";
+import { LegalPage } from "./pages/LegalPage";
 import { LoginPage } from "./pages/LoginPage";
 import { OverviewPage } from "./pages/OverviewPage";
+import { PendingPage } from "./pages/PendingPage";
 import { QueuePage } from "./pages/QueuePage";
 import { ReportDetailPage } from "./pages/ReportDetailPage";
 import { UserDetailPage } from "./pages/UserDetailPage";
@@ -45,6 +48,9 @@ export function App() {
     setTheme(next);
   }
 
+  // Legal texts and pending confirmations are admin pages (the SQL functions check is_admin() as well).
+  const isAdmin = state.role === "admin";
+
   return (
     <Layout route={route} theme={theme} onToggleTheme={toggleTheme}>
       {route.page === "overview" && <OverviewPage />}
@@ -53,6 +59,9 @@ export function App() {
       {route.page === "users" && <UsersPage />}
       {route.page === "user" && <UserDetailPage key={route.id} id={route.id} />}
       {route.page === "audit" && <AuditPage />}
+      {route.page === "legal" && isAdmin && <LegalPage />}
+      {route.page === "legal-edit" && isAdmin && <LegalEditPage key={route.id} id={route.id} />}
+      {route.page === "pending" && isAdmin && <PendingPage />}
     </Layout>
   );
 }

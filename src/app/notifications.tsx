@@ -4,6 +4,7 @@ import type { ComponentProps } from "react";
 import { useEffect, useState } from "react";
 import { ActivityIndicator, FlatList, Pressable, RefreshControl, StyleSheet, Text, View } from "react-native";
 
+import { LegalUpdateNotice } from "@/components/legal/legal-update-notice";
 import { ModerationNotices } from "@/components/moderation/moderation-notices";
 import { InboxRow } from "@/components/notifications/inbox-row";
 import { Avatar } from "@/components/ui/avatar";
@@ -120,6 +121,7 @@ export default function NotificationsScreen() {
       contentContainerStyle={feed.groups.length === 0 && inbox.length === 0 ? styles.emptyContainer : undefined}
       ListHeaderComponent={
         <View>
+          <LegalUpdateNotice />
           <ModerationNotices />
           {inbox.length > 0 && (
             <>
