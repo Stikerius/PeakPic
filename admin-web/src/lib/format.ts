@@ -38,6 +38,8 @@ export const TYPE_LABELS: Record<string, string> = {
   comment: "Kommentar",
   message: "Nachricht",
   profile: "Profil",
+  plan: "Trainingsplan",
+  workout: "Aktivität",
 };
 
 export const STATUS_LABELS: Record<string, string> = {

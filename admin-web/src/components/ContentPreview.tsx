@@ -57,6 +57,38 @@ export function ContentPreview({ type, content }: { type: string; content: Json 
           <p className="muted">Konto seit {formatDateTime(strOrNull(content.created_at))}</p>
         </>
       )}
+      {type === "plan" && (
+        <>
+          <p className="user-text">
+            <strong>{str(content.name)}</strong>
+          </p>
+          <ol className="plan-days">
+            {asArray(content.days).map((value, index) => {
+              const day = asRecord(value);
+              return (
+                <li key={index}>
+                  <span className="user-text">
+                    {str(day.type) === "rest" ? `Ruhetag: ${str(day.title)}` : str(day.title)}
+                  </span>
+                  {strOrNull(day.notes) !== null && <p className="muted user-text">{str(day.notes)}</p>}
+                  <ul>
+                    {asArray(day.exercises).map((exValue, exIndex) => {
+                      const ex = asRecord(exValue);
+                      return (
+                        <li key={exIndex} className="user-text">
+                          {str(ex.name)} · {String(ex.sets ?? "")} Sätze
+                          {strOrNull(ex.notes) !== null ? ` · ${str(ex.notes)}` : ""}
+                        </li>
+                      );
+                    })}
+                  </ul>
+                </li>
+              );
+            })}
+          </ol>
+          <p className="muted">Erstellt {formatDateTime(strOrNull(content.created_at))}</p>
+        </>
+      )}
       {type === "message" && (
         <>
           <p className="muted">

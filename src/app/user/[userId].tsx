@@ -1,7 +1,7 @@
 import Ionicons from "@expo/vector-icons/Ionicons";
 import { router, Stack, useLocalSearchParams } from "expo-router";
 import { useEffect, useState, type ReactNode } from "react";
-import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
+import { ActivityIndicator, Alert, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 
 import { FollowButton } from "@/components/follow-button";
 import { useReport } from "@/components/moderation/report-provider";
@@ -29,7 +29,8 @@ import {
   toDayKey,
   type DayKey,
 } from "@/lib/streak";
-import { fetchPlan, type TrainingPlan } from "@/lib/planRepo";
+import { adoptPlan, fetchPlansOf, type TrainingPlan } from "@/lib/planRepo";
+import { useSession } from "@/lib/session";
 import { makeStyles, useTheme } from "@/lib/theme";
 import {
   fetchProfileGrid,
@@ -38,12 +39,11 @@ import {
   type PostThumbnail,
   type UserProfileSummary,
 } from "@/lib/userProfileRepo";
-import { useTrackScreen } from "@/lib/usage";
+import { track, useTrackScreen } from "@/lib/usage";
 
 const AVATAR_SIZE = 88;
 
 type Content = {
-  plan: TrainingPlan | null;
   days: DayKey[];
   sharedDays: ReadonlySet<DayKey>;
   restDays: DayKey[];
@@ -88,24 +88,29 @@ export default function UserProfileScreen() {
   const [content, setContent] = useState<Content | null>(null);
   const [chatBusy, setChatBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Plans have their own visibility (followers / everyone), independent of posts and stories.
+  const [plans, setPlans] = useState<TrainingPlan[]>([]);
+  const [adoptingId, setAdoptingId] = useState<string | null>(null);
+  const myId = useSession().session?.user.id ?? null;
 
   const today = toDayKey(new Date());
   const { year: currentYear, month: currentMonth } = parseDayKey(today);
   const [visibleMonth, setVisibleMonth] = useState({ year: currentYear, month: currentMonth });
 
   async function load() {
+    fetchPlansOf(userId)
+      .then(setPlans)
+      .catch(() => setPlans([]));
     try {
       const result = await fetchUserProfile(userId);
       setSummary(result);
       if (result !== null && (result.canSeePosts || result.canSeeStories)) {
         // Only ask for what the settings allow; RLS enforces the same rules anyway.
-        const [days, posts, highlights, stories, plan] = await Promise.all([
+        const [days, posts, highlights, stories] = await Promise.all([
           result.canSeePosts ? fetchUserWorkoutDays(userId) : Promise.resolve({ days: [], shared: [], restDays: [] }),
           result.canSeePosts ? fetchProfileGrid(userId) : Promise.resolve([]),
           result.canSeeStories ? listHighlights(userId) : Promise.resolve([]),
           result.canSeeStories ? fetchUserStoryGroup(userId) : Promise.resolve(null),
-          // Null when there is none or the owner doesn't show it to me (the database decides).
-          result.canSeePosts ? fetchPlan(userId).catch(() => null) : Promise.resolve(null),
         ]);
         setContent({
           days: days.days,
@@ -114,7 +119,6 @@ export default function UserProfileScreen() {
           posts,
           highlights,
           hasStories: stories !== null,
-          plan,
           storiesUnseen: stories?.hasUnseen ?? false,
         });
       } else {
@@ -128,6 +132,32 @@ export default function UserProfileScreen() {
   useEffect(() => {
     void load();
   }, [userId]);
+
+  function adopt(plan: TrainingPlan, activate: boolean) {
+    setAdoptingId(plan.id);
+    adoptPlan(plan.id, activate)
+      .then(() =>
+        Alert.alert("Plan übernommen", activate ? "Der Plan ist jetzt dein aktiver Plan." : "Du findest ihn unter deinen Trainingsplänen.", [
+          { text: "OK", style: "cancel" },
+          { text: "Zu meinen Plänen", onPress: () => router.push("/plan-edit") },
+        ]),
+      )
+      .catch((adoptError: unknown) => Alert.alert("Hat nicht geklappt", describeError(adoptError)))
+      .finally(() => setAdoptingId(null));
+  }
+
+  function confirmAdopt(plan: TrainingPlan) {
+    track("plan_adopt_opened");
+    Alert.alert(
+      `„${plan.name}“ übernehmen?`,
+      "Du bekommst eine eigene Kopie mit allen Tagen und Übungen, ohne Zielgewichte und Notizen. Sie ist nur für dich sichtbar; Änderungen am Original wirken sich nicht aus. Beim Aktivieren beginnt die Reihenfolge bei Tag 1 und dein Plan-Streak startet neu.",
+      [
+        { text: "Abbrechen", style: "cancel" },
+        { text: "Übernehmen", onPress: () => adopt(plan, false) },
+        { text: "Übernehmen und aktivieren", onPress: () => adopt(plan, true) },
+      ],
+    );
+  }
 
   async function openChat() {
     if (chatBusy) return;
@@ -273,6 +303,20 @@ export default function UserProfileScreen() {
 
       {error !== null && <Text style={styles.error}>{error}</Text>}
 
+      {plans.length > 0 && (
+        <View style={styles.plans}>
+          {plans.map((plan) => (
+            <PlanSummary
+              key={plan.id}
+              plan={plan}
+              busy={adoptingId === plan.id}
+              onAdopt={plan.allowAdopt && plan.userId !== myId ? () => confirmAdopt(plan) : undefined}
+              onReport={plan.userId !== myId ? () => openReport({ targetType: "plan", targetId: plan.id }) : undefined}
+            />
+          ))}
+        </View>
+      )}
+
       {!summary.canSeePosts && !summary.canSeeStories ? (
         <View style={styles.locked}>
           <Ionicons name="lock-closed-outline" size={36} color={colors.textSecondary} />
@@ -288,11 +332,6 @@ export default function UserProfileScreen() {
       ) : (
         <>
           <HighlightsRow highlights={content.highlights} editable={false} />
-          {content.plan !== null && (
-            <View style={styles.plan}>
-              <PlanSummary plan={content.plan} />
-            </View>
-          )}
 
           {!summary.canSeePosts ? (
             <View style={styles.locked}>
@@ -462,8 +501,9 @@ const useStyles = makeStyles(({ colors }) =>
       textAlign: "center",
       paddingHorizontal: spacing.md,
     },
-    plan: {
+    plans: {
       paddingHorizontal: spacing.md,
+      gap: spacing.sm,
     },
     headerButton: {
       minWidth: 44,

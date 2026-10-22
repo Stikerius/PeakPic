@@ -33,6 +33,8 @@ function sentence(item: InboxItem): string {
       return "möchte dich fürs Workout verlinken. Zu deinem Streak hinzufügen?";
     case "workout_tag_accepted":
       return "hat deine Workout-Verlinkung angenommen";
+    case "plan_adopted":
+      return item.planTitle !== null ? `hat deinen Plan „${item.planTitle}“ übernommen` : "hat einen deiner Pläne übernommen";
     case "legal_update":
       // Shown separately (no sender); the inbox query only returns notifications with an actor.
       return "Rechtstexte wurden aktualisiert";
@@ -59,7 +61,7 @@ export function InboxRow({ item, onChanged }: InboxRowProps) {
   }
 
   function open() {
-    if (item.type === "follow_request") {
+    if (item.type === "follow_request" || item.type === "plan_adopted") {
       router.push({ pathname: "/user/[userId]", params: { userId: item.actor.id } });
     } else if (item.commentId !== null && item.postId !== null) {
       router.push({ pathname: "/post/[postId]", params: { postId: item.postId } });

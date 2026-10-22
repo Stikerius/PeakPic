@@ -40,6 +40,7 @@ export type UsageEvent =
   | "screen_plan_editor"
   | "plan_activated"
   | "planned_rest_confirmed"
+  | "plan_adopt_opened"
   | "screen_search"
   | "screen_hashtag"
   | "screen_settings"

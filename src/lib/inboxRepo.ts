@@ -22,6 +22,8 @@ export type InboxItem = {
   /** Post cover or story photo, if I may see it. */
   photoUrl: string | null;
   commentBody: string | null;
+  /** plan_adopted: the title of my plan that was adopted. */
+  planTitle: string | null;
   link: {
     id: string;
     status: WorkoutShareStatus;
@@ -32,13 +34,18 @@ export type InboxItem = {
   } | null;
 };
 
+function planTitleOf(payload: unknown): string | null {
+  if (typeof payload !== "object" || payload === null || !("plan_title" in payload)) return null;
+  return typeof payload.plan_title === "string" ? payload.plan_title : null;
+}
+
 /** My stored notifications, newest first, with previews. */
 export async function fetchInbox(): Promise<InboxItem[]> {
   const userId = await requireUserId();
   const { data, error } = await supabase
     .from("notifications")
     .select(
-      `id, type, created_at, read_at, post_id, story_id, comment_id, workout_share_id, actor:profiles!notifications_actor_id_fkey!inner(${PROFILE_COLUMNS})`,
+      `id, type, created_at, read_at, post_id, story_id, comment_id, workout_share_id, payload, actor:profiles!notifications_actor_id_fkey!inner(${PROFILE_COLUMNS})`,
     )
     .eq("user_id", userId)
     .order("created_at", { ascending: false })
@@ -99,6 +106,7 @@ export async function fetchInbox(): Promise<InboxItem[]> {
       commentId: row.comment_id,
       photoUrl: photoPath !== undefined ? (urls.get(photoPath) ?? null) : null,
       commentBody: row.comment_id !== null ? (commentById.get(row.comment_id)?.body ?? null) : null,
+      planTitle: planTitleOf(row.payload),
       link:
         share !== undefined
           ? {

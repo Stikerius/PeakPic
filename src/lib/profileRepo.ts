@@ -162,3 +162,17 @@ export async function updateMyAvatar(sourceUri: string, previousPath: string | n
   if (previousPath !== null) await removePhotos([previousPath]).catch(() => undefined);
   return getMyProfile();
 }
+
+/** "Benachrichtigen, wenn jemand meinen Plan übernimmt". */
+export async function getMyPlanAdoptNotify(): Promise<boolean> {
+  const userId = await requireUserId();
+  const { data, error } = await supabase.from("profiles").select("notify_plan_adopted").eq("id", userId).single();
+  if (error) throw error;
+  return data.notify_plan_adopted;
+}
+
+export async function updatePlanAdoptNotify(value: boolean): Promise<void> {
+  const userId = await requireUserId();
+  const { error } = await supabase.from("profiles").update({ notify_plan_adopted: value }).eq("id", userId);
+  if (error) throw error;
+}

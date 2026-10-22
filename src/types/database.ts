@@ -8,7 +8,13 @@ export type Visibility = "everyone" | "followers";
 export type FollowRowStatus = "pending" | "accepted";
 export type TagPermission = "everyone" | "connections" | "nobody";
 export type WorkoutShareStatus = "pending" | "accepted" | "declined";
-export type NotificationType = "tag" | "workout_tag_request" | "workout_tag_accepted" | "follow_request" | "legal_update";
+export type NotificationType =
+  | "tag"
+  | "workout_tag_request"
+  | "workout_tag_accepted"
+  | "follow_request"
+  | "legal_update"
+  | "plan_adopted";
 export type LegalDocType = "terms" | "privacy" | "guidelines";
 export type LegalConfirmationType = "accept" | "acknowledge";
 export type Json = string | number | boolean | null | Json[] | { [key: string]: Json };
@@ -16,7 +22,7 @@ export type AudienceScope = "stories" | "posts";
 export type AccountStatus = "active" | "suspended" | "banned" | "deleting";
 export type PlanVisibility = "private" | "followers" | "public";
 export type PlanDayType = "training" | "rest";
-export type ReportTargetType = "post" | "story" | "comment" | "message" | "profile";
+export type ReportTargetType = "post" | "story" | "comment" | "message" | "profile" | "plan" | "workout";
 export type ReportReason =
   | "spam"
   | "harassment"
@@ -62,6 +68,7 @@ export type Database = {
           tag_permission: TagPermission;
           tag_notifications: boolean;
           tag_chat_messages: boolean;
+          notify_plan_adopted: boolean;
         };
         Insert: { id: Uuid; username: string; display_name?: string; avatar_path?: string | null; created_at?: Timestamp };
         Update: {
@@ -76,6 +83,7 @@ export type Database = {
           tag_permission?: TagPermission;
           tag_notifications?: boolean;
           tag_chat_messages?: boolean;
+          notify_plan_adopted?: boolean;
         };
         Relationships: [];
       };
@@ -289,13 +297,18 @@ export type Database = {
           is_active: boolean;
           adopted_from_plan_id: Uuid | null;
           adopted_from_user_id: Uuid | null;
+          adopted_at: Timestamp | null;
+          moderation_state: "removed" | "quarantined" | null;
           sequence_changed_at: Timestamp;
           created_at: Timestamp;
           updated_at: Timestamp;
         };
         Insert: Record<string, never>;
         Update: Record<string, never>;
-        Relationships: [Rel<"training_plans_user_id_fkey", "user_id", "profiles">];
+        Relationships: [
+          Rel<"training_plans_user_id_fkey", "user_id", "profiles">,
+          Rel<"training_plans_adopted_from_user_id_fkey", "adopted_from_user_id", "profiles">,
+        ];
       };
       plan_days: {
         Row: {
@@ -614,6 +627,7 @@ export type Database = {
       duplicate_plan: { Args: { p_plan_id: Uuid }; Returns: Uuid };
       delete_plan: { Args: { p_plan_id: Uuid }; Returns: undefined };
       my_exercise_names: { Args: Record<string, never>; Returns: { name: string }[] };
+      adopt_plan: { Args: { p_plan_id: Uuid; p_activate: boolean }; Returns: Uuid };
       use_planned_rest_day: { Args: { d: string }; Returns: undefined };
       resolve_usernames: { Args: { names: string[] }; Returns: { username: string; user_id: Uuid }[] };
       get_or_create_direct_conversation: { Args: { other_user: Uuid }; Returns: Uuid };

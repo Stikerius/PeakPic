@@ -29,6 +29,8 @@ export const REPORT_TARGET_LABELS: Record<ReportTargetType, string> = {
   comment: "Kommentar",
   message: "Nachricht",
   profile: "Profil",
+  plan: "Trainingsplan",
+  workout: "Aktivität",
 };
 
 export type MyReport = {

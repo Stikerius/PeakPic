@@ -7,7 +7,7 @@ import { SIGNED_URL_SECONDS, supabase } from "./supabase";
  */
 
 export type StaffRole = "moderator" | "admin";
-export type ContentType = "post" | "story" | "comment" | "message";
+export type ContentType = "post" | "story" | "comment" | "message" | "plan";
 
 const ERROR_TEXTS: Record<string, string> = {
   not_authorized: "Keine Berechtigung (Rolle oder Zwei-Faktor fehlt).",

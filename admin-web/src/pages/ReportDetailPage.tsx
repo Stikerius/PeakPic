@@ -22,7 +22,7 @@ import { str, strOrNull } from "../lib/decode";
 import { ACCOUNT_STATUS_LABELS, REASON_LABELS, STATUS_LABELS, TYPE_LABELS, formatDateTime, label } from "../lib/format";
 import { href } from "../lib/router";
 
-const CONTENT_TYPES: readonly string[] = ["post", "story", "comment", "message"];
+const CONTENT_TYPES: readonly string[] = ["post", "story", "comment", "message", "plan"];
 
 export function ReportDetailPage({ id }: { id: string }) {
   const { state } = useAuth();

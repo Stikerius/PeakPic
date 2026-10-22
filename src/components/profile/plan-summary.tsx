@@ -2,6 +2,7 @@ import Ionicons from "@expo/vector-icons/Ionicons";
 import { useState } from "react";
 import { LayoutAnimation, Pressable, StyleSheet, Text, View } from "react-native";
 
+import { Button } from "@/components/ui/button";
 import { radius, spacing, typography } from "@/constants/theme";
 import { exerciseSummary } from "@/lib/planDraft";
 import type { TrainingPlan } from "@/lib/planRepo";
@@ -11,10 +12,15 @@ type PlanSummaryProps = {
   plan: TrainingPlan;
   /** Index of the unit that is due next; highlighted (own profile only). */
   nextIndex?: number | null;
+  /** Someone else's plan: "Plan übernehmen" (only if the owner allows it). */
+  onAdopt?: () => void;
+  /** Someone else's plan: report it. */
+  onReport?: () => void;
+  busy?: boolean;
 };
 
 /** The training plan in the profile: one line, expands to the units in cycle order. */
-export function PlanSummary({ plan, nextIndex = null }: PlanSummaryProps) {
+export function PlanSummary({ plan, nextIndex = null, onAdopt, onReport, busy = false }: PlanSummaryProps) {
   const { colors } = useTheme();
   const styles = useStyles();
   const [open, setOpen] = useState(false);
@@ -44,6 +50,12 @@ export function PlanSummary({ plan, nextIndex = null }: PlanSummaryProps) {
             {count === 1 ? "1 Tag" : `${count} Tage`} im Zyklus
             {next !== undefined ? ` · Als Nächstes: ${next.type === "rest" ? "Ruhetag" : next.title}` : ""}
           </Text>
+          {plan.origin !== null && (
+            <Text style={styles.subtitle} numberOfLines={1}>
+              {plan.origin}
+            </Text>
+          )}
+          {plan.removed && <Text style={styles.removed}>Von der Moderation entfernt: nur für dich sichtbar</Text>}
         </View>
         <Ionicons name={open ? "chevron-up" : "chevron-down"} size={18} color={colors.textTertiary} />
       </Pressable>
@@ -69,6 +81,14 @@ export function PlanSummary({ plan, nextIndex = null }: PlanSummaryProps) {
               </View>
             );
           })}
+          {(onAdopt !== undefined || onReport !== undefined) && (
+            <View style={styles.actions}>
+              {onAdopt !== undefined && (
+                <Button label="Plan übernehmen" icon="copy-outline" variant="secondary" size="sm" onPress={onAdopt} loading={busy} />
+              )}
+              {onReport !== undefined && <Button label="Plan melden" variant="ghost" size="sm" destructive onPress={onReport} />}
+            </View>
+          )}
         </View>
       )}
     </View>
@@ -147,6 +167,17 @@ const useStyles = makeStyles(({ colors }) =>
       ...typography.caption,
       ...typography.numeric,
       color: colors.text,
+    },
+    removed: {
+      ...typography.caption,
+      color: colors.danger,
+    },
+    actions: {
+      flexDirection: "row",
+      flexWrap: "wrap",
+      gap: spacing.sm,
+      paddingHorizontal: spacing.md,
+      paddingVertical: spacing.sm,
     },
     nextLabel: {
       ...typography.caption,

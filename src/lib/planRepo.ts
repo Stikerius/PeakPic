@@ -1,4 +1,4 @@
-import { toDayPayloads, type DayDraft } from "@/lib/planDraft";
+import { originLabel, toDayPayloads, type DayDraft } from "@/lib/planDraft";
 import { requireUserId } from "@/lib/session";
 import type { DayKey, PlanEntry, PlanProof } from "@/lib/streak";
 import { supabase } from "@/lib/supabase";
@@ -45,6 +45,10 @@ export type TrainingPlan = {
   isActive: boolean;
   adoptedFromPlanId: string | null;
   adoptedFromUserId: string | null;
+  /** "Übernommen von @username", "Gelöschtes Konto" … for adopted copies, otherwise null. */
+  origin: string | null;
+  /** Removed by the moderation: only the owner still sees it. */
+  removed: boolean;
   /** When days were added, removed or reordered, or the plan was activated (the plan streak restarts there). */
   sequenceChangedAt: string;
   updatedAt: string;
@@ -59,7 +63,8 @@ export const VISIBILITY_LABELS: Record<PlanVisibility, string> = {
 };
 
 const PLAN_SELECT =
-  "id, user_id, name, visibility, allow_adopt, is_active, adopted_from_plan_id, adopted_from_user_id, sequence_changed_at, updated_at, " +
+  "id, user_id, name, visibility, allow_adopt, is_active, adopted_from_plan_id, adopted_from_user_id, adopted_at, moderation_state, sequence_changed_at, updated_at, " +
+  "origin:profiles!training_plans_adopted_from_user_id_fkey(username), " +
   "days:plan_days(id, position, day_type, title, notes, exercises:plan_exercises(id, position, name, sets, reps_min, reps_max, target_seconds, target_weight_kg, notes))";
 
 type ExerciseRow = {
@@ -83,6 +88,10 @@ type PlanRow = {
   is_active: boolean;
   adopted_from_plan_id: string | null;
   adopted_from_user_id: string | null;
+  adopted_at: string | null;
+  moderation_state: string | null;
+  /** Hidden by RLS when that account isn't visible to me. */
+  origin: { username: string } | null;
   sequence_changed_at: string;
   updated_at: string;
   days: {
@@ -105,6 +114,8 @@ function toPlan(row: PlanRow): TrainingPlan {
     isActive: row.is_active,
     adoptedFromPlanId: row.adopted_from_plan_id,
     adoptedFromUserId: row.adopted_from_user_id,
+    origin: originLabel(row.adopted_at, row.adopted_from_user_id, row.origin?.username ?? null),
+    removed: row.moderation_state !== null,
     sequenceChangedAt: row.sequence_changed_at,
     updatedAt: row.updated_at,
     days: [...row.days]
@@ -189,6 +200,10 @@ export function planErrorMessage(error: RpcError): string {
       return "Höchstens 20 Übungen pro Tag.";
     case "plan_not_found":
       return "Plan nicht gefunden.";
+    case "plan_not_adoptable":
+      return "Dieser Plan kann nicht übernommen werden.";
+    case "adopt_limit":
+      return "Du kannst höchstens 10 Pläne pro Tag übernehmen.";
     case "account_inactive":
       return "Dein Konto ist gerade gesperrt.";
     case "planned_rest_not_due":
@@ -240,6 +255,14 @@ export async function savePlan(
 /** Makes the plan active: the order starts again at day 1, the plan streak runs anew. */
 export async function activatePlan(planId: string): Promise<void> {
   await callVoid(supabase.rpc("activate_plan", { p_plan_id: planId }));
+}
+
+/**
+ * Copies a plan I may see into my plans (without target weights and notes, private). The
+ * server checks visibility, "Übernehmen erlauben" and the limits.
+ */
+export async function adoptPlan(planId: string, activate: boolean): Promise<string> {
+  return call(supabase.rpc("adopt_plan", { p_plan_id: planId, p_activate: activate }));
 }
 
 export async function duplicatePlan(planId: string): Promise<string> {

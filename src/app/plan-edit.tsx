@@ -27,7 +27,10 @@ function planSubtitle(plan: TrainingPlan): string {
   const training = plan.days.filter((d) => d.type === "training").length;
   const rest = plan.days.length - training;
   const days = `${training} ${training === 1 ? "Trainingstag" : "Trainingstage"}${rest > 0 ? `, ${rest} ${rest === 1 ? "Ruhetag" : "Ruhetage"}` : ""}`;
-  return `${days} · ${VISIBILITY_LABELS[plan.visibility]}`;
+  const parts = [days, VISIBILITY_LABELS[plan.visibility]];
+  if (plan.origin !== null) parts.push(plan.origin);
+  if (plan.removed) parts.push("von der Moderation entfernt");
+  return parts.join(" · ");
 }
 
 /** "Trainingspläne": my plans, one of them active. Everything optional. */

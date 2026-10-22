@@ -60,14 +60,20 @@ Bricht etwas ab, bleibt der Status `deleting`. Die App zeigt dann „Löschung w
 
 | Ergebnis | Tabellen |
 |---|---|
-| Gelöscht (`on delete cascade`) | `profiles`, `username_history` (Name wird frei), `posts`, `post_media`, `post_tags`, `post_likes`, `comments`, `comment_likes`, `follows`, `stories`, `story_likes`, `story_views`, `highlights`, `highlight_items`, `audience_restrictions`, `conversation_members` (eigene Zeile), `messages` (eigene), `message_reactions`, `workout_shares`, `post_reposts`, `content_hashtags`, `notifications`, `training_plans`, `plan_days`, `plan_exercises`, `planned_rest_uses`, `rest_budgets`, `rest_day_uses`, `user_blocks`, `admin_roles`, `moderation_notices`, `legal_confirmations`, `confirmation_followups` |
-| Auf `null` gesetzt | `reports.reporter_id`, `messages.pinned_by`, `conversations.created_by`, `training_plans.adopted_from_user_id` (Kopien anderer behalten ihren Plan, Herkunft „Gelöschtes Konto“) |
+| Gelöscht (`on delete cascade`) | `profiles`, `username_history` (Name wird frei), `posts`, `post_media`, `post_tags`, `post_likes`, `comments`, `comment_likes`, `follows`, `stories`, `story_likes`, `story_views`, `highlights`, `highlight_items`, `audience_restrictions`, `conversation_members` (eigene Zeile), `messages` (eigene), `message_reactions`, `workout_shares`, `post_reposts`, `content_hashtags`, `notifications`, `training_plans`, `plan_days`, `plan_exercises`, `planned_rest_uses`, `plan_adoptions` (als Übernehmer), `rest_budgets`, `rest_day_uses`, `user_blocks`, `admin_roles`, `moderation_notices`, `legal_confirmations`, `confirmation_followups` |
+| Auf `null` gesetzt | `reports.reporter_id`, `messages.pinned_by`, `conversations.created_by`, `training_plans.adopted_from_user_id` (Kopien anderer behalten ihren Plan, Herkunft „Gelöschtes Konto“), `plan_adoptions.owner_id` |
 | Nur UUID, Texte pseudonymisiert | `moderation_actions`, `reports.target_user_id`, `report_snapshots.sender_id` |
 | Bereinigt | `stories.mentioned_user_ids` / `mention_positions` anderer |
 | Ohne Bezug zu Konten | `usage_counters`, `usage_event_types`, `usage_meta` (nur Tagessummen pro Ereignis, keine Nutzer-ID). Das Löschen eines Kontos erhöht den Zähler `account_deleted`. |
 | Bleibt | `account_deletions` (nur Hash) |
 
 **Prüfen nach dem Löschen:** `supabase/check-deleted-user.sql` durchsucht alle Tabellen nach der alten ID.
+
+## Trainingspläne
+
+- Sichtbarkeit pro Plan: „Nur ich“, „Follower“ (bestätigte Follower) oder „Alle“ (nur bei öffentlichem Profil, sonst Follower). Gesperrte, gebannte, gelöschte und blockierte Konten sowie verborgene Personen sehen nichts (`can_view_plan`).
+- Pläne sind meldbar (`target_type = 'plan'`). Die Moderation kann sie entfernen oder in Quarantäne setzen: dann sieht und übernimmt sie niemand mehr, der Besitzer behält seinen Plan mit einem Hinweis.
+- Übernehmen (`adopt_plan`) erzeugt eine private Kopie ohne Zielgewichte und Notizen. Höchstens 10 Übernahmen pro Tag und 10 eigene Pläne. Der Ersteller bekommt (abschaltbar) eine Mitteilung pro Übernehmer und Plan, aber keine Liste der Übernehmer. `plan_adoptions` ist für Clients nicht lesbar.
 
 ## Möglicherweise illegale Inhalte
 

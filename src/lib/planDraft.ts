@@ -215,3 +215,10 @@ export function moveItem<T>(items: readonly T[], index: number, by: -1 | 1): T[]
   [next[index], next[target]] = [next[target] as T, next[index] as T];
   return next;
 }
+
+/** Where an adopted plan comes from, as shown in the app. */
+export function originLabel(adoptedAt: string | null, fromUserId: string | null, username: string | null): string | null {
+  if (adoptedAt === null) return null;
+  if (fromUserId === null) return "Übernommen von: Gelöschtes Konto";
+  return username !== null ? `Übernommen von @${username}` : "Übernommen von: Konto nicht verfügbar";
+}

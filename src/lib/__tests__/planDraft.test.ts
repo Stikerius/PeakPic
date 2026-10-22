@@ -5,6 +5,7 @@ import {
   formatReps,
   formatTime,
   moveItem,
+  originLabel,
   parseReps,
   parseTime,
   parseWeight,
@@ -114,6 +115,13 @@ describe("helpers", () => {
     expect(suggestNames("bank", known)).toEqual(["Bankdrücken", "Schrägbankdrücken"]);
     expect(suggestNames("", known)).toEqual([]);
     expect(suggestNames("Klimmzüge", known)).toEqual([]);
+  });
+
+  it("labels the origin of adopted plans", () => {
+    expect(originLabel(null, "u1", "anna")).toBeNull();
+    expect(originLabel("2026-10-22T10:00:00Z", "u1", "anna")).toBe("Übernommen von @anna");
+    expect(originLabel("2026-10-22T10:00:00Z", null, null)).toBe("Übernommen von: Gelöschtes Konto");
+    expect(originLabel("2026-10-22T10:00:00Z", "u1", null)).toBe("Übernommen von: Konto nicht verfügbar");
   });
 
   it("moves items", () => {

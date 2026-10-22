@@ -589,6 +589,26 @@ create table if not exists public.plan_exercises (
   check (reps_max is null or (reps_min is not null and reps_max >= reps_min))
 );
 
+-- Adopted copies: when, and from whom (adopted_from_user_id becomes null when that account is
+-- deleted; adopted_at stays, so the app can show "Gelöschtes Konto").
+alter table public.training_plans add column if not exists adopted_at timestamptz;
+
+-- Every adoption (for the daily limit and "one notification per adopter and plan"). No client
+-- access; the plan owner never sees a list of adopters.
+create table if not exists public.plan_adoptions (
+  id             uuid primary key default gen_random_uuid(),
+  adopter_id     uuid not null references public.profiles (id) on delete cascade,
+  source_plan_id uuid references public.training_plans (id) on delete set null,
+  owner_id       uuid references public.profiles (id) on delete set null,
+  copy_plan_id   uuid references public.training_plans (id) on delete set null,
+  created_at     timestamptz not null default now()
+);
+create index if not exists plan_adoptions_adopter_idx on public.plan_adoptions (adopter_id, created_at desc);
+create index if not exists plan_adoptions_source_idx on public.plan_adoptions (source_plan_id, adopter_id);
+
+-- "Benachrichtigen, wenn jemand meinen Plan übernimmt" (default on).
+alter table public.profiles add column if not exists notify_plan_adopted boolean not null default true;
+
 -- Planned rest days that were confirmed ("Ruhetag bestätigen"). Like rest_day_uses they keep
 -- the streak alive without counting as a training day. Only use_planned_rest_day writes here.
 -- The rows stay when the plan is deleted (the streak history doesn't change).
@@ -688,6 +708,9 @@ create table if not exists public.reports (
   created_at      timestamptz not null default now()
 );
 create unique index if not exists reports_one_per_target_idx on public.reports (reporter_id, target_type, target_id);
+alter table public.reports drop constraint if exists reports_target_type_check;
+alter table public.reports add constraint reports_target_type_check
+  check (target_type in ('post', 'story', 'comment', 'message', 'profile', 'sound', 'plan', 'workout'));
 create index if not exists reports_status_created_idx on public.reports (status, created_at);
 create index if not exists reports_target_user_idx on public.reports (target_user_id);
 
@@ -802,7 +825,8 @@ alter table public.notifications alter column actor_id drop not null;
 alter table public.notifications drop constraint if exists notifications_type_check;
 alter table public.notifications
   add constraint notifications_type_check
-  check (type in ('tag', 'workout_tag_request', 'workout_tag_accepted', 'follow_request', 'legal_update'));
+  check (type in ('tag', 'workout_tag_request', 'workout_tag_accepted', 'follow_request', 'legal_update',
+                  'plan_adopted'));
 
 -- Removed instead of deleted: content stays as evidence, files stay in storage.
 -- moderation_state: null = visible, 'removed' or 'quarantined' (possibly illegal, admins only).
@@ -810,7 +834,7 @@ do $$
 declare
   t text;
 begin
-  foreach t in array array['posts', 'stories', 'comments', 'messages'] loop
+  foreach t in array array['posts', 'stories', 'comments', 'messages', 'training_plans'] loop
     execute format('alter table public.%I add column if not exists moderation_state text', t);
     execute format('alter table public.%I add column if not exists removed_at timestamptz', t);
     execute format('alter table public.%I add column if not exists removed_by uuid', t);
@@ -1873,9 +1897,9 @@ end;
 $$;
 
 -- ---------------------------------------------------------------- training plan
--- Who may read a plan (with its days and exercises): the owner always. Others only when the
--- owner's account is visible to them (active, no block), the plan isn't private and they are
--- not hidden from the owner's posts; 'followers' for confirmed followers, 'public' also for
+-- Who may read a plan (with its days and exercises): the owner always (also a plan removed by
+-- the moderation). Others only when the plan isn't removed, the owner's account is visible to
+-- them (active, no block), the plan isn't private and they are not hidden from the owner's posts; 'followers' for confirmed followers, 'public' also for
 -- everyone signed in, but only while the owner's profile is public (otherwise followers only).
 create or replace function public.can_view_plan(plan uuid)
 returns boolean
@@ -1889,6 +1913,7 @@ as $$
         tp.user_id = (select auth.uid())
         or (
           tp.visibility <> 'private'
+          and tp.moderation_state is null
           and public.can_see_account(tp.user_id)
           and not public.is_hidden_from_me(tp.user_id, 'posts')
           and (
@@ -2129,6 +2154,82 @@ language sql security definer set search_path = ''
 as $$
   delete from public.training_plans
   where id = p_plan_id and user_id = (select auth.uid()) and public.is_account_active();
+$$;
+
+-- Copies a plan I may see into my plans ("Plan übernehmen"): days, exercises with sets, reps
+-- and times, but without target weights and without notes. Private, origin "Übernommen von".
+-- The original never changes. Checks: visible, adopting allowed, at most 10 own plans and 10
+-- adoptions per day. Optionally activated right away (the order starts at day 1). The owner
+-- gets one notification per adopter and plan, if they want it; none for my own plans.
+create or replace function public.adopt_plan(p_plan_id uuid, p_activate boolean)
+returns uuid
+language plpgsql security definer set search_path = ''
+as $$
+declare
+  me uuid := auth.uid();
+  source public.training_plans%rowtype;
+  copy_id uuid;
+  source_day record;
+  new_day uuid;
+  first_time boolean;
+begin
+  if me is null then
+    raise exception 'not authenticated';
+  end if;
+  if not public.is_account_active() then
+    raise exception 'account_inactive';
+  end if;
+  select * into source from public.training_plans tp where tp.id = p_plan_id;
+  if not found or not public.can_view_plan(p_plan_id) or source.moderation_state is not null then
+    raise exception 'plan_not_found';
+  end if;
+  if source.user_id <> me and (source.visibility = 'private' or not source.allow_adopt) then
+    raise exception 'plan_not_adoptable';
+  end if;
+  -- Serialises per adopter (limits).
+  perform 1 from public.profiles pr where pr.id = me for update;
+  if (select count(*) from public.training_plans tp where tp.user_id = me) >= 10 then
+    raise exception 'plan_limit' using hint = '10';
+  end if;
+  if (
+    select count(*) from public.plan_adoptions a
+    where a.adopter_id = me and a.created_at >= (public.app_today()::timestamp at time zone 'Europe/Zurich')
+  ) >= 10 then
+    raise exception 'adopt_limit' using hint = '10';
+  end if;
+  first_time := not exists (
+    select 1 from public.plan_adoptions a where a.adopter_id = me and a.source_plan_id = source.id
+  );
+
+  insert into public.training_plans
+    (user_id, name, show_in_profile, visibility, allow_adopt, is_active,
+     adopted_from_plan_id, adopted_from_user_id, adopted_at)
+  values (me, source.name, false, 'private', true, false, source.id, source.user_id, now())
+  returning id into copy_id;
+  for source_day in select * from public.plan_days d where d.plan_id = source.id order by d.position loop
+    insert into public.plan_days (plan_id, position, day_type, title, notes)
+    values (copy_id, source_day.position, source_day.day_type, source_day.title, null)
+    returning id into new_day;
+    insert into public.plan_exercises (plan_day_id, position, name, sets, reps_min, reps_max, target_seconds)
+    select new_day, e.position, e.name, e.sets, e.reps_min, e.reps_max, e.target_seconds
+    from public.plan_exercises e where e.plan_day_id = source_day.id;
+  end loop;
+  insert into public.plan_adoptions (adopter_id, source_plan_id, owner_id, copy_plan_id)
+  values (me, source.id, source.user_id, copy_id);
+
+  if coalesce(p_activate, false)
+    or not exists (select 1 from public.training_plans tp where tp.user_id = me and tp.is_active) then
+    update public.training_plans set is_active = false where user_id = me and is_active;
+    update public.training_plans set is_active = true, sequence_changed_at = now() where id = copy_id;
+  end if;
+
+  if source.user_id <> me and first_time
+    and exists (select 1 from public.profiles pr where pr.id = source.user_id and pr.notify_plan_adopted) then
+    insert into public.notifications (user_id, actor_id, type, payload)
+    values (source.user_id, me, 'plan_adopted', jsonb_build_object('plan_id', source.id, 'plan_title', source.name));
+  end if;
+  return copy_id;
+end;
 $$;
 
 -- Exercise names I used before, for suggestions (most used first).
@@ -2563,7 +2664,7 @@ begin
 end;
 $$;
 
--- Reports a post, story, comment or profile. Only what the caller may see, never their own,
+-- Reports a post, story, comment, profile or plan. Only what the caller may see, never their own,
 -- one report per target. The owner of the target is looked up here, not taken from the app.
 create or replace function public.report_content(p_target_type text, p_target_id uuid, p_reason text, p_details text)
 returns uuid
@@ -2589,6 +2690,12 @@ begin
         raise exception 'report_target_not_found';
       end if;
       target_owner := p_target_id;
+    when 'plan' then
+      if not public.can_view_plan(p_target_id)
+        or exists (select 1 from public.training_plans tp where tp.id = p_target_id and tp.moderation_state is not null) then
+        raise exception 'report_target_not_found';
+      end if;
+      select tp.user_id into target_owner from public.training_plans tp where tp.id = p_target_id;
     else
       -- Messages go through report_message(); there are no sounds yet.
       raise exception 'report_type_not_supported';
@@ -2889,6 +2996,7 @@ begin
     when 'story' then select s.user_id into target_owner from public.stories s where s.id = p_id;
     when 'comment' then select c.user_id into target_owner from public.comments c where c.id = p_id;
     when 'message' then select m.sender_id into target_owner from public.messages m where m.id = p_id;
+    when 'plan' then select tp.user_id into target_owner from public.training_plans tp where tp.id = p_id;
     else raise exception 'unsupported_target_type';
   end case;
   if target_owner is null then
@@ -2910,6 +3018,7 @@ begin
     when 'story' then select s.moderation_state into state from public.stories s where s.id = p_id;
     when 'comment' then select c.moderation_state into state from public.comments c where c.id = p_id;
     when 'message' then select m.moderation_state into state from public.messages m where m.id = p_id;
+    when 'plan' then select tp.moderation_state into state from public.training_plans tp where tp.id = p_id;
     else raise exception 'unsupported_target_type';
   end case;
   return state;
@@ -2935,6 +3044,8 @@ begin
       update public.comments set moderation_state = p_state, removed_at = removed, removed_by = remover, removed_reason = why where id = p_id;
     when 'message' then
       update public.messages set moderation_state = p_state, removed_at = removed, removed_by = remover, removed_reason = why where id = p_id;
+    when 'plan' then
+      update public.training_plans set moderation_state = p_state, removed_at = removed, removed_by = remover, removed_reason = why where id = p_id;
     else raise exception 'unsupported_target_type';
   end case;
 end;
@@ -3226,7 +3337,7 @@ begin
     raise exception 'report_not_found';
   end if;
 
-  if report.target_type in ('post', 'story', 'comment', 'message')
+  if report.target_type in ('post', 'story', 'comment', 'message', 'plan')
     and public.moderation_state_of(report.target_type, report.target_id) = 'quarantined'
     and not public.is_admin() then
     hidden := true;
@@ -3265,6 +3376,21 @@ begin
       'id', p.id, 'username', p.username, 'display_name', p.display_name, 'avatar_path', p.avatar_path,
       'created_at', p.created_at
     ) into content from public.profiles p where p.id = report.target_id;
+  elsif report.target_type = 'plan' then
+    select jsonb_build_object(
+      'id', tp.id, 'name', tp.name, 'visibility', tp.visibility, 'created_at', tp.created_at,
+      'moderation_state', tp.moderation_state, 'removed_reason', tp.removed_reason,
+      'days', coalesce((
+        select jsonb_agg(jsonb_build_object(
+          'type', d.day_type, 'title', d.title, 'notes', d.notes,
+          'exercises', coalesce((
+            select jsonb_agg(jsonb_build_object('name', e.name, 'sets', e.sets, 'reps_min', e.reps_min,
+                                                'reps_max', e.reps_max, 'target_seconds', e.target_seconds,
+                                                'notes', e.notes) order by e.position)
+            from public.plan_exercises e where e.plan_day_id = d.id), '[]'::jsonb)
+        ) order by d.position)
+        from public.plan_days d where d.plan_id = tp.id), '[]'::jsonb)
+    ) into content from public.training_plans tp where tp.id = report.target_id;
   end if;
 
   if report.status = 'open' then
@@ -3420,6 +3546,7 @@ begin
                  + (select count(*) from public.stories s where s.moderation_state = 'quarantined')
                  + (select count(*) from public.comments c where c.moderation_state = 'quarantined')
                  + (select count(*) from public.messages m where m.moderation_state = 'quarantined')
+                 + (select count(*) from public.training_plans tp where tp.moderation_state = 'quarantined')
   );
 end;
 $$;
@@ -4217,7 +4344,7 @@ do $$
 declare
   t text;
 begin
-  foreach t in array array['posts', 'stories', 'comments', 'messages'] loop
+  foreach t in array array['posts', 'stories', 'comments', 'messages', 'training_plans'] loop
     execute format('drop trigger if exists %I on public.%I', t || '_moderation_guard', t);
     execute format(
       'create trigger %I before insert or update on public.%I for each row execute function public.guard_content_moderation()',
@@ -4298,6 +4425,8 @@ revoke all on function public.duplicate_plan(uuid) from public, anon;
 grant execute on function public.duplicate_plan(uuid) to authenticated;
 revoke all on function public.delete_plan(uuid) from public, anon;
 grant execute on function public.delete_plan(uuid) to authenticated;
+revoke all on function public.adopt_plan(uuid, boolean) from public, anon;
+grant execute on function public.adopt_plan(uuid, boolean) to authenticated;
 revoke all on function public.my_exercise_names() from public, anon;
 grant execute on function public.my_exercise_names() to authenticated;
 revoke all on function public.plan_limits() from public, anon;
@@ -4441,6 +4570,8 @@ revoke all on public.training_plans, public.plan_days, public.plan_exercises fro
 grant select on public.training_plans, public.plan_days, public.plan_exercises to authenticated;
 revoke all on public.planned_rest_uses from anon, authenticated;
 grant select on public.planned_rest_uses to authenticated;
+-- Adoptions: no client access (the daily limit and notifications are handled in adopt_plan).
+revoke all on public.plan_adoptions from anon, authenticated;
 -- Rest days: owners read their own; all writes go through the rest-day functions.
 revoke all on public.rest_budgets, public.rest_day_uses from anon, authenticated;
 grant select on public.rest_budgets, public.rest_day_uses to authenticated;
@@ -4492,6 +4623,7 @@ alter table public.training_plans       enable row level security;
 alter table public.plan_days            enable row level security;
 alter table public.plan_exercises       enable row level security;
 alter table public.planned_rest_uses    enable row level security;
+alter table public.plan_adoptions       enable row level security;
 alter table public.rest_budgets         enable row level security;
 alter table public.rest_day_uses        enable row level security;
 alter table public.user_blocks          enable row level security;
@@ -5005,6 +5137,7 @@ create policy "training_plans: read" on public.training_plans
     user_id = (select auth.uid())
     or (
       visibility <> 'private'
+      and moderation_state is null
       and public.can_see_account(user_id)
       and not public.is_hidden_from_me(user_id, 'posts')
       and (
@@ -5213,7 +5346,8 @@ begin
   if exists (select 1 from public.posts x where x.user_id = p_user and x.moderation_state = 'quarantined')
     or exists (select 1 from public.stories x where x.user_id = p_user and x.moderation_state = 'quarantined')
     or exists (select 1 from public.comments x where x.user_id = p_user and x.moderation_state = 'quarantined')
-    or exists (select 1 from public.messages x where x.sender_id = p_user and x.moderation_state = 'quarantined') then
+    or exists (select 1 from public.messages x where x.sender_id = p_user and x.moderation_state = 'quarantined')
+    or exists (select 1 from public.training_plans x where x.user_id = p_user and x.moderation_state = 'quarantined') then
     return 'quarantined';
   end if;
   return null;
@@ -5417,6 +5551,7 @@ insert into public.usage_event_types (name, area, source) values
   ('follow_created', 'profile', 'server'),
   ('report_created', 'moderation', 'server'),
   ('plan_created', 'plans', 'server'),
+  ('plan_adopted', 'plans', 'server'),
   ('screen_home', 'home', 'client'),
   ('screen_feed', 'feed', 'client'),
   ('screen_post', 'feed', 'client'),
@@ -5441,6 +5576,7 @@ insert into public.usage_event_types (name, area, source) values
   ('screen_plan_editor', 'plans', 'client'),
   ('plan_activated', 'plans', 'client'),
   ('planned_rest_confirmed', 'plans', 'client'),
+  ('plan_adopt_opened', 'plans', 'client'),
   ('screen_search', 'search', 'client'),
   ('screen_hashtag', 'search', 'client'),
   ('screen_settings', 'settings', 'client'),
@@ -5487,6 +5623,12 @@ begin
       return null;
     end if;
   end if;
+  -- Adoptions are plans with an origin.
+  if tg_argv[0] = 'plan_adopted' then
+    if new.adopted_from_plan_id is null then
+      return null;
+    end if;
+  end if;
   begin
     perform public.bump_usage(tg_argv[0]);
   exception when others then
@@ -5514,13 +5656,17 @@ begin
       ('comment_likes', 'insert', 'like_created'),
       ('follows', 'insert', 'follow_created'),
       ('reports', 'insert', 'report_created'),
-      ('training_plans', 'insert', 'plan_created')
+      ('training_plans', 'insert', 'plan_created'),
+      ('training_plans', 'insert', 'plan_adopted')
     ) as v(tbl, op, event)
   loop
+    -- Trigger names per event (one table can count several events); the first version named
+    -- them per operation.
     execute format('drop trigger if exists %I on public.%I', t.tbl || '_usage_' || t.op, t.tbl);
+    execute format('drop trigger if exists %I on public.%I', t.tbl || '_usage_' || t.event, t.tbl);
     execute format(
       'create trigger %I after %s on public.%I for each row execute function public.on_usage_event(%L)',
-      t.tbl || '_usage_' || t.op, t.op, t.tbl, t.event
+      t.tbl || '_usage_' || t.event, t.op, t.tbl, t.event
     );
   end loop;
 end;

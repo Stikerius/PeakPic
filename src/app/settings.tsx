@@ -18,8 +18,10 @@ import { useLegalGate } from "@/lib/legalGate";
 import { LEGAL_TYPE_LABELS } from "@/lib/legalRepo";
 import { listHiddenUserIds } from "@/lib/privacyRepo";
 import {
+  getMyPlanAdoptNotify,
   getMyProfile,
   getMyTagSettings,
+  updatePlanAdoptNotify,
   updatePrivacy,
   updateTagSettings,
   type PrivacySettings,
@@ -115,6 +117,7 @@ export default function SettingsScreen() {
   const requestCount = useFollowRequestCount();
   const legal = useLegalGate();
   const usageEnabled = useUsageEnabled();
+  const [planAdoptNotify, setPlanAdoptNotify] = useState<boolean | null>(null);
 
   useFocusEffect(
     useCallback(() => {
@@ -123,6 +126,9 @@ export default function SettingsScreen() {
         .catch(() => undefined);
       getMyTagSettings()
         .then(setTags)
+        .catch(() => undefined);
+      getMyPlanAdoptNotify()
+        .then(setPlanAdoptNotify)
         .catch(() => undefined);
       void Promise.all([listHiddenUserIds("stories"), listHiddenUserIds("posts")])
         .then(([stories, posts]) => setCounts({ stories: stories.size, posts: posts.size }))
@@ -290,6 +296,34 @@ export default function SettingsScreen() {
       <Text style={styles.footnote}>
         „Verbindungen“ heisst: Leute, denen du folgst oder die dir folgen. Markieren können dich ausserdem nur Leute,
         mit denen du verbunden bist oder deren Inhalt öffentlich ist; höchstens 10 Personen pro Beitrag.
+      </Text>
+
+      <Text style={[styles.sectionTitle, styles.sectionSpacing]}>Trainingspläne</Text>
+      <View style={styles.card}>
+        <View style={styles.row}>
+          <Ionicons name="copy-outline" size={22} color={colors.text} />
+          <View style={styles.rowText}>
+            <Text style={styles.rowTitle}>Benachrichtigen, wenn jemand meinen Plan übernimmt</Text>
+          </View>
+          <Switch
+            value={planAdoptNotify ?? true}
+            onValueChange={(value) => {
+              const previous = planAdoptNotify;
+              setPlanAdoptNotify(value);
+              updatePlanAdoptNotify(value).catch((error: unknown) => {
+                setPlanAdoptNotify(previous);
+                Alert.alert("Speichern fehlgeschlagen", describeError(error));
+              });
+            }}
+            disabled={planAdoptNotify === null}
+            trackColor={{ true: colors.accent, false: colors.border }}
+            accessibilityLabel="Benachrichtigen, wenn jemand meinen Plan übernimmt"
+          />
+        </View>
+      </View>
+      <Text style={styles.footnote}>
+        Wer einen Plan übernimmt, bekommt eine Kopie ohne Zielgewichte und Notizen. Eine Liste der Personen gibt es
+        nicht, nur diese Mitteilung (einmal pro Person und Plan).
       </Text>
 
       <Text style={[styles.sectionTitle, styles.sectionSpacing]}>Darstellung</Text>
