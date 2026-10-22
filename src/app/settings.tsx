@@ -29,6 +29,7 @@ import {
 } from "@/lib/profileRepo";
 import { makeStyles, useTheme } from "@/lib/theme";
 import { getDefaultActivityVisibility, setDefaultActivityVisibility } from "@/lib/trainingRepo";
+import { getTrainingStatsVisibility, setTrainingStatsVisibility } from "@/lib/trainingStatsRepo";
 import { REST_TIMER_CHOICES, setRestTimerSettings, useRestTimerSettings } from "@/lib/trainingSettings";
 import type { ActivityVisibility } from "@/lib/workout";
 import type { AudienceScope, TagPermission, Visibility } from "@/types/database";
@@ -133,6 +134,7 @@ export default function SettingsScreen() {
   const usageEnabled = useUsageEnabled();
   const [planAdoptNotify, setPlanAdoptNotify] = useState<boolean | null>(null);
   const [activityVisibility, setActivityVisibility] = useState<ActivityVisibility | null>(null);
+  const [statsVisibility, setStatsVisibility] = useState<ActivityVisibility | null>(null);
   const restTimer = useRestTimerSettings();
 
   useFocusEffect(
@@ -148,6 +150,9 @@ export default function SettingsScreen() {
         .catch(() => undefined);
       getDefaultActivityVisibility()
         .then(setActivityVisibility)
+        .catch(() => undefined);
+      getTrainingStatsVisibility()
+        .then(setStatsVisibility)
         .catch(() => undefined);
       void Promise.all([listHiddenUserIds("stories"), listHiddenUserIds("posts")])
         .then(([stories, posts]) => setCounts({ stories: stories.size, posts: posts.size }))
@@ -452,6 +457,21 @@ export default function SettingsScreen() {
 
       <Text style={[styles.sectionTitle, styles.sectionSpacing]}>Datenschutz</Text>
       <View style={styles.card}>
+        <Choice
+          title="Wer sieht deine Trainingsstatistik"
+          options={ACTIVITY_OPTIONS}
+          value={statsVisibility ?? "private"}
+          disabled={statsVisibility === null}
+          onChange={(value) => {
+            const previous = statsVisibility;
+            setStatsVisibility(value);
+            setTrainingStatsVisibility(value).catch((error: unknown) => {
+              setStatsVisibility(previous);
+              Alert.alert("Speichern fehlgeschlagen", describeError(error));
+            });
+          }}
+        />
+        <View style={styles.separator} />
         <View style={styles.row}>
           <Ionicons name="bar-chart-outline" size={22} color={colors.text} />
           <View style={styles.rowText}>
@@ -466,6 +486,10 @@ export default function SettingsScreen() {
           />
         </View>
       </View>
+      <Text style={styles.footnote}>
+        Die Trainingsstatistik zeigt nur Summen (Trainings, Zeit, Volumen, Streak, Werte pro Übung), nie einzelne
+        Trainings. Standard ist „Nur ich“; „Alle“ gilt nur bei öffentlichem Profil, sonst sehen sie nur Follower.
+      </Text>
       <Text style={styles.footnote}>
         Gezählt wird nur, wie oft ein Bereich der App geöffnet wird (zum Beispiel Feed oder Chats), als Tagessumme
         für alle Nutzer zusammen. Dabei wird weder dein Konto noch dein Gerät gespeichert, und keine Inhalte. Die

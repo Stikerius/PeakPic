@@ -17,6 +17,7 @@ import { PostGrid } from "@/components/profile/post-grid";
 import { FlameIcon } from "@/components/streak/flame-icon";
 import { Avatar } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
+import { Divider } from "@/components/ui/divider";
 import { fontSize, radius, spacing, typography } from "@/constants/theme";
 import { useFollowRequestCount } from "@/hooks/use-follow-requests";
 import { useWorkoutDays } from "@/hooks/use-workout-days";
@@ -248,7 +249,7 @@ export default function ProfileScreen() {
       </View>
 
       {myId !== null && (
-        <View style={styles.padded}>
+        <View style={styles.activitiesCard}>
           <Pressable
             onPress={() => router.push({ pathname: "/activities/[userId]", params: { userId: myId } })}
             accessibilityRole="button"
@@ -257,6 +258,17 @@ export default function ProfileScreen() {
           >
             <Ionicons name="barbell-outline" size={20} color={colors.textSecondary} />
             <Text style={styles.activitiesText}>Aktivitäten</Text>
+            <Ionicons name="chevron-forward" size={18} color={colors.textTertiary} />
+          </Pressable>
+          <Divider />
+          <Pressable
+            onPress={() => router.push({ pathname: "/stats/[userId]", params: { userId: myId } })}
+            accessibilityRole="button"
+            accessibilityLabel="Statistik: Trainings, Zeit, Streak und Übungen"
+            style={({ pressed }) => [styles.activitiesRow, pressed && styles.activitiesPressed]}
+          >
+            <Ionicons name="bar-chart-outline" size={20} color={colors.textSecondary} />
+            <Text style={styles.activitiesText}>Statistik</Text>
             <Ionicons name="chevron-forward" size={18} color={colors.textTertiary} />
           </Pressable>
         </View>
@@ -282,16 +294,20 @@ const useStyles = makeStyles(({ colors }) =>
       paddingVertical: spacing.md,
       gap: spacing.lg,
     },
+    activitiesCard: {
+      marginHorizontal: spacing.md,
+      borderRadius: radius.md,
+      borderWidth: StyleSheet.hairlineWidth,
+      borderColor: colors.border,
+      backgroundColor: colors.surface,
+      overflow: "hidden",
+    },
     activitiesRow: {
       minHeight: 48,
       flexDirection: "row",
       alignItems: "center",
       gap: spacing.ms,
       paddingHorizontal: spacing.md,
-      borderRadius: radius.md,
-      borderWidth: StyleSheet.hairlineWidth,
-      borderColor: colors.border,
-      backgroundColor: colors.surface,
     },
     activitiesPressed: {
       backgroundColor: colors.surfaceRaised,

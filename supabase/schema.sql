@@ -50,6 +50,9 @@
 --                   Written only through save_plan() / activate_plan() / duplicate_plan() /
 --                   delete_plan(); sequence_changed_at marks changes of order or day types
 --                   and activation (the plan streak restarts there).
+--   * training stats get_my_training_stats() / get_training_stats(): aggregated numbers only
+--                   (per day and exercise, never single trainings), visible per
+--                   profiles.training_stats_visibility (default 'private'; can_view_training_stats).
 --   * workouts      recorded trainings (workouts, workout_exercises, workout_sets). Written only
 --                   by save_workout() (validated, atomic); counts_for_streak is decided there
 --                   (plausibility rules, workout_rules()) and never written by clients. A counting
@@ -6067,6 +6070,9 @@ insert into public.usage_event_types (name, area, source) values
   ('screen_activities', 'workout', 'client'),
   ('activity_visibility_changed', 'workout', 'client'),
   ('activity_deleted', 'workout', 'client'),
+  ('screen_training_stats', 'stats', 'client'),
+  ('training_stats_range_changed', 'stats', 'client'),
+  ('training_stats_exercise_selected', 'stats', 'client'),
   ('screen_search', 'search', 'client'),
   ('screen_hashtag', 'search', 'client'),
   ('screen_settings', 'settings', 'client'),
@@ -6402,3 +6408,261 @@ begin
   end loop;
 end;
 $$;
+
+
+-- ================================================================ training statistics
+-- "Statistik" in the profile. Others never read workouts for it: the functions below return
+-- aggregated numbers only (sums per day, per exercise and day, plan day counts, streak lengths),
+-- no ids, titles, notes, times of day or single sets. Who may see them:
+-- profiles.training_stats_visibility ('private' | 'followers' | 'public', default 'private';
+-- 'public' only while the profile is public, otherwise followers only).
+alter table public.profiles add column if not exists training_stats_visibility text not null default 'private';
+do $$
+begin
+  if not exists (select 1 from pg_constraint where conname = 'profiles_training_stats_visibility_check') then
+    alter table public.profiles add constraint profiles_training_stats_visibility_check
+      check (training_stats_visibility in ('private', 'followers', 'public'));
+  end if;
+end;
+$$;
+
+-- May the caller see `target`'s training statistics? Own always; others only with an active,
+-- unblocked account that isn't hidden from them, per the setting.
+create or replace function public.can_view_training_stats(target uuid)
+returns boolean
+language sql stable security definer set search_path = ''
+as $$
+  select (select auth.uid()) is not null and (
+    target = (select auth.uid())
+    or exists (
+      select 1 from public.profiles p
+      where p.id = target
+        and p.training_stats_visibility <> 'private'
+        and public.can_see_account(target)
+        and not public.is_hidden_from_me(target, 'posts')
+        and (
+          public.is_following(target)
+          or (p.training_stats_visibility = 'public' and not p.is_private)
+        )
+    )
+  );
+$$;
+
+-- Current and longest streak of `target`, with the same rules as lib/streak.ts: training days
+-- (posts that count, accepted workout links, counting trainings) in a row; rest days bridge a
+-- gap but don't add to the count; not having trained yet today keeps yesterday's streak.
+-- Internal (no visibility check).
+create or replace function public.streak_numbers(target uuid)
+returns table (current_streak integer, longest_streak integer)
+language sql stable security definer set search_path = ''
+as $$
+  with training as (
+    select p.workout_date as d from public.posts p
+    where p.user_id = target and public.post_counts_as_workout(p.id)
+    union
+    select p.workout_date from public.workout_shares ws
+    join public.posts p on p.id = ws.post_id
+    where ws.tagged_user_id = target and ws.status = 'accepted' and public.post_counts_as_workout(p.id)
+    union
+    select w.workout_date from public.workouts w
+    where w.user_id = target and w.counts_for_streak and w.moderation_state is null
+  ),
+  rest as (
+    select r.day as d from public.rest_day_uses r where r.user_id = target
+    union
+    select r.day from public.planned_rest_uses r where r.user_id = target
+  ),
+  active_days as (
+    select t.d, true as is_training from training t
+    union all
+    select r.d, false from rest r where not exists (select 1 from training t where t.d = r.d)
+  ),
+  runs as (
+    select a.d, a.is_training, a.d - (row_number() over (order by a.d))::integer as grp
+    from active_days a
+  ),
+  cursor_day as (
+    select case when exists (select 1 from active_days a where a.d = public.app_today())
+                then public.app_today() else public.app_today() - 1 end as d
+  )
+  select
+    coalesce((
+      select (count(*) filter (where r.is_training))::integer from runs r
+      where r.grp = (select r2.grp from runs r2 where r2.d = (select c.d from cursor_day c))
+        and r.d <= (select c.d from cursor_day c)
+    ), 0),
+    coalesce((
+      select max(x.n)::integer from (
+        select count(*) filter (where r.is_training) as n from runs r group by r.grp
+      ) x
+    ), 0);
+$$;
+
+-- The period of a range (Europe/Zurich): 'weeks' = the last 12 calendar weeks (Mon-Sun, by
+-- week), 'months' = the last 12 calendar months (by month), 'year' = this calendar year (by
+-- month). Always up to today. Same as statsRange() in lib/trainingStats.ts.
+create or replace function public.training_stats_range(p_range text)
+returns table (range_from date, range_to date, bucket text)
+language plpgsql stable set search_path = ''
+as $$
+declare
+  today date := public.app_today();
+begin
+  case p_range
+    when 'weeks' then
+      return query select date_trunc('week', today::timestamp)::date - 77, today, 'week'::text;
+    when 'months' then
+      return query select (date_trunc('month', today::timestamp) - interval '11 months')::date, today, 'month'::text;
+    when 'year' then
+      return query select date_trunc('year', today::timestamp)::date, today, 'month'::text;
+    else
+      raise exception 'invalid_range';
+  end case;
+end;
+$$;
+
+-- The numbers of `target` in a range. Internal (no visibility check; see get_training_stats).
+-- Removed trainings don't count; all other recorded trainings do (also those that didn't count
+-- for the streak). Exercises are grouped by their normalized name (lowercase, trimmed, single
+-- spaces), at most the 30 done most often. Estimated max weight (Epley): weight × (1 + reps /
+-- 30), the weight itself for a single rep. Weights only where recorded (null otherwise).
+create or replace function public.training_stats_of(target uuid, p_range text)
+returns jsonb
+language sql stable security definer set search_path = ''
+as $$
+  with period as (
+    select * from public.training_stats_range(p_range)
+  ),
+  ws as (
+    select w.id, w.workout_date, w.active_seconds, w.plan_day_title
+    from public.workouts w, period
+    where w.user_id = target and w.moderation_state is null
+      and w.workout_date between period.range_from and period.range_to
+  ),
+  set_rows as (
+    select w.workout_date as d,
+           lower(regexp_replace(btrim(e.name), '\s+', ' ', 'g')) as ex_key,
+           e.name, s.reps, s.weight_kg, s.seconds,
+           case when s.weight_kg is not null and s.reps >= 1 then
+             case when s.reps = 1 then s.weight_kg else s.weight_kg * (1 + s.reps / 30.0) end
+           end as e1rm
+    from ws w
+    join public.workout_exercises e on e.workout_id = w.id
+    join public.workout_sets s on s.workout_exercise_id = e.id
+  ),
+  set_rows_ranked as (
+    select r.*, max(r.weight_kg) over (partition by r.ex_key, r.d) as day_best_weight
+    from set_rows r
+  ),
+  day_sets as (
+    select r.d, count(*) as n_sets,
+           sum(r.weight_kg * r.reps) filter (where r.weight_kg is not null and r.reps is not null) as vol
+    from set_rows r group by r.d
+  ),
+  day_totals as (
+    select w.workout_date as d, count(*) as n, sum(w.active_seconds) as secs
+    from ws w group by w.workout_date
+  ),
+  top_ex as (
+    select r.ex_key, mode() within group (order by r.name) as name, count(distinct r.d) as sessions
+    from set_rows r
+    group by r.ex_key
+    order by count(distinct r.d) desc, r.ex_key
+    limit 30
+  ),
+  ex_points as (
+    select r.ex_key, r.d,
+           max(r.weight_kg) as best_weight,
+           max(r.reps) filter (where r.weight_kg = r.day_best_weight) as best_weight_reps,
+           max(r.e1rm) as best_e1rm,
+           sum(r.weight_kg * r.reps) filter (where r.weight_kg is not null and r.reps is not null) as vol,
+           sum(r.reps) as total_reps, max(r.reps) as max_reps,
+           sum(r.seconds) as total_seconds, max(r.seconds) as max_seconds
+    from set_rows_ranked r
+    where r.ex_key in (select t.ex_key from top_ex t)
+    group by r.ex_key, r.d
+  )
+  select jsonb_build_object(
+    'range', p_range,
+    'bucket', (select period.bucket from period),
+    'from', (select period.range_from from period),
+    'to', (select period.range_to from period),
+    'days', coalesce((
+      select jsonb_agg(jsonb_build_object(
+        'day', t.d, 'workouts', t.n, 'active_seconds', t.secs,
+        'sets', coalesce(ds.n_sets, 0), 'volume_kg', round(ds.vol, 1)
+      ) order by t.d)
+      from day_totals t left join day_sets ds on ds.d = t.d
+    ), '[]'::jsonb),
+    'plan_days', coalesce((
+      select jsonb_agg(jsonb_build_object('title', x.title, 'workouts', x.n) order by x.n desc, x.title)
+      from (
+        select w.plan_day_title as title, count(*) as n from ws w
+        where w.plan_day_title is not null
+        group by w.plan_day_title
+        order by count(*) desc
+        limit 30
+      ) x
+    ), '[]'::jsonb),
+    'free_workouts', (select count(*) from ws w where w.plan_day_title is null),
+    'exercises', coalesce((
+      select jsonb_agg(jsonb_build_object(
+        'key', t.ex_key, 'name', t.name, 'sessions', t.sessions,
+        'points', (
+          select jsonb_agg(jsonb_build_object(
+            'day', p.d, 'best_weight_kg', p.best_weight, 'best_weight_reps', p.best_weight_reps,
+            'best_e1rm_kg', round(p.best_e1rm, 1), 'volume_kg', round(p.vol, 1),
+            'total_reps', p.total_reps, 'max_reps', p.max_reps,
+            'total_seconds', p.total_seconds, 'max_seconds', p.max_seconds
+          ) order by p.d)
+          from ex_points p where p.ex_key = t.ex_key
+        )
+      ) order by t.sessions desc, t.ex_key)
+      from top_ex t
+    ), '[]'::jsonb),
+    'current_streak', (select sn.current_streak from public.streak_numbers(target) sn),
+    'longest_streak', (select sn.longest_streak from public.streak_numbers(target) sn)
+  );
+$$;
+
+-- Training statistics of a person (null when the caller may not see them). Signed in only.
+create or replace function public.get_training_stats(p_user_id uuid, p_range text)
+returns jsonb
+language plpgsql stable security definer set search_path = ''
+as $$
+begin
+  if auth.uid() is null then
+    raise exception 'not authenticated';
+  end if;
+  if p_range is null or p_range not in ('weeks', 'months', 'year') then
+    raise exception 'invalid_range';
+  end if;
+  if p_user_id is null or not public.can_view_training_stats(p_user_id) then
+    return null;
+  end if;
+  return public.training_stats_of(p_user_id, p_range);
+end;
+$$;
+
+-- My own training statistics.
+create or replace function public.get_my_training_stats(p_range text)
+returns jsonb
+language plpgsql stable security definer set search_path = ''
+as $$
+begin
+  if auth.uid() is null then
+    raise exception 'not authenticated';
+  end if;
+  return public.get_training_stats(auth.uid(), p_range);
+end;
+$$;
+
+revoke all on function public.streak_numbers(uuid) from public, anon, authenticated;
+revoke all on function public.training_stats_range(text) from public, anon, authenticated;
+revoke all on function public.training_stats_of(uuid, text) from public, anon, authenticated;
+revoke all on function public.can_view_training_stats(uuid) from public, anon;
+grant execute on function public.can_view_training_stats(uuid) to authenticated;
+revoke all on function public.get_training_stats(uuid, text) from public, anon;
+grant execute on function public.get_training_stats(uuid, text) to authenticated;
+revoke all on function public.get_my_training_stats(text) from public, anon;
+grant execute on function public.get_my_training_stats(text) to authenticated;

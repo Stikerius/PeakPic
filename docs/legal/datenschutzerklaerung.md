@@ -16,7 +16,11 @@ TODO: Braucht es eine Vertretung in der EU oder Schweiz (DSGVO Art. 27, DSG Art.
 
 **Was du teilst:** Workout-Fotos und Bildunterschriften, Storys (24 Stunden sichtbar, ausser in Highlights), Kommentare, Likes, Reposts, Hashtags, Markierungen und Erwähnungen anderer Personen, Follows und Follow-Anfragen.
 
-**Training:** Streak, Trainingsplan, Ruhetage.
+**Training:** Streak, Trainingspläne (mit Übungen, Sätzen, Wiederholungen, Zielgewichten und Notizen; übernommene Pläne mit ihrer Herkunft), Ruhetage und aufgezeichnete Trainings (Datum, Start- und Endzeit, aktive Zeit, Übungen, Sätze mit Wiederholungen, Gewicht und Dauer, Pausen, Titel und Notiz, zugehöriger Plantag, ob das Training für den Streak zählt). Daraus berechnet die App deine Trainingsstatistik (Trainings pro Woche oder Monat, Gesamtzeit, Volumen, Streak, Verlauf und Bestleistungen pro Übung, geschätztes Maximalgewicht). Ein laufendes Training wird bis zum Speichern nur auf deinem Gerät zwischengespeichert.
+
+Trainingsdaten können Rückschlüsse auf deine Gesundheit und körperliche Leistungsfähigkeit zulassen. Deshalb sind aufgezeichnete Trainings und die Trainingsstatistik standardmässig nur für dich sichtbar (siehe Abschnitt 4).
+
+TODO (Rechtsprüfung): Trainingsdaten können als Gesundheitsdaten (DSGVO Art. 9) beziehungsweise besonders schützenswerte Personendaten (DSG Art. 5 lit. c) gelten. Rechtsgrundlage klären, insbesondere ob für das Teilen mit anderen eine ausdrückliche Einwilligung nötig ist, und ob eine Datenschutz-Folgenabschätzung erforderlich ist.
 
 **Nachrichten:** Direktnachrichten und Reaktionen. Sie sind nur für die Beteiligten sichtbar. Moderatoren sehen sie nicht, ausser jemand meldet eine Nachricht: Dann wird eine Kopie der gemeldeten Nachricht mit wenigen Nachrichten davor und danach für die Prüfung gespeichert.
 
@@ -51,6 +55,8 @@ TODO: Rechtsgrundlagen und Pflichten aus dem Digital Services Act prüfen.
 ## 4. Wer die Daten sieht
 
 - Andere Nutzer sehen, was du teilst, je nach deinen Einstellungen (öffentliches oder privates Profil, Einschränkungen, Blockierungen).
+- **Trainings:** Jede aufgezeichnete Aktivität hat eine eigene Sichtbarkeit: „Nur ich“ (Standard, änderbar unter Einstellungen → Training), „Follower“ (bestätigte Follower) oder „Alle“ (alle angemeldeten Nutzer, aber nur solange dein Profil öffentlich ist, sonst nur Follower). Zeigst du den Trainingsbericht bei einem Beitrag, sieht ihn auch, wer diesen Beitrag sehen darf. Trainingspläne haben dieselben drei Stufen.
+- **Trainingsstatistik:** Standard „Nur ich“ (Einstellungen → Datenschutz → Wer sieht deine Trainingsstatistik). Mit „Follower“ oder „Alle“ (wie oben nur bei öffentlichem Profil) sehen andere nur zusammengefasste Zahlen, keine einzelnen Trainings, Titel oder Notizen. Blockierte Personen sehen nie etwas.
 - Moderatoren und Administratoren sehen gemeldete Inhalte und die für die Prüfung nötigen Kontodaten. Jeder Zugriff auf private Inhalte wird protokolliert. Deine E-Mail-Adresse sehen nur Administratoren, mit Begründung und Protokoll.
 - Unser Hosting-Anbieter Supabase speichert die Daten in unserem Auftrag (Region: {{SUPABASE_REGION}}).
 - {{EMAIL_ANBIETER}} für den Versand von Erinnerungs-E-Mails, falls eingerichtet.
@@ -69,7 +75,7 @@ TODO: Werden Story-Dateien nach 24 Stunden gelöscht? Ablauf festlegen.
 
 Du kannst dein Konto jederzeit in der App löschen (Einstellungen → Konto → Konto löschen). Die Löschung ist sofort und endgültig.
 
-**Was gelöscht wird:** dein Konto und deine Anmeldedaten, Profil, Beiträge, Storys, Highlights, Kommentare, Likes, Follows und Follow-Anfragen, Markierungen und Erwähnungen, deine Chat-Nachrichten, alle hochgeladenen Fotos und Dateien, Trainingsplan, Streak und Ruhetage, Einstellungen, Blockierungen, Mitteilungen und deine Bestätigungen der Rechtstexte. Auf deinem Gerät entfernt die App die gespeicherten Daten und die Anmeldung.
+**Was gelöscht wird:** dein Konto und deine Anmeldedaten, Profil, Beiträge, Storys, Highlights, Kommentare, Likes, Follows und Follow-Anfragen, Markierungen und Erwähnungen, deine Chat-Nachrichten, alle hochgeladenen Fotos und Dateien, Trainingspläne, aufgezeichnete Trainings und die Statistik daraus, Streak und Ruhetage, Einstellungen, Blockierungen, Mitteilungen und deine Bestätigungen der Rechtstexte. Auf deinem Gerät entfernt die App die gespeicherten Daten und die Anmeldung.
 
 **Was ohne Bezug zu deinem Namen bleibt (pseudonymisiert):**
 

@@ -32,6 +32,7 @@ import {
 import { adoptPlan, fetchPlansOf, type TrainingPlan } from "@/lib/planRepo";
 import { useSession } from "@/lib/session";
 import { fetchWorkoutsOf } from "@/lib/trainingRepo";
+import { canViewTrainingStats } from "@/lib/trainingStatsRepo";
 import { makeStyles, useTheme } from "@/lib/theme";
 import {
   fetchProfileGrid,
@@ -94,6 +95,7 @@ export default function UserProfileScreen() {
   const [adoptingId, setAdoptingId] = useState<string | null>(null);
   // Whether I may see at least one activity (the database decides).
   const [hasActivities, setHasActivities] = useState(false);
+  const [canSeeStats, setCanSeeStats] = useState(false);
   const myId = useSession().session?.user.id ?? null;
 
   const today = toDayKey(new Date());
@@ -107,6 +109,9 @@ export default function UserProfileScreen() {
     fetchWorkoutsOf(userId, 1)
       .then((items) => setHasActivities(items.length > 0))
       .catch(() => setHasActivities(false));
+    canViewTrainingStats(userId)
+      .then(setCanSeeStats)
+      .catch(() => setCanSeeStats(false));
     try {
       const result = await fetchUserProfile(userId);
       setSummary(result);
@@ -309,14 +314,24 @@ export default function UserProfileScreen() {
 
       {error !== null && <Text style={styles.error}>{error}</Text>}
 
-      {hasActivities && (
+      {(hasActivities || canSeeStats) && (
         <View style={styles.plans}>
-          <Button
-            label="Aktivitäten"
-            icon="barbell-outline"
-            variant="secondary"
-            onPress={() => router.push({ pathname: "/activities/[userId]", params: { userId } })}
-          />
+          {hasActivities && (
+            <Button
+              label="Aktivitäten"
+              icon="barbell-outline"
+              variant="secondary"
+              onPress={() => router.push({ pathname: "/activities/[userId]", params: { userId } })}
+            />
+          )}
+          {canSeeStats && (
+            <Button
+              label="Statistik"
+              icon="bar-chart-outline"
+              variant="secondary"
+              onPress={() => router.push({ pathname: "/stats/[userId]", params: { userId } })}
+            />
+          )}
         </View>
       )}
       {plans.length > 0 && (

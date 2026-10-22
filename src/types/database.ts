@@ -70,6 +70,7 @@ export type Database = {
           tag_chat_messages: boolean;
           notify_plan_adopted: boolean;
           default_activity_visibility: PlanVisibility;
+          training_stats_visibility: PlanVisibility;
         };
         Insert: { id: Uuid; username: string; display_name?: string; avatar_path?: string | null; created_at?: Timestamp };
         Update: {
@@ -86,6 +87,7 @@ export type Database = {
           tag_chat_messages?: boolean;
           notify_plan_adopted?: boolean;
           default_activity_visibility?: PlanVisibility;
+          training_stats_visibility?: PlanVisibility;
         };
         Relationships: [];
       };
@@ -695,6 +697,9 @@ export type Database = {
       save_workout: { Args: { payload: Json }; Returns: { [key: string]: Json } };
       link_workout_post: { Args: { p_workout_id: Uuid; p_post_id: Uuid; p_share: boolean }; Returns: undefined };
       set_workout_visibility: { Args: { p_workout_id: Uuid; p_visibility: PlanVisibility }; Returns: undefined };
+      can_view_training_stats: { Args: { target: Uuid }; Returns: boolean };
+      get_training_stats: { Args: { p_user_id: Uuid; p_range: "weeks" | "months" | "year" }; Returns: Json | null };
+      get_my_training_stats: { Args: { p_range: "weeks" | "months" | "year" }; Returns: Json | null };
     };
     Enums: Record<string, never>;
     CompositeTypes: Record<string, never>;

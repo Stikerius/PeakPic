@@ -81,6 +81,12 @@ Bricht etwas ab, bleibt der Status `deleting`. Die App zeigt dann „Löschung w
 - Aktivitäten sind meldbar (`target_type = 'workout'`) und können entfernt oder in Quarantäne gesetzt werden. Entfernte Aktivitäten zählen nicht mehr für den Streak und sind auch für den Besitzer nicht mehr sichtbar.
 - Fotos zu einem Training zählen nie selbst als Nachweis; der Nachweis ist das Training (mit den Plausibilitätsregeln). So machen nachträgliche Fotos keinen anderen Tag und kein unplausibles Training zum Trainingstag.
 
+## Trainingsstatistik
+
+- Sichtbarkeit über `profiles.training_stats_visibility` (Standard „Nur ich“, einstellbar unter Einstellungen → Datenschutz). „Alle“ gilt nur bei öffentlichem Profil, sonst sehen sie nur Follower. Gesperrte, blockierte und verborgene Personen sehen nichts (`can_view_training_stats`).
+- Gelesen wird nur über `get_my_training_stats(range)` und `get_training_stats(user_id, range)`. Sie liefern Summen pro Tag und pro Übung und Tag, die Verteilung nach Plantagen und die Streak-Längen, aber keine IDs, Titel, Notizen, Uhrzeiten oder einzelnen Sätze. Entfernte Aktivitäten zählen nicht mit.
+- Keine eigene Tabelle: Beim Löschen des Kontos verschwindet die Statistik mit den Trainings (`workouts`, `workout_exercises`, `workout_sets`) und der Spalte in `profiles`.
+
 ## Möglicherweise illegale Inhalte
 
 - **Quarantäne** (`mod_quarantine_content`): Inhalt sofort für alle ausser Admins verbergen. Nichts löschen, keine Dateien entfernen.
@@ -137,6 +143,7 @@ Drei Texte: **Nutzungsbedingungen** (werden akzeptiert), **Datenschutzerklärung
 - Kontolöschung: Inhalte, die als Beweis gesichert werden müssten (Quarantäne), blockieren die Selbstlöschung. Ist das zulässig, und wie lange darf eine Löschung so aufgeschoben werden?
 - Anonyme Nutzungsstatistik: Reicht „berechtigtes Interesse“ für das Zählen von Bildschirmaufrufen ohne Personenbezug, und braucht es dafür eine Einwilligung (Standard an, abschaltbar)? Supabase führt zusätzlich eigene technische Zugriffsprotokolle (API-Anfragen); deren Inhalt und Aufbewahrung klären.
 - Supabase führt eigene Auth-Protokolle (`auth.audit_log_entries`, mit Nutzer-ID und teils E-Mail). Aufbewahrung und Löschung dort klären.
+- Trainingsdaten (Gewichte, Wiederholungen, Dauer, Trainingshäufigkeit, Streak) können als Gesundheitsdaten beziehungsweise besonders schützenswerte Personendaten gelten (DSGVO Art. 9, DSG Art. 5 lit. c). Klären: Rechtsgrundlage (ausdrückliche Einwilligung nötig, wenn andere die Statistik sehen?), Hinweis in der Datenschutzerklärung, Datenschutz-Folgenabschätzung, und ob die Standardwerte „Nur ich“ für Aktivitäten und Statistik genügen.
 - Erwähnungen (@username) in Texten anderer bleiben stehen. Weil der Username frei wird, kann er später auf ein neues Konto zeigen.
 
 ## Spätere Phasen
