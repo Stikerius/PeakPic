@@ -8,6 +8,7 @@ import { Button } from "@/components/ui/button";
 import { fontSize, onPhoto, spacing } from "@/constants/theme";
 import { describeError } from "@/lib/errors";
 import { emitAppEvent } from "@/lib/events";
+import { linkPendingWorkout } from "@/lib/pendingWorkoutLink";
 import { assignPlanDayIfEmpty } from "@/lib/planRepo";
 import {
   addToDayPost,
@@ -102,6 +103,7 @@ function PostCreateScreenContent() {
             );
           }
           await linkWorkouts(postId, workoutLinkIds);
+          await linkPendingWorkout(postId);
         } else {
           await updatePost(postId, {
             photos,
@@ -123,6 +125,7 @@ function PostCreateScreenContent() {
           planDayId: planDayId ?? null,
         });
         await linkWorkouts(newPostId, workoutLinkIds);
+        await linkPendingWorkout(newPostId);
       }
       emitAppEvent("postCreated", undefined);
       router.back();

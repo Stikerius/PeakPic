@@ -69,6 +69,7 @@ export type Database = {
           tag_notifications: boolean;
           tag_chat_messages: boolean;
           notify_plan_adopted: boolean;
+          default_activity_visibility: PlanVisibility;
         };
         Insert: { id: Uuid; username: string; display_name?: string; avatar_path?: string | null; created_at?: Timestamp };
         Update: {
@@ -84,6 +85,7 @@ export type Database = {
           tag_notifications?: boolean;
           tag_chat_messages?: boolean;
           notify_plan_adopted?: boolean;
+          default_activity_visibility?: PlanVisibility;
         };
         Relationships: [];
       };
@@ -341,6 +343,58 @@ export type Database = {
         Insert: Record<string, never>;
         Update: Record<string, never>;
         Relationships: [Rel<"plan_exercises_plan_day_id_fkey", "plan_day_id", "plan_days">];
+      };
+      workouts: {
+        Row: {
+          id: Uuid;
+          user_id: Uuid;
+          client_id: Uuid;
+          plan_id: Uuid | null;
+          plan_day_id: Uuid | null;
+          plan_day_title: string | null;
+          title: string | null;
+          note: string | null;
+          started_at: Timestamp;
+          ended_at: Timestamp;
+          active_seconds: number;
+          workout_date: string;
+          visibility: PlanVisibility;
+          share_with_post: boolean;
+          post_id: Uuid | null;
+          counts_for_streak: boolean;
+          not_counting_reason: string | null;
+          proof: "workout";
+          created_at: Timestamp;
+          moderation_state: "removed" | "quarantined" | null;
+        };
+        Insert: Record<string, never>;
+        Update: Record<string, never>;
+        Relationships: [
+          Rel<"workouts_user_id_fkey", "user_id", "profiles">,
+          Rel<"workouts_post_id_fkey", "post_id", "posts">,
+          Rel<"workouts_plan_day_id_fkey", "plan_day_id", "plan_days">,
+        ];
+      };
+      workout_exercises: {
+        Row: { id: Uuid; workout_id: Uuid; position: number; name: string; planned_exercise_id: Uuid | null };
+        Insert: Record<string, never>;
+        Update: Record<string, never>;
+        Relationships: [Rel<"workout_exercises_workout_id_fkey", "workout_id", "workouts">];
+      };
+      workout_sets: {
+        Row: {
+          id: Uuid;
+          workout_exercise_id: Uuid;
+          position: number;
+          reps: number | null;
+          weight_kg: number | string | null;
+          seconds: number | null;
+          rest_seconds: number | null;
+          completed_at: Timestamp | null;
+        };
+        Insert: Record<string, never>;
+        Update: Record<string, never>;
+        Relationships: [Rel<"workout_sets_workout_exercise_id_fkey", "workout_exercise_id", "workout_exercises">];
       };
       planned_rest_uses: {
         Row: { user_id: Uuid; day: string; plan_id: Uuid | null; plan_day_id: Uuid | null; created_at: Timestamp };
@@ -634,7 +688,12 @@ export type Database = {
       set_message_pinned: { Args: { message: Uuid; pinned: boolean }; Returns: undefined };
       follow_counts: { Args: { target: Uuid }; Returns: { followers: number; following: number }[] };
       taggable_user_ids: { Args: { ids: Uuid[]; scope: "posts" | "stories" }; Returns: Uuid[] };
-      workout_days: { Args: { target: Uuid }; Returns: { day: string; post_id: Uuid; shared_by: Uuid | null }[] };
+      workout_days: {
+        Args: { target: Uuid };
+        Returns: { day: string; post_id: Uuid | null; shared_by: Uuid | null; proof: "photo" | "workout"; workout_id: Uuid | null }[];
+      };
+      save_workout: { Args: { payload: Json }; Returns: { [key: string]: Json } };
+      link_workout_post: { Args: { p_workout_id: Uuid; p_post_id: Uuid; p_share: boolean }; Returns: undefined };
     };
     Enums: Record<string, never>;
     CompositeTypes: Record<string, never>;

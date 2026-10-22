@@ -1,7 +1,8 @@
 import Ionicons from "@expo/vector-icons/Ionicons";
-import { Link, Tabs } from "expo-router";
+import { Link, router, Tabs } from "expo-router";
 import type { ComponentProps } from "react";
-import { Pressable, StyleSheet, View, type ColorValue } from "react-native";
+import { useEffect } from "react";
+import { Alert, Pressable, StyleSheet, View, type ColorValue } from "react-native";
 
 import { NewChatButton } from "@/components/chat/new-chat-button";
 import { NotificationBell } from "@/components/notification-bell";
@@ -9,6 +10,48 @@ import { spacing } from "@/constants/theme";
 import { useFollowRequestCount } from "@/hooks/use-follow-requests";
 import { useUnreadChatCount } from "@/hooks/use-unread-chats";
 import { makeStyles, useTheme } from "@/lib/theme";
+import { clearTrainingDraft, loadTrainingDraft } from "@/lib/trainingDraft";
+import { isStale } from "@/lib/workout";
+
+// Once per app start: offer to continue a training that is still on the device.
+let resumePromptShown = false;
+
+function useResumeTrainingPrompt() {
+  useEffect(() => {
+    if (resumePromptShown) return;
+    resumePromptShown = true;
+    void loadTrainingDraft().then((draft) => {
+      if (draft === null) return;
+      if (isStale(draft, Date.now())) {
+        Alert.alert(
+          "Unbeendetes Training",
+          "Ein Training von vor über 12 Stunden ist noch nicht gespeichert. Beenden und speichern oder verwerfen?",
+          [
+            { text: "Später", style: "cancel" },
+            {
+              text: "Verwerfen",
+              style: "destructive",
+              onPress: () =>
+                Alert.alert("Wirklich verwerfen?", "Alle erfassten Sätze dieses Trainings gehen verloren.", [
+                  { text: "Abbrechen", style: "cancel" },
+                  { text: "Verwerfen", style: "destructive", onPress: () => void clearTrainingDraft() },
+                ]),
+            },
+            { text: "Beenden", onPress: () => router.push("/workout-finish") },
+          ],
+        );
+        return;
+      }
+      Alert.alert("Training fortsetzen?", "Dein letztes Training ist noch nicht beendet.", [
+        { text: "Später", style: "cancel" },
+        {
+          text: "Fortsetzen",
+          onPress: () => router.push(draft.endedAt !== null ? "/workout-finish" : "/workout-session"),
+        },
+      ]);
+    });
+  }, []);
+}
 
 type IoniconName = ComponentProps<typeof Ionicons>["name"];
 
@@ -71,6 +114,7 @@ export default function TabLayout() {
   const { colors } = useTheme();
   const unreadChats = useUnreadChatCount();
   const followRequests = useFollowRequestCount();
+  useResumeTrainingPrompt();
   return (
     <Tabs
       screenOptions={{
@@ -111,6 +155,13 @@ export default function TabLayout() {
           title: "Kamera",
           headerShown: false,
           tabBarIcon: tabIcon("camera", "camera-outline"),
+        }}
+      />
+      <Tabs.Screen
+        name="training"
+        options={{
+          title: "Training",
+          tabBarIcon: tabIcon("barbell", "barbell-outline"),
         }}
       />
       <Tabs.Screen

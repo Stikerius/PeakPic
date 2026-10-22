@@ -1,7 +1,7 @@
 import { router, useFocusEffect, useIsFocused, useNavigation } from "expo-router";
 import { StatusBar } from "expo-status-bar";
 import { useCallback, useEffect, useState } from "react";
-import { Alert, StyleSheet, Text, View } from "react-native";
+import { Alert, Pressable, StyleSheet, Text, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { CameraCapture } from "@/components/camera/camera-capture";
@@ -9,6 +9,7 @@ import { PhotoReview } from "@/components/camera/photo-review";
 import { fontSize, radius, spacing } from "@/constants/theme";
 import { describeError } from "@/lib/errors";
 import { emitAppEvent } from "@/lib/events";
+import { getPendingWorkoutLink, linkPendingWorkout, setPendingShareWithPost, setPendingWorkoutLink } from "@/lib/pendingWorkoutLink";
 import { fetchMyPlan, fetchPlanProofs, type TrainingPlan } from "@/lib/planRepo";
 import { createPost, getTodaysDayPostId } from "@/lib/postRepo";
 import { nextPlanDayIndex } from "@/lib/streak";
@@ -48,9 +49,12 @@ function CameraScreenContent() {
   const [notice, setNotice] = useState<string | null>(null);
   // My plan and the unit due next; null without a plan (then nothing about plans is shown).
   const [plan, setPlan] = useState<{ plan: TrainingPlan; nextIndex: number } | null>(null);
+  // "Fotos hinzufügen" after a recorded training: the next post belongs to it.
+  const [workoutLink, setWorkoutLink] = useState(() => getPendingWorkoutLink());
 
   useFocusEffect(
     useCallback(() => {
+      setWorkoutLink(getPendingWorkoutLink());
       let active = true;
       Promise.all([fetchMyPlan(), fetchPlanProofs()])
         .then(([myPlan, proofs]) => {
@@ -104,7 +108,7 @@ function CameraScreenContent() {
     setSaving(true);
     setSaveError(null);
     try {
-      await createPost({
+      const postId = await createPost({
         photos: [{ existing: null, originalUri: photoUri, renderedUri: null, edits: null, changed: true }],
         caption: "",
         inFeed: false,
@@ -113,6 +117,8 @@ function CameraScreenContent() {
         tagIds: [],
         planDayId,
       });
+      await linkPendingWorkout(postId);
+      setWorkoutLink(null);
       emitAppEvent("postCreated", undefined);
       setCaptured(null);
       setNotice("Training gespeichert 💪");
@@ -170,6 +176,18 @@ function CameraScreenContent() {
         onRetake={discardCapture}
         onUse={(planDayId) => void confirmPhoto(planDayId)}
         plan={plan}
+        workout={
+          workoutLink !== null
+            ? {
+                planDayId: workoutLink.planDayId,
+                shareWithPost: workoutLink.shareWithPost,
+                onShareChange: (share) => {
+                  setPendingShareWithPost(share);
+                  setWorkoutLink(getPendingWorkoutLink());
+                },
+              }
+            : null
+        }
       />
     );
   }
@@ -180,11 +198,23 @@ function CameraScreenContent() {
       onCapture={setCaptured}
       onError={setNotice}
       overlay={
-        notice !== null && (
+        notice !== null ? (
           <View style={[styles.notice, { top: insets.top + spacing.md }]}>
             <Text style={styles.noticeText}>{notice}</Text>
           </View>
-        )
+        ) : workoutLink !== null ? (
+          <Pressable
+            onPress={() => {
+              setPendingWorkoutLink(null);
+              setWorkoutLink(null);
+            }}
+            accessibilityRole="button"
+            accessibilityLabel="Fotos für dein Training. Antippen zum Abbrechen."
+            style={[styles.notice, { top: insets.top + spacing.md }]}
+          >
+            <Text style={styles.noticeText}>Fotos für dein Training · Abbrechen</Text>
+          </Pressable>
+        ) : null
       }
     />
   );

@@ -28,6 +28,9 @@ import {
   type TagSettings,
 } from "@/lib/profileRepo";
 import { makeStyles, useTheme } from "@/lib/theme";
+import { getDefaultActivityVisibility, setDefaultActivityVisibility } from "@/lib/trainingRepo";
+import { REST_TIMER_CHOICES, setRestTimerSettings, useRestTimerSettings } from "@/lib/trainingSettings";
+import type { ActivityVisibility } from "@/lib/workout";
 import type { AudienceScope, TagPermission, Visibility } from "@/types/database";
 import { setUsageEnabled, useTrackScreen, useUsageEnabled } from "@/lib/usage";
 
@@ -94,6 +97,17 @@ const APPEARANCE_OPTIONS: { value: ThemePreference; label: string }[] = [
   { value: "dark", label: "Dunkel" },
 ];
 
+const ACTIVITY_OPTIONS: { value: ActivityVisibility; label: string }[] = [
+  { value: "private", label: "Nur ich" },
+  { value: "followers", label: "Follower" },
+  { value: "public", label: "Alle" },
+];
+
+const REST_TIMER_OPTIONS: { value: string; label: string }[] = REST_TIMER_CHOICES.map((seconds) => ({
+  value: String(seconds),
+  label: seconds < 60 ? `${seconds} s` : `${seconds / 60}${seconds % 60 === 0 ? "" : ",5"} min`,
+}));
+
 const TAG_OPTIONS: { value: TagPermission; label: string }[] = [
   { value: "everyone", label: "Alle" },
   { value: "connections", label: "Verbindungen" },
@@ -118,6 +132,8 @@ export default function SettingsScreen() {
   const legal = useLegalGate();
   const usageEnabled = useUsageEnabled();
   const [planAdoptNotify, setPlanAdoptNotify] = useState<boolean | null>(null);
+  const [activityVisibility, setActivityVisibility] = useState<ActivityVisibility | null>(null);
+  const restTimer = useRestTimerSettings();
 
   useFocusEffect(
     useCallback(() => {
@@ -129,6 +145,9 @@ export default function SettingsScreen() {
         .catch(() => undefined);
       getMyPlanAdoptNotify()
         .then(setPlanAdoptNotify)
+        .catch(() => undefined);
+      getDefaultActivityVisibility()
+        .then(setActivityVisibility)
         .catch(() => undefined);
       void Promise.all([listHiddenUserIds("stories"), listHiddenUserIds("posts")])
         .then(([stories, posts]) => setCounts({ stories: stories.size, posts: posts.size }))
@@ -324,6 +343,52 @@ export default function SettingsScreen() {
       <Text style={styles.footnote}>
         Wer einen Plan übernimmt, bekommt eine Kopie ohne Zielgewichte und Notizen. Eine Liste der Personen gibt es
         nicht, nur diese Mitteilung (einmal pro Person und Plan).
+      </Text>
+
+      <Text style={[styles.sectionTitle, styles.sectionSpacing]}>Training</Text>
+      <View style={styles.card}>
+        <Choice
+          title="Wer sieht neue Aktivitäten"
+          options={ACTIVITY_OPTIONS}
+          value={activityVisibility ?? "private"}
+          disabled={activityVisibility === null}
+          onChange={(value) => {
+            const previous = activityVisibility;
+            setActivityVisibility(value);
+            setDefaultActivityVisibility(value).catch((error: unknown) => {
+              setActivityVisibility(previous);
+              Alert.alert("Speichern fehlgeschlagen", describeError(error));
+            });
+          }}
+        />
+        <View style={styles.separator} />
+        <View style={styles.row}>
+          <Ionicons name="timer-outline" size={22} color={colors.text} />
+          <View style={styles.rowText}>
+            <Text style={styles.rowTitle}>Pausentimer nach jedem Satz</Text>
+          </View>
+          <Switch
+            value={restTimer.enabled}
+            onValueChange={(enabled) => setRestTimerSettings({ ...restTimer, enabled })}
+            trackColor={{ true: colors.accent, false: colors.border }}
+            accessibilityLabel="Pausentimer nach jedem Satz"
+          />
+        </View>
+        {restTimer.enabled && (
+          <>
+            <View style={styles.separator} />
+            <Choice
+              title="Standardpause"
+              options={REST_TIMER_OPTIONS}
+              value={String(restTimer.seconds)}
+              onChange={(value) => setRestTimerSettings({ ...restTimer, seconds: Number(value) })}
+            />
+          </>
+        )}
+      </View>
+      <Text style={styles.footnote}>
+        Aufgezeichnete Trainings sind standardmässig nur für dich sichtbar. „Alle“ gilt nur bei öffentlichem Profil.
+        Die Pause lässt sich im Training überspringen; die Einstellung gilt nur auf diesem Gerät.
       </Text>
 
       <Text style={[styles.sectionTitle, styles.sectionSpacing]}>Darstellung</Text>

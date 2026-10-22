@@ -130,6 +130,8 @@ function RootNavigator() {
         <Stack.Screen name="notifications" options={{ title: "Mitteilungen" }} />
         <Stack.Screen name="settings" options={{ title: "Einstellungen", headerBackTitle: "Profil" }} />
         <Stack.Screen name="delete-account" options={{ title: "Konto löschen" }} />
+        <Stack.Screen name="workout-session" options={{ title: "Training", presentation: "fullScreenModal", gestureEnabled: false }} />
+        <Stack.Screen name="workout-finish" options={{ title: "Training beenden", presentation: "modal", gestureEnabled: false }} />
         <Stack.Screen name="profile-edit" options={{ title: "Profil bearbeiten", presentation: "modal" }} />
         <Stack.Screen name="plan-edit" options={{ title: "Trainingspläne" }} />
         <Stack.Screen name="plan-editor/[planId]" options={{ title: "Plan bearbeiten", presentation: "modal" }} />

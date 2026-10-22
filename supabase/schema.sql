@@ -50,6 +50,10 @@
 --                   Written only through save_plan() / activate_plan() / duplicate_plan() /
 --                   delete_plan(); sequence_changed_at marks changes of order or day types
 --                   and activation (the plan streak restarts there).
+--   * workouts      recorded trainings (workouts, workout_exercises, workout_sets). Written only
+--                   by save_workout() (validated, atomic); counts_for_streak is decided there
+--                   (plausibility rules, workout_rules()) and never written by clients. A counting
+--                   workout is a training proof like a post, with or without a photo.
 --   * plan on posts posts.plan_day_id: a unit of the poster's own plan (checked by a trigger,
 --                   changeable only while the workout day is today or yesterday); title,
 --                   position and plan length are copied onto the post so the label survives
@@ -621,6 +625,70 @@ create table if not exists public.planned_rest_uses (
   primary key (user_id, day)
 );
 
+-- Default visibility of new activities (recorded trainings).
+alter table public.profiles add column if not exists default_activity_visibility text not null default 'private';
+do $$
+begin
+  if not exists (select 1 from pg_constraint where conname = 'profiles_default_activity_visibility_check') then
+    alter table public.profiles add constraint profiles_default_activity_visibility_check
+      check (default_activity_visibility in ('private', 'followers', 'public'));
+  end if;
+end;
+$$;
+
+-- Recorded trainings ("Training aufzeichnen"). Only save_workout() writes them. workout_date is
+-- the start day in Europe/Zurich (server side); counts_for_streak and not_counting_reason come
+-- from the plausibility rules (workout_rules()). client_id makes saving repeatable (a retry
+-- returns the same workout instead of a second one).
+create table if not exists public.workouts (
+  id                  uuid primary key default gen_random_uuid(),
+  user_id             uuid not null references public.profiles (id) on delete cascade,
+  client_id           uuid not null,
+  plan_id             uuid references public.training_plans (id) on delete set null,
+  plan_day_id         uuid references public.plan_days (id) on delete set null,
+  -- Label of the plan day at the time of the training (kept when the plan changes).
+  plan_day_title      text check (char_length(plan_day_title) <= 30),
+  title               text check (char_length(title) between 1 and 60 and title = btrim(title)),
+  note                text check (char_length(note) <= 1000),
+  started_at          timestamptz not null,
+  ended_at            timestamptz not null,
+  active_seconds      integer not null check (active_seconds between 0 and 86400),
+  workout_date        date not null,
+  visibility          text not null default 'private' check (visibility in ('private', 'followers', 'public')),
+  share_with_post     boolean not null default false,
+  post_id             uuid references public.posts (id) on delete set null,
+  counts_for_streak   boolean not null default false,
+  not_counting_reason text check (not_counting_reason in ('too_short', 'too_few_sets', 'too_old', 'daily_limit')),
+  proof               text not null default 'workout' check (proof = 'workout'),
+  created_at          timestamptz not null default now(),
+  unique (user_id, client_id),
+  check (ended_at > started_at and ended_at - started_at <= interval '24 hours')
+);
+create index if not exists workouts_user_date_idx on public.workouts (user_id, workout_date desc);
+create index if not exists workouts_post_idx on public.workouts (post_id) where post_id is not null;
+
+create table if not exists public.workout_exercises (
+  id                  uuid primary key default gen_random_uuid(),
+  workout_id          uuid not null references public.workouts (id) on delete cascade,
+  position            integer not null check (position between 0 and 29),
+  name                text not null check (char_length(name) between 1 and 60 and name = btrim(name)),
+  planned_exercise_id uuid references public.plan_exercises (id) on delete set null,
+  unique (workout_id, position)
+);
+
+create table if not exists public.workout_sets (
+  id                  uuid primary key default gen_random_uuid(),
+  workout_exercise_id uuid not null references public.workout_exercises (id) on delete cascade,
+  position            integer not null check (position between 0 and 39),
+  reps                integer check (reps between 0 and 1000),
+  weight_kg           numeric(6, 2) check (weight_kg between 0 and 1000),
+  seconds             integer check (seconds between 0 and 86400),
+  rest_seconds        integer check (rest_seconds between 0 and 3600),
+  completed_at        timestamptz,
+  unique (workout_exercise_id, position),
+  check (reps is not null or seconds is not null)
+);
+
 -- Which unit of the poster's plan a training proof belongs to. The snapshot columns are
 -- filled by the posts_plan_day trigger (never trusted from the client) and keep the label
 -- ("Pull · Einheit 2 von 6") even if the unit or the plan is removed later.
@@ -834,7 +902,7 @@ do $$
 declare
   t text;
 begin
-  foreach t in array array['posts', 'stories', 'comments', 'messages', 'training_plans'] loop
+  foreach t in array array['posts', 'stories', 'comments', 'messages', 'training_plans', 'workouts'] loop
     execute format('alter table public.%I add column if not exists moderation_state text', t);
     execute format('alter table public.%I add column if not exists removed_at timestamptz', t);
     execute format('alter table public.%I add column if not exists removed_by uuid', t);
@@ -1374,23 +1442,30 @@ as $$
     );
 $$;
 
--- Training days of `target`: own posts that count, plus accepted workout links (shared_by =
--- the post owner). Duplicate days are fine; the streak counts each day once.
+-- Training days of `target`: own posts that count, accepted workout links (shared_by = the post
+-- owner) and recorded trainings that count (workout_id). proof is the basis ('photo' or
+-- 'workout'). Duplicate days are fine; the streak counts each day once.
+drop function if exists public.workout_days(uuid);
 create or replace function public.workout_days(target uuid)
-returns table (day date, post_id uuid, shared_by uuid)
+returns table (day date, post_id uuid, shared_by uuid, proof text, workout_id uuid)
 language sql stable security definer set search_path = ''
 as $$
-  select p.workout_date, p.id, null::uuid
+  select p.workout_date, p.id, null::uuid, 'photo'::text, null::uuid
   from public.posts p
   where p.user_id = target and public.can_view_calendar(target) and public.post_counts_as_workout(p.id)
   union all
-  select p.workout_date, p.id, p.user_id
+  select p.workout_date, p.id, p.user_id, 'photo', null
   from public.workout_shares ws
   join public.posts p on p.id = ws.post_id
   where ws.tagged_user_id = target
     and ws.status = 'accepted'
     and public.can_view_calendar(target)
-    and public.post_counts_as_workout(p.id);
+    and public.post_counts_as_workout(p.id)
+  union all
+  select w.workout_date, null, null, 'workout', w.id
+  from public.workouts w
+  where w.user_id = target and public.can_view_calendar(target)
+    and w.counts_for_streak and w.moderation_state is null;
 $$;
 
 -- The owner may ask a tagged person to link a counting workout, before the deadline.
@@ -2237,14 +2312,229 @@ create or replace function public.my_exercise_names()
 returns table (name text)
 language sql stable security definer set search_path = ''
 as $$
-  select e.name
-  from public.plan_exercises e
-  join public.plan_days d on d.id = e.plan_day_id
-  join public.training_plans tp on tp.id = d.plan_id
-  where tp.user_id = (select auth.uid())
-  group by lower(e.name), e.name
-  order by count(*) desc, e.name
+  select x.name
+  from (
+    select e.name
+    from public.plan_exercises e
+    join public.plan_days d on d.id = e.plan_day_id
+    join public.training_plans tp on tp.id = d.plan_id
+    where tp.user_id = (select auth.uid())
+    union all
+    select we.name
+    from public.workout_exercises we
+    join public.workouts w on w.id = we.workout_id
+    where w.user_id = (select auth.uid())
+  ) x
+  group by lower(x.name), x.name
+  order by count(*) desc, x.name
   limit 200;
+$$;
+
+-- ---------------------------------------------------------------- recorded trainings
+-- Plausibility rules (the app shows the same, lib/workout.ts). A training counts for the streak
+-- only with at least 10 minutes of active time and 3 sets, started today or yesterday
+-- (Europe/Zurich), and while the day has fewer than 2 counting trainings. Hard limits: 30
+-- exercises, 40 sets per exercise, 24 hours, not in the future, 20 trainings per day.
+create or replace function public.workout_rules()
+returns jsonb
+language sql immutable set search_path = ''
+as $$
+  select jsonb_build_object(
+    'min_active_seconds', 600, 'min_sets', 3, 'max_days_back', 1, 'max_counting_per_day', 2,
+    'max_per_day', 20, 'max_exercises', 30, 'max_sets_per_exercise', 40, 'max_hours', 24
+  );
+$$;
+
+-- Saves one recorded training of the caller, all or nothing. payload:
+-- {"client_id": uuid, "plan_day_id": uuid|null, "title": text|null, "note": text|null,
+--  "started_at": iso, "ended_at": iso, "active_seconds": int, "visibility": text|null,
+--  "share_with_post": bool, "exercises": [{"name": text, "planned_exercise_id": uuid|null,
+--  "sets": [{"reps": int|null, "weight_kg": num|null, "seconds": int|null,
+--            "rest_seconds": int|null, "completed_at": iso|null}]}]}
+-- Returns {id, counts_for_streak, reason, workout_date}. Saving the same client_id again
+-- returns the stored training.
+create or replace function public.save_workout(payload jsonb)
+returns jsonb
+language plpgsql security definer set search_path = ''
+as $$
+declare
+  me uuid := auth.uid();
+  rules jsonb := public.workout_rules();
+  client uuid;
+  existing public.workouts%rowtype;
+  started timestamptz;
+  ended timestamptz;
+  active integer;
+  wday date;
+  day_id uuid;
+  plan uuid;
+  day_title text;
+  vis text;
+  ex record;
+  st record;
+  ex_id uuid;
+  planned uuid;
+  total_sets integer := 0;
+  new_id uuid;
+  counting_today integer;
+  reason text;
+  done_at timestamptz;
+begin
+  if me is null then
+    raise exception 'not authenticated';
+  end if;
+  if not public.is_account_active() then
+    raise exception 'account_inactive';
+  end if;
+  if payload is null or jsonb_typeof(payload) <> 'object' then
+    raise exception 'invalid_payload';
+  end if;
+  client := nullif(payload ->> 'client_id', '')::uuid;
+  if client is null then
+    raise exception 'invalid_payload' using hint = 'client_id';
+  end if;
+  select * into existing from public.workouts w where w.user_id = me and w.client_id = client;
+  if found then
+    return jsonb_build_object('id', existing.id, 'counts_for_streak', existing.counts_for_streak,
+                              'reason', existing.not_counting_reason, 'workout_date', existing.workout_date);
+  end if;
+
+  started := (payload ->> 'started_at')::timestamptz;
+  ended := (payload ->> 'ended_at')::timestamptz;
+  active := (payload ->> 'active_seconds')::integer;
+  if started is null or ended is null or active is null then
+    raise exception 'invalid_times';
+  end if;
+  if started > now() + interval '1 minute' or ended > now() + interval '1 minute' then
+    raise exception 'workout_in_future';
+  end if;
+  if ended <= started then
+    raise exception 'workout_end_before_start';
+  end if;
+  if ended - started > make_interval(hours => (rules ->> 'max_hours')::integer) then
+    raise exception 'workout_too_long';
+  end if;
+  if active < 0 or active > extract(epoch from ended - started) + 60 then
+    raise exception 'invalid_active_time';
+  end if;
+  vis := coalesce(nullif(payload ->> 'visibility', ''),
+                  (select p.default_activity_visibility from public.profiles p where p.id = me));
+  if vis not in ('private', 'followers', 'public') then
+    raise exception 'invalid_visibility';
+  end if;
+  if jsonb_typeof(coalesce(payload -> 'exercises', '[]'::jsonb)) <> 'array'
+    or jsonb_array_length(coalesce(payload -> 'exercises', '[]'::jsonb)) > (rules ->> 'max_exercises')::integer then
+    raise exception 'too_many_exercises' using hint = rules ->> 'max_exercises';
+  end if;
+  wday := (started at time zone 'Europe/Zurich')::date;
+
+  -- One training at a time per person (limits).
+  perform 1 from public.profiles pr where pr.id = me for update;
+  if (select count(*) from public.workouts w where w.user_id = me and w.workout_date = wday)
+     >= (rules ->> 'max_per_day')::integer then
+    raise exception 'workout_daily_limit';
+  end if;
+
+  day_id := nullif(payload ->> 'plan_day_id', '')::uuid;
+  if day_id is not null then
+    select d.plan_id, d.title into plan, day_title
+    from public.plan_days d
+    join public.training_plans tp on tp.id = d.plan_id
+    where d.id = day_id and tp.user_id = me and d.day_type = 'training';
+    if not found then
+      raise exception 'plan_day_not_yours';
+    end if;
+  end if;
+
+  insert into public.workouts
+    (user_id, client_id, plan_id, plan_day_id, plan_day_title, title, note, started_at, ended_at,
+     active_seconds, workout_date, visibility, share_with_post)
+  values (
+    me, client, plan, day_id, day_title,
+    nullif(btrim(coalesce(payload ->> 'title', '')), ''),
+    nullif(btrim(coalesce(payload ->> 'note', '')), ''),
+    started, ended, active, wday, vis, coalesce((payload ->> 'share_with_post')::boolean, false)
+  )
+  returning id into new_id;
+
+  for ex in
+    select value, ordinality - 1 as idx from jsonb_array_elements(coalesce(payload -> 'exercises', '[]'::jsonb)) with ordinality
+  loop
+    if jsonb_typeof(coalesce(ex.value -> 'sets', '[]'::jsonb)) <> 'array'
+      or jsonb_array_length(coalesce(ex.value -> 'sets', '[]'::jsonb)) > (rules ->> 'max_sets_per_exercise')::integer then
+      raise exception 'too_many_sets' using hint = rules ->> 'max_sets_per_exercise';
+    end if;
+    planned := nullif(ex.value ->> 'planned_exercise_id', '')::uuid;
+    if planned is not null and (day_id is null or not exists (
+      select 1 from public.plan_exercises e where e.id = planned and e.plan_day_id = day_id
+    )) then
+      planned := null;
+    end if;
+    insert into public.workout_exercises (workout_id, position, name, planned_exercise_id)
+    values (new_id, ex.idx, btrim(coalesce(ex.value ->> 'name', '')), planned)
+    returning id into ex_id;
+    for st in
+      select value, ordinality - 1 as idx from jsonb_array_elements(coalesce(ex.value -> 'sets', '[]'::jsonb)) with ordinality
+    loop
+      done_at := nullif(st.value ->> 'completed_at', '')::timestamptz;
+      if done_at is not null and (done_at < started - interval '1 minute' or done_at > ended + interval '1 minute') then
+        done_at := null;
+      end if;
+      insert into public.workout_sets (workout_exercise_id, position, reps, weight_kg, seconds, rest_seconds, completed_at)
+      values (
+        ex_id, st.idx,
+        nullif(st.value ->> 'reps', '')::integer,
+        nullif(st.value ->> 'weight_kg', '')::numeric,
+        nullif(st.value ->> 'seconds', '')::integer,
+        nullif(st.value ->> 'rest_seconds', '')::integer,
+        done_at
+      );
+      total_sets := total_sets + 1;
+    end loop;
+  end loop;
+
+  select count(*) into counting_today from public.workouts w
+  where w.user_id = me and w.workout_date = wday and w.counts_for_streak and w.moderation_state is null
+    and w.id <> new_id;
+  reason := case
+    when active < (rules ->> 'min_active_seconds')::integer then 'too_short'
+    when total_sets < (rules ->> 'min_sets')::integer then 'too_few_sets'
+    when wday < public.app_today() - (rules ->> 'max_days_back')::integer then 'too_old'
+    when counting_today >= (rules ->> 'max_counting_per_day')::integer then 'daily_limit'
+  end;
+  update public.workouts set counts_for_streak = reason is null, not_counting_reason = reason where id = new_id;
+  -- A counting training on a rest day makes the rest day unnecessary.
+  if reason is null then
+    delete from public.rest_day_uses where user_id = me and day = wday;
+    delete from public.planned_rest_uses where user_id = me and day = wday;
+  end if;
+  return jsonb_build_object('id', new_id, 'counts_for_streak', reason is null, 'reason', reason, 'workout_date', wday);
+end;
+$$;
+
+-- Links a post (the photos of a recorded training) to that training. Both must be mine;
+-- share_with_post: show the training report with the post.
+create or replace function public.link_workout_post(p_workout_id uuid, p_post_id uuid, p_share boolean)
+returns void
+language plpgsql security definer set search_path = ''
+as $$
+begin
+  if auth.uid() is null then
+    raise exception 'not authenticated';
+  end if;
+  if not public.is_account_active() then
+    raise exception 'account_inactive';
+  end if;
+  if not exists (select 1 from public.posts p where p.id = p_post_id and p.user_id = auth.uid()) then
+    raise exception 'post_not_found';
+  end if;
+  update public.workouts
+  set post_id = p_post_id, share_with_post = coalesce(p_share, false)
+  where id = p_workout_id and user_id = auth.uid() and moderation_state is null;
+  if not found then
+    raise exception 'workout_not_found';
+  end if;
+end;
 $$;
 
 -- ---------------------------------------------------------------- streak inputs
@@ -2256,22 +2546,45 @@ as $$
   select (now() at time zone 'Europe/Zurich')::date;
 $$;
 
--- Does `target` have a counting training proof on `d` (own post or accepted workout link)?
--- Uses post_counts_as_workout, like workout_days(). Internal.
-create or replace function public.is_training_day(target uuid, d date)
-returns boolean
+-- THE place that decides whether `target` has a training proof on `d`, and on what it rests:
+-- 'photo' (own post that counts, or an accepted workout link) or 'workout' (a recorded training
+-- that counts, without photo). null: no proof. A later photo check only concerns 'photo' days.
+-- Removed or deleted posts and workouts don't count. Internal.
+create or replace function public.day_proof(target uuid, d date)
+returns text
 language sql stable security definer set search_path = ''
 as $$
-  select exists (
+  select case
+    when exists (
       select 1 from public.posts p
       where p.user_id = target and p.workout_date = d and public.post_counts_as_workout(p.id)
-    )
-    or exists (
+    ) or exists (
       select 1 from public.workout_shares ws
       join public.posts p on p.id = ws.post_id
       where ws.tagged_user_id = target and ws.status = 'accepted' and p.workout_date = d
         and public.post_counts_as_workout(p.id)
-    );
+    ) then 'photo'
+    when exists (
+      select 1 from public.workouts w
+      where w.user_id = target and w.workout_date = d and w.counts_for_streak and w.moderation_state is null
+    ) then 'workout'
+  end;
+$$;
+
+-- Does `target` count `d` as a training day (any proof)? Internal.
+create or replace function public.day_counts_as_workout(target uuid, d date)
+returns boolean
+language sql stable security definer set search_path = ''
+as $$
+  select public.day_proof(target, d) is not null;
+$$;
+
+-- Kept for the rest day functions: same as day_counts_as_workout.
+create or replace function public.is_training_day(target uuid, d date)
+returns boolean
+language sql stable security definer set search_path = ''
+as $$
+  select public.day_counts_as_workout(target, d);
 $$;
 
 -- Replaced by rest_week_start (rest days are budgeted per week now).
@@ -2399,6 +2712,18 @@ as $$
     where p.user_id = p_user
       and p.created_at >= tp.sequence_changed_at
       and public.post_counts_as_workout(p.id)
+      -- A photo of a recorded training is the same proof as the training (counted there).
+      and not exists (
+        select 1 from public.workouts w
+        where w.post_id = p.id and w.counts_for_streak and w.moderation_state is null
+      )
+    union all
+    select w.workout_date, w.created_at, w.plan_day_id, 'training'
+    from public.workouts w
+    join public.training_plans tp on tp.user_id = w.user_id and tp.is_active
+    where w.user_id = p_user
+      and w.created_at >= tp.sequence_changed_at
+      and w.counts_for_streak and w.moderation_state is null
     union all
     select r.day, r.created_at, r.plan_day_id, 'rest'
     from public.planned_rest_uses r
@@ -4344,7 +4669,7 @@ do $$
 declare
   t text;
 begin
-  foreach t in array array['posts', 'stories', 'comments', 'messages', 'training_plans'] loop
+  foreach t in array array['posts', 'stories', 'comments', 'messages', 'training_plans', 'workouts'] loop
     execute format('drop trigger if exists %I on public.%I', t || '_moderation_guard', t);
     execute format(
       'create trigger %I before insert or update on public.%I for each row execute function public.guard_content_moderation()',
@@ -4425,6 +4750,14 @@ revoke all on function public.duplicate_plan(uuid) from public, anon;
 grant execute on function public.duplicate_plan(uuid) to authenticated;
 revoke all on function public.delete_plan(uuid) from public, anon;
 grant execute on function public.delete_plan(uuid) to authenticated;
+revoke all on function public.save_workout(jsonb) from public, anon;
+grant execute on function public.save_workout(jsonb) to authenticated;
+revoke all on function public.link_workout_post(uuid, uuid, boolean) from public, anon;
+grant execute on function public.link_workout_post(uuid, uuid, boolean) to authenticated;
+revoke all on function public.workout_rules() from public, anon;
+grant execute on function public.workout_rules() to authenticated;
+revoke all on function public.day_proof(uuid, date) from public, anon, authenticated;
+revoke all on function public.day_counts_as_workout(uuid, date) from public, anon, authenticated;
 revoke all on function public.adopt_plan(uuid, boolean) from public, anon;
 grant execute on function public.adopt_plan(uuid, boolean) to authenticated;
 revoke all on function public.my_exercise_names() from public, anon;
@@ -4572,6 +4905,10 @@ revoke all on public.planned_rest_uses from anon, authenticated;
 grant select on public.planned_rest_uses to authenticated;
 -- Adoptions: no client access (the daily limit and notifications are handled in adopt_plan).
 revoke all on public.plan_adoptions from anon, authenticated;
+-- Recorded trainings: written only by save_workout / link_workout_post; owners may delete.
+revoke all on public.workouts, public.workout_exercises, public.workout_sets from anon, authenticated;
+grant select, delete on public.workouts to authenticated;
+grant select on public.workout_exercises, public.workout_sets to authenticated;
 -- Rest days: owners read their own; all writes go through the rest-day functions.
 revoke all on public.rest_budgets, public.rest_day_uses from anon, authenticated;
 grant select on public.rest_budgets, public.rest_day_uses to authenticated;
@@ -4624,6 +4961,9 @@ alter table public.plan_days            enable row level security;
 alter table public.plan_exercises       enable row level security;
 alter table public.planned_rest_uses    enable row level security;
 alter table public.plan_adoptions       enable row level security;
+alter table public.workouts             enable row level security;
+alter table public.workout_exercises    enable row level security;
+alter table public.workout_sets         enable row level security;
 alter table public.rest_budgets         enable row level security;
 alter table public.rest_day_uses        enable row level security;
 alter table public.user_blocks          enable row level security;
@@ -5160,6 +5500,33 @@ create policy "plan_exercises: read with plan" on public.plan_exercises
     select 1 from public.plan_days d where d.id = plan_day_id and public.can_view_plan(d.plan_id)
   ));
 
+-- workouts: the owner reads and deletes (the linked post stays). Others: see can_view_workout.
+drop policy if exists "workouts: owner reads" on public.workouts;
+create policy "workouts: owner reads" on public.workouts
+  for select to authenticated using (user_id = (select auth.uid()) and moderation_state is null);
+
+drop policy if exists "workouts: owner deletes" on public.workouts;
+create policy "workouts: owner deletes" on public.workouts
+  for delete to authenticated
+  using (user_id = (select auth.uid()) and public.is_account_active() and moderation_state is null);
+
+drop policy if exists "workout_exercises: read with workout" on public.workout_exercises;
+create policy "workout_exercises: read with workout" on public.workout_exercises
+  for select to authenticated
+  using (exists (
+    select 1 from public.workouts w
+    where w.id = workout_id and w.user_id = (select auth.uid()) and w.moderation_state is null
+  ));
+
+drop policy if exists "workout_sets: read with exercise" on public.workout_sets;
+create policy "workout_sets: read with exercise" on public.workout_sets
+  for select to authenticated
+  using (exists (
+    select 1 from public.workout_exercises we
+    join public.workouts w on w.id = we.workout_id
+    where we.id = workout_exercise_id and w.user_id = (select auth.uid()) and w.moderation_state is null
+  ));
+
 drop policy if exists "planned_rest_uses: owner reads" on public.planned_rest_uses;
 create policy "planned_rest_uses: owner reads" on public.planned_rest_uses
   for select to authenticated using (user_id = (select auth.uid()));
@@ -5552,6 +5919,7 @@ insert into public.usage_event_types (name, area, source) values
   ('report_created', 'moderation', 'server'),
   ('plan_created', 'plans', 'server'),
   ('plan_adopted', 'plans', 'server'),
+  ('workout_completed', 'workout', 'server'),
   ('screen_home', 'home', 'client'),
   ('screen_feed', 'feed', 'client'),
   ('screen_post', 'feed', 'client'),
@@ -5577,6 +5945,12 @@ insert into public.usage_event_types (name, area, source) values
   ('plan_activated', 'plans', 'client'),
   ('planned_rest_confirmed', 'plans', 'client'),
   ('plan_adopt_opened', 'plans', 'client'),
+  ('screen_training', 'workout', 'client'),
+  ('screen_workout_session', 'workout', 'client'),
+  ('screen_workout_finish', 'workout', 'client'),
+  ('workout_started', 'workout', 'client'),
+  ('workout_discarded', 'workout', 'client'),
+  ('workout_photo_added', 'workout', 'client'),
   ('screen_search', 'search', 'client'),
   ('screen_hashtag', 'search', 'client'),
   ('screen_settings', 'settings', 'client'),
@@ -5657,7 +6031,8 @@ begin
       ('follows', 'insert', 'follow_created'),
       ('reports', 'insert', 'report_created'),
       ('training_plans', 'insert', 'plan_created'),
-      ('training_plans', 'insert', 'plan_adopted')
+      ('training_plans', 'insert', 'plan_adopted'),
+      ('workouts', 'insert', 'workout_completed')
     ) as v(tbl, op, event)
   loop
     -- Trigger names per event (one table can count several events); the first version named
@@ -5738,7 +6113,8 @@ begin
       'messages', (select count(*) from public.messages m where m.kind is null),
       'likes', (select count(*) from public.post_likes) + (select count(*) from public.story_likes)
                + (select count(*) from public.comment_likes),
-      'plans', (select count(*) from public.training_plans)
+      'plans', (select count(*) from public.training_plans),
+      'workouts', (select count(*) from public.workouts)
     )
   );
 end;
@@ -5783,6 +6159,7 @@ as $$
     union all select user_id, created_at from public.story_likes
     union all select user_id, created_at from public.comment_likes
     union all select follower_id, created_at from public.follows
+    union all select user_id, created_at from public.workouts
   ) x
   where x.created_at >= (p_from::timestamp at time zone 'Europe/Zurich')
     and x.created_at < ((p_to + 1)::timestamp at time zone 'Europe/Zurich');

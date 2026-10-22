@@ -14,9 +14,9 @@ export type WorkoutDays = {
 };
 
 /**
- * Training days of a user from the database's workout_days(): own posts that count as a
- * training proof plus accepted workout links. Which posts count is decided there
- * (post_counts_as_workout), so app and database agree.
+ * Training days of a user from the database's workout_days(): own posts and recorded
+ * trainings that count as a training proof, plus accepted workout links. What counts is
+ * decided there (post_counts_as_workout, counts_for_streak), so app and database agree.
  */
 export async function fetchWorkoutDays(userId?: string): Promise<WorkoutDays> {
   const target = userId ?? (await requireUserId());
@@ -29,7 +29,8 @@ export async function fetchWorkoutDays(userId?: string): Promise<WorkoutDays> {
   const own: DayKey[] = [];
   const shared: SharedWorkoutDay[] = [];
   for (const row of data) {
-    if (row.shared_by === null) own.push(row.day);
+    // Own proofs: posts and recorded trainings ('photo' or 'workout'); each day counts once.
+    if (row.shared_by === null || row.post_id === null) own.push(row.day);
     else shared.push({ day: row.day, postId: row.post_id, ownerId: row.shared_by });
   }
   return {
