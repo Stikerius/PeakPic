@@ -11,17 +11,17 @@ import { SectionFooter, SectionHeader } from "@/components/ui/section-header";
 import { spacing, typography } from "@/constants/theme";
 import { showActionSheet } from "@/lib/actionSheet";
 import { describeError } from "@/lib/errors";
+import { confirmActivatePlan, confirmDeactivatePlan } from "@/lib/planActivation";
 import {
   PLAN_MAX_PLANS,
   VISIBILITY_LABELS,
-  activatePlan,
   deletePlan,
   duplicatePlan,
   fetchMyPlans,
   type TrainingPlan,
 } from "@/lib/planRepo";
 import { makeStyles, useTheme } from "@/lib/theme";
-import { track, useTrackScreen } from "@/lib/usage";
+import { useTrackScreen } from "@/lib/usage";
 
 function planSubtitle(plan: TrainingPlan): string {
   const training = plan.days.filter((d) => d.type === "training").length;
@@ -68,24 +68,6 @@ export default function PlansScreen() {
       .finally(() => setBusy(false));
   }
 
-  function confirmActivate(plan: TrainingPlan) {
-    Alert.alert(
-      `„${plan.name}“ aktivieren?`,
-      "Die Reihenfolge beginnt wieder bei Tag 1 und dein Plan-Streak startet neu. Bisherige Beiträge behalten ihre Zuordnung.",
-      [
-        { text: "Abbrechen", style: "cancel" },
-        {
-          text: "Aktivieren",
-          onPress: () =>
-            run(async () => {
-              await activatePlan(plan.id);
-              track("plan_activated");
-            }),
-        },
-      ],
-    );
-  }
-
   function confirmDelete(plan: TrainingPlan) {
     Alert.alert(
       `„${plan.name}“ löschen?`,
@@ -100,7 +82,12 @@ export default function PlansScreen() {
   function openMenu(plan: TrainingPlan) {
     showActionSheet(plan.name, [
       { label: "Bearbeiten", onPress: () => router.push({ pathname: "/plan-editor/[planId]", params: { planId: plan.id } }) },
-      ...(plan.isActive ? [] : [{ label: "Aktivieren", onPress: () => confirmActivate(plan) }]),
+      plan.isActive
+        ? { label: "Plan deaktivieren", onPress: () => confirmDeactivatePlan(() => void load()) }
+        : {
+            label: plan.deactivatedAt !== null ? "Wieder aktivieren" : "Aktivieren",
+            onPress: () => confirmActivatePlan(plan, () => void load()),
+          },
       { label: "Duplizieren", onPress: () => run(() => duplicatePlan(plan.id)) },
       { label: "Löschen", destructive: true, onPress: () => confirmDelete(plan) },
     ]);

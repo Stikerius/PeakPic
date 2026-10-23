@@ -17,14 +17,15 @@ import { useWorkoutDays } from "@/hooks/use-workout-days";
 import { describeError } from "@/lib/errors";
 import { onAppEvent } from "@/lib/events";
 import { listMyHighlights, type Highlight } from "@/lib/highlightRepo";
-import { fetchMyPlan, fetchPlanProofs, type TrainingPlan } from "@/lib/planRepo";
+import { confirmDeactivatePlan } from "@/lib/planActivation";
+import { fetchMyPlan, fetchPlanProofs, planEntries, type TrainingPlan } from "@/lib/planRepo";
 import { getMyProfile, updateMyAvatar, type Profile } from "@/lib/profileRepo";
 import { useSession } from "@/lib/session";
 import { fetchFollowCounts } from "@/lib/socialRepo";
 import {
   computeStreakStatsFromDays,
   flameTier,
-  nextPlanDayIndex,
+  planRound,
   toDayKey,
   type PlanProof,
 } from "@/lib/streak";
@@ -207,10 +208,8 @@ export default function ProfileScreen() {
         <View style={styles.padded}>
           <PlanSummary
             plan={plan}
-            nextIndex={nextPlanDayIndex(
-              plan.days.map((d) => d.id),
-              planProofs,
-            )}
+            nextIndex={planRound(planEntries(plan), planProofs).nextIndex}
+            onDeactivate={() => confirmDeactivatePlan(() => setVersion((v) => v + 1))}
           />
         </View>
       )}

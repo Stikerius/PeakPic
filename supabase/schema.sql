@@ -53,9 +53,11 @@
 --                   to weekdays.
 --                   Readable by the owner, and per plan visibility ('private' | 'followers' |
 --                   'public', public only while the profile is public; can_view_plan).
---                   Written only through save_plan() / activate_plan() / duplicate_plan() /
---                   delete_plan(); sequence_changed_at marks changes of order or day types
---                   and activation (the plan streak restarts there).
+--                   Written only through save_plan() / activate_plan() / deactivate_plan() /
+--                   duplicate_plan() / delete_plan() / reorder_plan_days() / reorder_plan_exercises().
+--                   No plan may be active at all. Progress is kept per day id within a round
+--                   (plan_round_next()): reordering, adding or removing days never resets it;
+--                   sequence_changed_at only moves when a plan is (re)started at day 1.
 --   * training stats get_my_training_stats() / get_training_stats(): aggregated numbers only
 --                   (per day and exercise, never single trainings), visible per
 --                   profiles.training_stats_visibility (default 'private'; can_view_training_stats).
@@ -613,6 +615,31 @@ create table if not exists public.plan_exercises (
   check (reps_min is not null or target_seconds is not null),
   check (reps_max is null or (reps_min is not null and reps_max >= reps_min))
 );
+
+-- Positions are unique per plan / per day, checked at the end of the transaction, so a reorder
+-- can move every row in one update without duplicate positions in between.
+do $$
+begin
+  if exists (select 1 from pg_constraint where conname = 'plan_days_plan_id_position_key' and not condeferrable) then
+    alter table public.plan_days drop constraint plan_days_plan_id_position_key;
+  end if;
+  if not exists (select 1 from pg_constraint where conname = 'plan_days_plan_id_position_key') then
+    alter table public.plan_days add constraint plan_days_plan_id_position_key
+      unique (plan_id, position) deferrable initially deferred;
+  end if;
+  if exists (select 1 from pg_constraint where conname = 'plan_exercises_plan_day_id_position_key' and not condeferrable) then
+    alter table public.plan_exercises drop constraint plan_exercises_plan_day_id_position_key;
+  end if;
+  if not exists (select 1 from pg_constraint where conname = 'plan_exercises_plan_day_id_position_key') then
+    alter table public.plan_exercises add constraint plan_exercises_plan_day_id_position_key
+      unique (plan_day_id, position) deferrable initially deferred;
+  end if;
+end;
+$$;
+
+-- When the plan was deactivated ("Plan deaktivieren"); set again on activation. Only a plan
+-- deactivated this way can be resumed where it stopped (activate_plan(p_resume)).
+alter table public.training_plans add column if not exists deactivated_at timestamptz;
 
 -- Adopted copies: when, and from whom (adopted_from_user_id becomes null when that account is
 -- deleted; adopted_at stays, so the app can show "Gelöschtes Konto").
@@ -2160,8 +2187,9 @@ $$;
 -- "notes": "...", "exercises": [{"id": ..., "name": "...", "sets": 3, "reps_min": 8,
 -- "reps_max": 12, "target_seconds": null, "target_weight_kg": null, "notes": "..."}]}].
 -- Existing days and exercises keep their id (posts stay assigned), the rest is removed.
--- 1 to 30 days, at most 20 exercises per training day, at most 10 plans. My first plan is
--- active at once.
+-- 1 to 30 days, at most 20 exercises per training day, at most 10 plans. My very first plan is
+-- active at once. Changing the order, adding or removing days resets nothing: progress is kept
+-- per day id (plan_round_next()).
 create or replace function public.save_plan(
   p_plan_id uuid, p_name text, p_visibility text, p_allow_adopt boolean, p_days jsonb
 )
@@ -2171,8 +2199,6 @@ as $$
 declare
   me uuid := auth.uid();
   plan uuid := p_plan_id;
-  old_sequence text[];
-  new_sequence text[] := '{}';
   day_ids uuid[] := '{}';
   day_item jsonb;
   ex_item jsonb;
@@ -2209,7 +2235,7 @@ begin
     end if;
     insert into public.training_plans (user_id, name, show_in_profile, visibility, allow_adopt, is_active)
     values (me, btrim(p_name), p_visibility <> 'private', p_visibility, coalesce(p_allow_adopt, true),
-            not exists (select 1 from public.training_plans tp where tp.user_id = me and tp.is_active))
+            not exists (select 1 from public.training_plans tp where tp.user_id = me))
     returning id into plan;
   else
     update public.training_plans
@@ -2221,8 +2247,6 @@ begin
     end if;
   end if;
 
-  select coalesce(array_agg(d.id::text || ':' || d.day_type order by d.position), '{}') into old_sequence
-  from public.plan_days d where d.plan_id = plan;
   -- Out of the way of the new positions (unique per plan).
   update public.plan_days set position = position + 1000 where plan_id = plan;
 
@@ -2245,7 +2269,6 @@ begin
       returning id into day_id;
     end if;
     day_ids := day_ids || day_id;
-    new_sequence := new_sequence || (day_id::text || ':' || day_kind);
 
     -- Exercises: rest days have none.
     if day_kind = 'rest' then
@@ -2291,22 +2314,22 @@ begin
   end loop;
 
   delete from public.plan_days where plan_id = plan and not (id = any (day_ids));
-  -- New order (or a day turned into a rest day): the plan streak starts again from day 1.
-  if old_sequence is distinct from new_sequence then
-    update public.training_plans set sequence_changed_at = now() where id = plan;
-  end if;
   return plan;
 end;
 $$;
 
--- Makes one of my plans the active one. The order starts again at day 1 and the plan streak
--- runs anew; posts keep their assignment.
-create or replace function public.activate_plan(p_plan_id uuid)
+-- Makes one of my plans the active one. Normally the order starts again at day 1 and the plan
+-- streak runs anew (posts keep their assignment). p_resume: a plan I deactivated myself
+-- continues where I stopped (its progress since the last start stays). Another plan that was
+-- active is simply replaced.
+drop function if exists public.activate_plan(uuid);
+create or replace function public.activate_plan(p_plan_id uuid, p_resume boolean default false)
 returns void
 language plpgsql security definer set search_path = ''
 as $$
 declare
   me uuid := auth.uid();
+  target public.training_plans%rowtype;
 begin
   if me is null then
     raise exception 'not authenticated';
@@ -2314,12 +2337,108 @@ begin
   if not public.is_account_active() then
     raise exception 'account_inactive';
   end if;
-  if not exists (select 1 from public.training_plans tp where tp.id = p_plan_id and tp.user_id = me) then
+  select * into target from public.training_plans tp where tp.id = p_plan_id and tp.user_id = me for update;
+  if not found then
     raise exception 'plan_not_found';
   end if;
-  update public.training_plans set is_active = false where user_id = me and is_active and id <> p_plan_id;
-  update public.training_plans set is_active = true, sequence_changed_at = now(), updated_at = now()
-  where id = p_plan_id;
+  update public.training_plans set is_active = false, deactivated_at = null
+  where user_id = me and is_active and id <> p_plan_id;
+  if coalesce(p_resume, false) and target.deactivated_at is not null then
+    update public.training_plans set is_active = true, deactivated_at = null, updated_at = now() where id = p_plan_id;
+  else
+    update public.training_plans set is_active = true, deactivated_at = null, sequence_changed_at = now(), updated_at = now()
+    where id = p_plan_id;
+  end if;
+end;
+$$;
+
+-- "Plan deaktivieren": afterwards no plan is active (also when it is my only one). The app then
+-- behaves as without a plan, the rest day budget applies again, the plan streak ends; trainings
+-- and posts keep their assignment. Nothing to do without an active plan.
+create or replace function public.deactivate_plan()
+returns void
+language plpgsql security definer set search_path = ''
+as $$
+begin
+  if auth.uid() is null then
+    raise exception 'not authenticated';
+  end if;
+  if not public.is_account_active() then
+    raise exception 'account_inactive';
+  end if;
+  update public.training_plans set is_active = false, deactivated_at = now(), updated_at = now()
+  where user_id = auth.uid() and is_active;
+end;
+$$;
+
+-- New order of a plan's days: p_ordered_ids must be exactly the plan's day ids (each once).
+-- One update, positions 0..n-1 without gaps. Resets nothing (progress is kept per day id).
+create or replace function public.reorder_plan_days(p_plan_id uuid, p_ordered_ids uuid[])
+returns void
+language plpgsql security definer set search_path = ''
+as $$
+declare
+  existing uuid[];
+begin
+  if auth.uid() is null then
+    raise exception 'not authenticated';
+  end if;
+  if not public.is_account_active() then
+    raise exception 'account_inactive';
+  end if;
+  perform 1 from public.training_plans tp where tp.id = p_plan_id and tp.user_id = auth.uid() for update;
+  if not found then
+    raise exception 'plan_not_found';
+  end if;
+  if p_ordered_ids is null or cardinality(p_ordered_ids) not between 1 and 30 then
+    raise exception 'invalid_order';
+  end if;
+  select array_agg(d.id) into existing from public.plan_days d where d.plan_id = p_plan_id;
+  if cardinality(p_ordered_ids) <> coalesce(cardinality(existing), 0)
+    or (select count(distinct x) from unnest(p_ordered_ids) x) <> cardinality(p_ordered_ids)
+    or exists (select 1 from unnest(p_ordered_ids) x where not (x = any (existing))) then
+    raise exception 'invalid_order';
+  end if;
+  update public.plan_days d set position = o.ord - 1
+  from unnest(p_ordered_ids) with ordinality as o(id, ord)
+  where d.id = o.id and d.plan_id = p_plan_id;
+  update public.training_plans set updated_at = now() where id = p_plan_id;
+end;
+$$;
+
+-- New order of the exercises of one of my training days (same checks, at most 20).
+create or replace function public.reorder_plan_exercises(p_day_id uuid, p_ordered_ids uuid[])
+returns void
+language plpgsql security definer set search_path = ''
+as $$
+declare
+  existing uuid[];
+begin
+  if auth.uid() is null then
+    raise exception 'not authenticated';
+  end if;
+  if not public.is_account_active() then
+    raise exception 'account_inactive';
+  end if;
+  perform 1 from public.plan_days d
+  join public.training_plans tp on tp.id = d.plan_id
+  where d.id = p_day_id and tp.user_id = auth.uid()
+  for update of d;
+  if not found then
+    raise exception 'plan_day_not_found';
+  end if;
+  if p_ordered_ids is null or cardinality(p_ordered_ids) not between 1 and 20 then
+    raise exception 'invalid_order';
+  end if;
+  select array_agg(e.id) into existing from public.plan_exercises e where e.plan_day_id = p_day_id;
+  if cardinality(p_ordered_ids) <> coalesce(cardinality(existing), 0)
+    or (select count(distinct x) from unnest(p_ordered_ids) x) <> cardinality(p_ordered_ids)
+    or exists (select 1 from unnest(p_ordered_ids) x where not (x = any (existing))) then
+    raise exception 'invalid_order';
+  end if;
+  update public.plan_exercises e set position = o.ord - 1
+  from unnest(p_ordered_ids) with ordinality as o(id, ord)
+  where e.id = o.id and e.plan_day_id = p_day_id;
 end;
 $$;
 
@@ -2436,8 +2555,8 @@ begin
   values (me, source.id, source.user_id, copy_id);
 
   if coalesce(p_activate, false)
-    or not exists (select 1 from public.training_plans tp where tp.user_id = me and tp.is_active) then
-    update public.training_plans set is_active = false where user_id = me and is_active;
+    or not exists (select 1 from public.training_plans tp where tp.user_id = me and tp.id <> copy_id) then
+    update public.training_plans set is_active = false, deactivated_at = null where user_id = me and is_active;
     update public.training_plans set is_active = true, sequence_changed_at = now() where id = copy_id;
   end if;
 
@@ -2934,10 +3053,75 @@ as $$
   order by x.day, x.created_at;
 $$;
 
--- Confirms the planned rest day of the active plan for `d` (today or yesterday). Allowed when
--- the plan entry before it is really done: the last completed entry (training day or planned
--- rest day) was on the day before `d`, and the entry after it is a rest day. Not on a day with
--- training, not twice. Keeps the streak alive, doesn't count as a training day.
+-- Progress of the active plan's current round (same rule as planRound() in lib/streak.ts): the
+-- days done in this round, kept by day id, so the current order decides what comes next. A
+-- training proof done while only planned rest days come before it skips them (they count as
+-- done); once every day is done a new round starts. Returns the day due next, its type and the
+-- day of the last completed plan entry (null if none). Nothing without an active plan. Internal.
+create or replace function public.plan_round_next(p_user uuid)
+returns table (next_day_id uuid, next_type text, last_day date)
+language plpgsql stable security definer set search_path = ''
+as $$
+declare
+  active_plan uuid;
+  ids uuid[];
+  types text[];
+  done uuid[] := '{}';
+  entry record;
+  pos integer;
+  i integer;
+  only_rest boolean;
+  last_done date;
+begin
+  select tp.id into active_plan from public.training_plans tp where tp.user_id = p_user and tp.is_active;
+  if active_plan is null then
+    return;
+  end if;
+  select array_agg(d.id order by d.position), array_agg(d.day_type order by d.position) into ids, types
+  from public.plan_days d where d.plan_id = active_plan;
+  if ids is null then
+    return;
+  end if;
+  for entry in select * from public.plan_progress(p_user) loop
+    pos := array_position(ids, entry.plan_day_id);
+    continue when pos is null;
+    if entry.kind = 'training' and not (ids[pos] = any (done)) then
+      only_rest := true;
+      for i in 1 .. pos - 1 loop
+        if not (ids[i] = any (done)) and types[i] <> 'rest' then
+          only_rest := false;
+        end if;
+      end loop;
+      if only_rest then
+        for i in 1 .. pos - 1 loop
+          if not (ids[i] = any (done)) then
+            done := done || ids[i];
+          end if;
+        end loop;
+      end if;
+    end if;
+    if not (ids[pos] = any (done)) then
+      done := done || ids[pos];
+    end if;
+    last_done := entry.day;
+    if cardinality(done) >= cardinality(ids) then
+      done := '{}';
+    end if;
+  end loop;
+  for i in 1 .. cardinality(ids) loop
+    if not (ids[i] = any (done)) then
+      return query select ids[i], types[i], last_done;
+      return;
+    end if;
+  end loop;
+  return query select ids[1], types[1], last_done;
+end;
+$$;
+
+-- Confirms the planned rest day of the active plan for `d` (today or yesterday). Allowed when the
+-- day due next in the round is a rest day and the last completed entry (training day or planned
+-- rest day) was on the day before `d`. Not on a day with training, not twice. Keeps the streak
+-- alive, doesn't count as a training day.
 create or replace function public.use_planned_rest_day(d date)
 returns void
 language plpgsql security definer set search_path = ''
@@ -2945,12 +3129,7 @@ as $$
 declare
   me uuid := auth.uid();
   plan public.training_plans%rowtype;
-  entries uuid[];
-  kinds text[];
-  last_day date;
-  last_entry uuid;
-  last_index integer;
-  next_index integer;
+  next_entry record;
 begin
   if me is null then
     raise exception 'not authenticated';
@@ -2972,29 +3151,18 @@ begin
     or exists (select 1 from public.rest_day_uses r where r.user_id = me and r.day = d) then
     raise exception 'planned_rest_already_used';
   end if;
-  select array_agg(pd.id order by pd.position), array_agg(pd.day_type order by pd.position)
-  into entries, kinds
-  from public.plan_days pd where pd.plan_id = plan.id;
-
-  -- The last completed entry before d that belongs to the plan.
-  select pp.day, pp.plan_day_id into last_day, last_entry
-  from public.plan_progress(me) pp
-  where pp.day < d and pp.plan_day_id = any (entries)
-  order by pp.day desc, pp.created_at desc
-  limit 1;
-  if last_entry is null then
+  select * into next_entry from public.plan_round_next(me);
+  if next_entry.last_day is null then
     raise exception 'planned_rest_not_due' using hint = 'no completed plan day before';
   end if;
-  if last_day <> d - 1 then
+  if next_entry.last_day <> d - 1 then
     raise exception 'planned_rest_not_due' using hint = 'the previous plan day was not done the day before';
   end if;
-  last_index := array_position(entries, last_entry);
-  next_index := (last_index % array_length(entries, 1)) + 1;
-  if kinds[next_index] <> 'rest' then
+  if next_entry.next_type <> 'rest' then
     raise exception 'planned_rest_not_due' using hint = 'the next plan day is a training day';
   end if;
   insert into public.planned_rest_uses (user_id, day, plan_id, plan_day_id)
-  values (me, d, plan.id, entries[next_index]);
+  values (me, d, plan.id, next_entry.next_day_id);
 end;
 $$;
 
@@ -4980,8 +5148,15 @@ revoke all on function public.can_view_plan(uuid) from public, anon;
 grant execute on function public.can_view_plan(uuid) to authenticated;
 revoke all on function public.save_plan(uuid, text, text, boolean, jsonb) from public, anon;
 grant execute on function public.save_plan(uuid, text, text, boolean, jsonb) to authenticated;
-revoke all on function public.activate_plan(uuid) from public, anon;
-grant execute on function public.activate_plan(uuid) to authenticated;
+revoke all on function public.activate_plan(uuid, boolean) from public, anon;
+grant execute on function public.activate_plan(uuid, boolean) to authenticated;
+revoke all on function public.deactivate_plan() from public, anon;
+grant execute on function public.deactivate_plan() to authenticated;
+revoke all on function public.reorder_plan_days(uuid, uuid[]) from public, anon;
+grant execute on function public.reorder_plan_days(uuid, uuid[]) to authenticated;
+revoke all on function public.reorder_plan_exercises(uuid, uuid[]) from public, anon;
+grant execute on function public.reorder_plan_exercises(uuid, uuid[]) to authenticated;
+revoke all on function public.plan_round_next(uuid) from public, anon, authenticated;
 revoke all on function public.duplicate_plan(uuid) from public, anon;
 grant execute on function public.duplicate_plan(uuid) to authenticated;
 revoke all on function public.delete_plan(uuid) from public, anon;
@@ -6232,6 +6407,11 @@ insert into public.usage_event_types (name, area, source) values
   ('plan_activated', 'plans', 'client'),
   ('planned_rest_confirmed', 'plans', 'client'),
   ('plan_adopt_opened', 'plans', 'client'),
+  ('plan_deactivated', 'plans', 'client'),
+  ('plan_days_reordered', 'plans', 'client'),
+  ('plan_deviation_exception', 'plans', 'client'),
+  ('plan_deviation_reordered', 'plans', 'client'),
+  ('plan_round_adjusted', 'plans', 'client'),
   ('screen_training', 'workout', 'client'),
   ('screen_workout_session', 'workout', 'client'),
   ('screen_workout_finish', 'workout', 'client'),

@@ -10,9 +10,9 @@ import { fontSize, radius, spacing } from "@/constants/theme";
 import { describeError } from "@/lib/errors";
 import { emitAppEvent } from "@/lib/events";
 import { getPendingWorkoutLink, linkPendingWorkout, setPendingShareWithPost, setPendingWorkoutLink } from "@/lib/pendingWorkoutLink";
-import { fetchMyPlan, fetchPlanProofs, type TrainingPlan } from "@/lib/planRepo";
+import { fetchMyPlan, fetchPlanProofs, planEntries, type TrainingPlan } from "@/lib/planRepo";
 import { createPost, getTodaysDayPostId } from "@/lib/postRepo";
-import { nextPlanDayIndex } from "@/lib/streak";
+import { planRound } from "@/lib/streak";
 import { DarkScheme, makeStyles } from "@/lib/theme";
 import type { CapturedPhoto } from "@/types/photo";
 import { useTrackScreen } from "@/lib/usage";
@@ -61,7 +61,7 @@ function CameraScreenContent() {
           if (!active) return;
           setPlan(
             myPlan !== null
-              ? { plan: myPlan, nextIndex: nextPlanDayIndex(myPlan.days.map((d) => d.id), proofs) }
+              ? { plan: myPlan, nextIndex: planRound(planEntries(myPlan), proofs).nextTrainingIndex }
               : null,
           );
         })

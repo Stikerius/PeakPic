@@ -190,18 +190,6 @@ export function nextTrainingIndex(entries: readonly PlanEntry[], index: number):
   return index % entries.length;
 }
 
-/** Whether going from `from` to `to` in the cycle passes only planned rest days. */
-function skipsOnlyRest(planDayIds: readonly string[], restIds: ReadonlySet<string>, from: number, to: number): boolean {
-  if (restIds.size === 0) return false;
-  let i = from;
-  while (i !== to) {
-    const id = planDayIds[i];
-    if (id === undefined || !restIds.has(id)) return false;
-    i = (i + 1) % planDayIds.length;
-  }
-  return true;
-}
-
 function sortProofs(proofs: readonly PlanProof[]): PlanProof[] {
   return [...proofs].sort((a, b) =>
     a.day === b.day ? a.createdAt.localeCompare(b.createdAt) : a.day.localeCompare(b.day),
@@ -209,26 +197,74 @@ function sortProofs(proofs: readonly PlanProof[]): PlanProof[] {
 }
 
 /**
- * Index of the unit that is due next: the one after the last assigned proof, wrapping
- * around at the end of the cycle; the first unit if nothing is assigned yet (also right after
- * a plan change, because only proofs since then are passed in).
+ * Progress through the current round: one pass through the plan's days in their CURRENT order.
+ * Progress is kept by day id, so reordering, adding or removing days never resets it: what was
+ * done in this round stays done, and the next unit is the first one not done yet. Same rule as
+ * plan_round_next() in the database.
  */
-export function nextPlanDayIndex(planDayIds: readonly string[], proofs: readonly PlanProof[]): number {
-  if (planDayIds.length === 0) return 0;
-  let next = 0;
-  for (const proof of sortProofs(proofs)) {
-    const index = proof.planDayId !== null ? planDayIds.indexOf(proof.planDayId) : -1;
-    if (index !== -1) next = (index + 1) % planDayIds.length;
+export type PlanRound = {
+  /** Days done in the current round. */
+  done: Set<string>;
+  /** The unit due next (training or rest day). */
+  nextIndex: number;
+  /** The next training day of the round (to pick for a post or a training). */
+  nextTrainingIndex: number;
+  /** Day of the last completed plan entry, null if none. */
+  lastDay: DayKey | null;
+};
+
+/**
+ * Applies one proof to the round. A training proof is "on plan" when its unit is the first one
+ * not done yet, or when only planned rest days come before it (training instead of resting skips
+ * them, they count as done). Any other unit of the plan is still done (it doesn't come again in
+ * this round), but not on plan. Returns null for proofs without a unit of this plan.
+ */
+function applyProof(entries: readonly PlanEntry[], done: Set<string>, proof: PlanProof): { onPlan: boolean } | null {
+  const index = proof.planDayId !== null ? entries.findIndex((e) => e.id === proof.planDayId) : -1;
+  if (index === -1) return null;
+  let onPlan = true;
+  if (proof.kind !== "rest") {
+    const before = entries.slice(0, index).filter((e) => !done.has(e.id));
+    // A unit done again in the same round (e.g. twice Push) is a repeat, not the plan.
+    onPlan = !done.has(entries[index]?.id ?? "") && before.every((e) => e.type === "rest");
+    if (onPlan) before.forEach((e) => done.add(e.id));
   }
-  return next;
+  done.add(entries[index]?.id ?? "");
+  // The last open unit done: a new round starts in the plan's order.
+  if (entries.every((e) => done.has(e.id))) done.clear();
+  return { onPlan };
+}
+
+export function planRound(entries: readonly PlanEntry[], proofs: readonly PlanProof[]): PlanRound {
+  const done = new Set<string>();
+  let lastDay: DayKey | null = null;
+  for (const proof of sortProofs(proofs)) {
+    if (applyProof(entries, done, proof) !== null) lastDay = proof.day;
+  }
+  const open = (e: PlanEntry) => !done.has(e.id);
+  const nextIndex = Math.max(0, entries.findIndex(open));
+  let nextTraining = entries.findIndex((e) => open(e) && e.type === "training");
+  if (nextTraining === -1) nextTraining = Math.max(0, entries.findIndex((e) => e.type === "training"));
+  return { done, nextIndex, nextTrainingIndex: nextTraining, lastDay };
+}
+
+function entriesOf(planDayIds: readonly string[], restIds: ReadonlySet<string>): PlanEntry[] {
+  return planDayIds.map((id) => ({ id, type: restIds.has(id) ? "rest" : "training" }));
+}
+
+/** Index of the unit that is due next (see planRound); the first unit if nothing is done yet. */
+export function nextPlanDayIndex(
+  planDayIds: readonly string[],
+  proofs: readonly PlanProof[],
+  restIds: ReadonlySet<string> = new Set(),
+): number {
+  if (planDayIds.length === 0) return 0;
+  return planRound(entriesOf(planDayIds, restIds), proofs).nextIndex;
 }
 
 /**
- * Days on which every training proof was the unit due at that moment. A proof without a unit
- * (or with one that isn't in the plan) doesn't move the order on; a wrong unit does (the next
- * one due is the one after it), so the plan streak can restart with the next correct proof.
- * Planned rest days that are due may be skipped by training the next training day instead;
- * confirmed rest days move the order on like a training day.
+ * Days on which every training proof was on plan (see applyProof). A proof without a unit (or
+ * with one that isn't in the plan) isn't on plan and doesn't move the round on.
  */
 export function correctPlanDays(
   planDayIds: readonly string[],
@@ -237,14 +273,11 @@ export function correctPlanDays(
 ): Set<DayKey> {
   const verdict = new Map<DayKey, boolean>();
   if (planDayIds.length === 0) return new Set();
-  let expected = 0;
+  const entries = entriesOf(planDayIds, restIds);
+  const done = new Set<string>();
   for (const proof of sortProofs(proofs)) {
-    const index = proof.planDayId !== null ? planDayIds.indexOf(proof.planDayId) : -1;
-    if (proof.kind !== "rest") {
-      const ok = index === expected || (index !== -1 && skipsOnlyRest(planDayIds, restIds, expected, index));
-      verdict.set(proof.day, (verdict.get(proof.day) ?? true) && ok);
-    }
-    if (index !== -1) expected = (index + 1) % planDayIds.length;
+    const result = applyProof(entries, done, proof);
+    if (proof.kind !== "rest") verdict.set(proof.day, (verdict.get(proof.day) ?? true) && (result?.onPlan ?? false));
   }
   return new Set([...verdict].filter(([, ok]) => ok).map(([day]) => day));
 }
@@ -298,9 +331,9 @@ export type PlannedRestInput = {
 };
 
 /**
- * The planned rest day that can be confirmed now, mirroring use_planned_rest_day: the last
- * completed plan entry was on the day before, the entry after it is a rest day, and that day
- * is today or yesterday, without training and not already a rest day. null otherwise (also
+ * The planned rest day that can be confirmed now, mirroring use_planned_rest_day: the unit due
+ * next in the round is a rest day, the last completed plan entry was on the day before, and that
+ * day is today or yesterday, without training and not already a rest day. null otherwise (also
  * when nothing of the plan was done yet: a rest day needs a training day before it).
  */
 export function plannedRestDue({ entries, proofs, today, trainingDays, restDays }: PlannedRestInput): {
@@ -309,14 +342,12 @@ export function plannedRestDue({ entries, proofs, today, trainingDays, restDays 
   index: number;
 } | null {
   if (entries.length === 0) return null;
-  const ids = entries.map((e) => e.id);
-  const done = sortProofs(proofs).filter((p) => p.planDayId !== null && ids.includes(p.planDayId));
-  const last = done[done.length - 1];
-  if (last === undefined || last.planDayId === null) return null;
-  const index = (ids.indexOf(last.planDayId) + 1) % entries.length;
+  const round = planRound(entries, proofs);
+  if (round.lastDay === null) return null;
+  const index = round.nextIndex;
   const entry = entries[index];
   if (entry === undefined || entry.type !== "rest") return null;
-  const day = addDays(last.day, 1);
+  const day = addDays(round.lastDay, 1);
   if (day !== today && day !== addDays(today, -1)) return null;
   if (trainingDays.has(day) || restDays.has(day)) return null;
   return { day, entryId: entry.id, index };

@@ -17,7 +17,7 @@ import {
   addMonths,
   computeStreakStatsFromDays,
   currentPlanStreak,
-  nextPlanDayIndex,
+  planRound,
   parseDayKey,
   plannedRestDue,
   restEntryIds,
@@ -123,7 +123,7 @@ export default function HomeScreen() {
         <PlanStreakCard
           plan={plan}
           streak={planStreak}
-          nextIndex={nextPlanDayIndex(planDayIds, proofs)}
+          nextIndex={planRound(entries, proofs).nextIndex}
           trainedToday={stats.trainingDays.has(today)}
           restDue={restDue?.day ?? null}
           today={today}

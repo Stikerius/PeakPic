@@ -82,11 +82,16 @@ describe("plan streak", () => {
   it("ends on a unit in the wrong order and restarts with the next correct one", () => {
     const proofs = [
       proof("2026-10-17", PUSH),
-      proof("2026-10-18", LEGS), // Pull was due
-      proof("2026-10-19", PUSH), // after Legs, Push is due again
-      proof("2026-10-20", PULL),
+      proof("2026-10-18", LEGS), // Pull was due; Legs is done for this round anyway
+      proof("2026-10-19", PULL), // the only open unit of the round
+      proof("2026-10-20", PUSH), // a new round starts with Push
     ];
     expect(planStreak(proofs, "2026-10-20")).toBe(2);
+  });
+
+  it("doesn't count a unit done again in the same round", () => {
+    const proofs = [proof("2026-10-18", PUSH), proof("2026-10-19", LEGS), proof("2026-10-20", PUSH)];
+    expect(planStreak(proofs, "2026-10-20")).toBe(0);
   });
 
   it("ends on a proof without assignment, which still counts for the normal streak", () => {

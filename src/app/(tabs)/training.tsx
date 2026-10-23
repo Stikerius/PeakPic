@@ -11,7 +11,7 @@ import { radius, spacing, typography } from "@/constants/theme";
 import { useActivityActions } from "@/hooks/use-activity-actions";
 import { randomUuid } from "@/lib/ids";
 import { fetchMyPlan, fetchPlanProofs, planEntries, type TrainingPlan } from "@/lib/planRepo";
-import { nextPlanDayIndex, nextTrainingIndex } from "@/lib/streak";
+import { planRound } from "@/lib/streak";
 import { makeStyles, useTheme } from "@/lib/theme";
 import { clearTrainingDraft, setTrainingDraft, useTrainingDraft } from "@/lib/trainingDraft";
 import { fetchMyWorkouts, type WorkoutListItem } from "@/lib/trainingRepo";
@@ -70,7 +70,7 @@ export default function TrainingScreen() {
         setPlan(myPlan);
         if (myPlan !== null) {
           const entries = planEntries(myPlan);
-          const next = nextTrainingIndex(entries, nextPlanDayIndex(entries.map((e) => e.id), proofs));
+          const next = planRound(entries, proofs).nextTrainingIndex;
           setSelectedDay(myPlan.days[next]?.id ?? null);
         }
       })

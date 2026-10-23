@@ -39,6 +39,22 @@ function due(proofs: PlanProof[], today: string) {
   return plannedRestDue({ entries: PLAN, proofs, today, trainingDays, restDays });
 }
 
+// The round up to and including "legs" (push, pull, the first rest day and legs done).
+function upToLegs(legsDay: string): PlanProof[] {
+  return [
+    training(addDaysKey(legsDay, -3), "push"),
+    training(addDaysKey(legsDay, -2), "pull"),
+    rest(addDaysKey(legsDay, -1), "rest1"),
+    training(legsDay, "legs"),
+  ];
+}
+
+function addDaysKey(day: string, amount: number): string {
+  const d = new Date(`${day}T12:00:00Z`);
+  d.setUTCDate(d.getUTCDate() + amount);
+  return d.toISOString().slice(0, 10);
+}
+
 describe("planned rest days", () => {
   it("are due the day after the training day before them", () => {
     const proofs = [training("2026-10-19", "push"), training("2026-10-20", "pull")];
@@ -59,7 +75,7 @@ describe("planned rest days", () => {
   });
 
   it("follow each other on consecutive days", () => {
-    const proofs = [training("2026-10-20", "legs")];
+    const proofs = upToLegs("2026-10-20");
     expect(due(proofs, "2026-10-21")?.entryId).toBe("rest2");
     const afterFirst = [...proofs, rest("2026-10-21", "rest2")];
     expect(due(afterFirst, "2026-10-22")).toEqual({ day: "2026-10-22", entryId: "rest3", index: 5 });
@@ -68,7 +84,7 @@ describe("planned rest days", () => {
   });
 
   it("can't be confirmed on a training day or twice", () => {
-    const proofs = [training("2026-10-20", "pull")];
+    const proofs = [training("2026-10-19", "push"), training("2026-10-20", "pull")];
     const input = { entries: PLAN, proofs, today: "2026-10-21" };
     expect(canUsePlannedRestDay("2026-10-21", { ...input, trainingDays: new Set(["2026-10-21"]), restDays: new Set() })).toBe(false);
     expect(canUsePlannedRestDay("2026-10-21", { ...input, trainingDays: new Set(), restDays: new Set(["2026-10-21"]) })).toBe(false);
@@ -76,9 +92,9 @@ describe("planned rest days", () => {
   });
 
   it("work across month and year boundaries", () => {
-    expect(due([training("2026-10-31", "pull")], "2026-11-01")?.day).toBe("2026-11-01");
-    expect(due([training("2026-12-31", "legs")], "2027-01-01")?.day).toBe("2027-01-01");
-    expect(due([training("2026-12-31", "legs"), rest("2027-01-01", "rest2")], "2027-01-02")?.entryId).toBe("rest3");
+    expect(due([training("2026-10-30", "push"), training("2026-10-31", "pull")], "2026-11-01")?.day).toBe("2026-11-01");
+    expect(due(upToLegs("2026-12-31"), "2027-01-01")?.day).toBe("2027-01-01");
+    expect(due([...upToLegs("2026-12-31"), rest("2027-01-01", "rest2")], "2027-01-02")?.entryId).toBe("rest3");
   });
 
   it("keep the normal streak alive without counting", () => {

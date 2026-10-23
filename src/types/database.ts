@@ -304,6 +304,7 @@ export type Database = {
           adopted_at: Timestamp | null;
           moderation_state: "removed" | "quarantined" | null;
           sequence_changed_at: Timestamp;
+          deactivated_at: Timestamp | null;
           created_at: Timestamp;
           updated_at: Timestamp;
         };
@@ -679,7 +680,10 @@ export type Database = {
         Args: { p_plan_id: Uuid | null; p_name: string; p_visibility: PlanVisibility; p_allow_adopt: boolean; p_days: Json };
         Returns: Uuid;
       };
-      activate_plan: { Args: { p_plan_id: Uuid }; Returns: undefined };
+      activate_plan: { Args: { p_plan_id: Uuid; p_resume?: boolean }; Returns: undefined };
+      deactivate_plan: { Args: Record<string, never>; Returns: undefined };
+      reorder_plan_days: { Args: { p_plan_id: Uuid; p_ordered_ids: Uuid[] }; Returns: undefined };
+      reorder_plan_exercises: { Args: { p_day_id: Uuid; p_ordered_ids: Uuid[] }; Returns: undefined };
       duplicate_plan: { Args: { p_plan_id: Uuid }; Returns: Uuid };
       delete_plan: { Args: { p_plan_id: Uuid }; Returns: undefined };
       my_exercise_names: { Args: Record<string, never>; Returns: { name: string }[] };

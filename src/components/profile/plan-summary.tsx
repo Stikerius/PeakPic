@@ -17,10 +17,12 @@ type PlanSummaryProps = {
   /** Someone else's plan: report it. */
   onReport?: () => void;
   busy?: boolean;
+  /** My active plan: "Plan deaktivieren". */
+  onDeactivate?: () => void;
 };
 
 /** The training plan in the profile: one line, expands to the units in cycle order. */
-export function PlanSummary({ plan, nextIndex = null, onAdopt, onReport, busy = false }: PlanSummaryProps) {
+export function PlanSummary({ plan, nextIndex = null, onAdopt, onReport, busy = false, onDeactivate }: PlanSummaryProps) {
   const { colors } = useTheme();
   const styles = useStyles();
   const [open, setOpen] = useState(false);
@@ -81,8 +83,11 @@ export function PlanSummary({ plan, nextIndex = null, onAdopt, onReport, busy = 
               </View>
             );
           })}
-          {(onAdopt !== undefined || onReport !== undefined) && (
+          {(onAdopt !== undefined || onReport !== undefined || onDeactivate !== undefined) && (
             <View style={styles.actions}>
+              {onDeactivate !== undefined && (
+                <Button label="Plan deaktivieren" icon="pause-outline" variant="ghost" size="sm" onPress={onDeactivate} />
+              )}
               {onAdopt !== undefined && (
                 <Button label="Plan übernehmen" icon="copy-outline" variant="secondary" size="sm" onPress={onAdopt} loading={busy} />
               )}

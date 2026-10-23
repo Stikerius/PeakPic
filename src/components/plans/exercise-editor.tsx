@@ -1,12 +1,12 @@
 import Ionicons from "@expo/vector-icons/Ionicons";
-import type { ComponentProps } from "react";
-import { useState } from "react";
+import { useState, type ComponentProps, type ReactElement } from "react";
 import { Pressable, StyleSheet, Text, View } from "react-native";
 
 import { TextField } from "@/components/ui/text-field";
 import { radius, spacing, typography } from "@/constants/theme";
 import { EXERCISE_NAME_MAX_LENGTH, EXERCISE_NOTES_MAX_LENGTH, suggestNames, type ExerciseDraft } from "@/lib/planDraft";
 import { makeStyles, useTheme } from "@/lib/theme";
+import { moveLabel } from "@/lib/sortable";
 
 type IconName = ComponentProps<typeof Ionicons>["name"];
 
@@ -49,22 +49,42 @@ type ExerciseEditorProps = {
   onChange: (change: Partial<ExerciseDraft>) => void;
   onMove: (by: -1 | 1) => void;
   onRemove: () => void;
+  /** Position in the day, for the arrow labels ("Kniebeuge, Position 2 von 4, …"). */
+  position?: { index: number; total: number };
+  /** Drag handle (from DraggableList). */
+  handle?: ReactElement;
 };
 
 /** One planned exercise: name (with suggestions), sets, reps or time, optional weight and notes. */
-export function ExerciseEditor({ exercise, label, knownNames, isFirst, isLast, onChange, onMove, onRemove }: ExerciseEditorProps) {
+export function ExerciseEditor({
+  exercise,
+  label,
+  knownNames,
+  isFirst,
+  isLast,
+  onChange,
+  onMove,
+  onRemove,
+  position,
+  handle,
+}: ExerciseEditorProps) {
   const styles = useStyles();
   const [nameFocused, setNameFocused] = useState(false);
   const suggestions = nameFocused ? suggestNames(exercise.name, knownNames, 4) : [];
   const [showNotes, setShowNotes] = useState(exercise.notes !== "");
 
+  const spoken = exercise.name.trim() !== "" ? exercise.name.trim() : label;
+  const upLabel = position !== undefined ? moveLabel(spoken, position.index, position.total, "up") : `${label} nach oben`;
+  const downLabel = position !== undefined ? moveLabel(spoken, position.index, position.total, "down") : `${label} nach unten`;
+
   return (
     <View style={styles.exercise}>
       <View style={styles.header}>
-        <Text style={styles.label}>{label}</Text>
+        {handle}
+        <Text style={[styles.label, styles.labelGrow]}>{label}</Text>
         <View style={styles.actions}>
-          <IconButton icon="chevron-up" label={`${label} nach oben`} onPress={() => onMove(-1)} disabled={isFirst} />
-          <IconButton icon="chevron-down" label={`${label} nach unten`} onPress={() => onMove(1)} disabled={isLast} />
+          <IconButton icon="chevron-up" label={upLabel} onPress={() => onMove(-1)} disabled={isFirst} />
+          <IconButton icon="chevron-down" label={downLabel} onPress={() => onMove(1)} disabled={isLast} />
           <IconButton icon="trash-outline" label={`${label} entfernen`} onPress={onRemove} destructive />
         </View>
       </View>
@@ -164,6 +184,9 @@ const useStyles = makeStyles(({ colors }) =>
       flexDirection: "row",
       alignItems: "center",
       justifyContent: "space-between",
+    },
+    labelGrow: {
+      flex: 1,
     },
     label: {
       ...typography.label,

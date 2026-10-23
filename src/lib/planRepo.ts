@@ -49,8 +49,10 @@ export type TrainingPlan = {
   origin: string | null;
   /** Removed by the moderation: only the owner still sees it. */
   removed: boolean;
-  /** When days were added, removed or reordered, or the plan was activated (the plan streak restarts there). */
+  /** When the plan was last started at day 1 (activation); reordering doesn't change it. */
   sequenceChangedAt: string;
+  /** Deactivated by me ("Plan deaktivieren"): can be resumed where I stopped. */
+  deactivatedAt: string | null;
   updatedAt: string;
   /** In cycle order. */
   days: PlanDay[];
@@ -63,7 +65,7 @@ export const VISIBILITY_LABELS: Record<PlanVisibility, string> = {
 };
 
 const PLAN_SELECT =
-  "id, user_id, name, visibility, allow_adopt, is_active, adopted_from_plan_id, adopted_from_user_id, adopted_at, moderation_state, sequence_changed_at, updated_at, " +
+  "id, user_id, name, visibility, allow_adopt, is_active, adopted_from_plan_id, adopted_from_user_id, adopted_at, moderation_state, sequence_changed_at, deactivated_at, updated_at, " +
   "origin:profiles!training_plans_adopted_from_user_id_fkey(username), " +
   "days:plan_days(id, position, day_type, title, notes, exercises:plan_exercises(id, position, name, sets, reps_min, reps_max, target_seconds, target_weight_kg, notes))";
 
@@ -93,6 +95,7 @@ type PlanRow = {
   /** Hidden by RLS when that account isn't visible to me. */
   origin: { username: string } | null;
   sequence_changed_at: string;
+  deactivated_at: string | null;
   updated_at: string;
   days: {
     id: string;
@@ -117,6 +120,7 @@ function toPlan(row: PlanRow): TrainingPlan {
     origin: originLabel(row.adopted_at, row.adopted_from_user_id, row.origin?.username ?? null),
     removed: row.moderation_state !== null,
     sequenceChangedAt: row.sequence_changed_at,
+    deactivatedAt: row.deactivated_at,
     updatedAt: row.updated_at,
     days: [...row.days]
       .sort((a, b) => a.position - b.position)
@@ -252,9 +256,27 @@ export async function savePlan(
   );
 }
 
-/** Makes the plan active: the order starts again at day 1, the plan streak runs anew. */
-export async function activatePlan(planId: string): Promise<void> {
-  await callVoid(supabase.rpc("activate_plan", { p_plan_id: planId }));
+/**
+ * Makes the plan active. Normally the order starts again at day 1 and the plan streak runs anew;
+ * `resume` continues a plan I deactivated myself where I stopped.
+ */
+export async function activatePlan(planId: string, resume = false): Promise<void> {
+  await callVoid(supabase.rpc("activate_plan", { p_plan_id: planId, p_resume: resume }));
+}
+
+/** "Plan deaktivieren": afterwards no plan is active, the app works as without a plan. */
+export async function deactivatePlan(): Promise<void> {
+  await callVoid(supabase.rpc("deactivate_plan"));
+}
+
+/** New order of a plan's days (exactly its day ids). Resets nothing. */
+export async function reorderPlanDays(planId: string, orderedIds: string[]): Promise<void> {
+  await callVoid(supabase.rpc("reorder_plan_days", { p_plan_id: planId, p_ordered_ids: orderedIds }));
+}
+
+/** New order of a training day's exercises (exactly its exercise ids). */
+export async function reorderPlanExercises(dayId: string, orderedIds: string[]): Promise<void> {
+  await callVoid(supabase.rpc("reorder_plan_exercises", { p_day_id: dayId, p_ordered_ids: orderedIds }));
 }
 
 /**

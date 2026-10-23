@@ -4,6 +4,7 @@ import { ActivityIndicator, Alert, KeyboardAvoidingView, Platform, ScrollView, S
 
 import { ExerciseEditor, IconButton } from "@/components/plans/exercise-editor";
 import { Button } from "@/components/ui/button";
+import { DraggableList } from "@/components/ui/draggable-list";
 import { ErrorState } from "@/components/ui/empty-state";
 import { ListItem } from "@/components/ui/list-item";
 import { SectionFooter, SectionHeader } from "@/components/ui/section-header";
@@ -26,9 +27,11 @@ import {
   type ExerciseDraft,
   type PlanDayType,
 } from "@/lib/planDraft";
+import { confirmDeactivatePlan } from "@/lib/planActivation";
 import { deletePlan, fetchExerciseNames, fetchPlanById, savePlan, type TrainingPlan } from "@/lib/planRepo";
+import { moveLabel, moveTo } from "@/lib/sortable";
 import { makeStyles, useTheme } from "@/lib/theme";
-import { useTrackScreen } from "@/lib/usage";
+import { track, useTrackScreen } from "@/lib/usage";
 import type { PlanVisibility } from "@/types/database";
 
 const VISIBILITY_OPTIONS: { value: PlanVisibility; label: string }[] = [
@@ -55,6 +58,12 @@ function newExercise(): ExerciseDraft {
 
 function newDay(type: PlanDayType): DayDraft {
   return { key: nextKey(), id: null, type, title: type === "rest" ? "Ruhetag" : "", notes: "", exercises: [] };
+}
+
+/** What a day is called in lists and VoiceOver labels. */
+function dayName(day: DayDraft, index: number): string {
+  const title = day.title.trim();
+  return title !== "" ? title : day.type === "rest" ? "Ruhetag" : `Tag ${index + 1}`;
 }
 
 function toDrafts(plan: TrainingPlan): DayDraft[] {
@@ -93,6 +102,8 @@ export default function PlanEditorScreen() {
   const [knownNames, setKnownNames] = useState<string[]>([]);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // No scrolling while a row is dragged.
+  const [dragging, setDragging] = useState(false);
   const load = useCallback(() => {
     fetchExerciseNames()
       .then(setKnownNames)
@@ -150,16 +161,37 @@ export default function PlanEditorScreen() {
     ]);
   }
 
-  async function save() {
+  /** Days of the stored plan in their stored order (to see whether the order changed). */
+  const storedOrder = plan?.days.map((d) => d.id).join(",") ?? "";
+  const draftOrder = days.flatMap((d) => (d.id !== null ? [d.id] : [])).join(",");
+  const orderChanged = plan !== null && plan !== undefined && (draftOrder !== storedOrder || days.some((d) => d.id === null));
+
+  function save() {
     const problem = planDraftError(name, days);
     if (problem !== null) {
       setError(problem);
       return;
     }
+    if (plan?.isActive === true && orderChanged) {
+      Alert.alert(
+        "Reihenfolge des aktiven Plans",
+        "Es wird nichts zurückgesetzt: Was du in diesem Durchlauf schon gemacht hast, bleibt erledigt. Als Nächstes kommt die erste noch offene Einheit in der neuen Reihenfolge, und dein Plan-Streak läuft weiter.",
+        [
+          { text: "Abbrechen", style: "cancel" },
+          { text: "Speichern", onPress: () => void store() },
+        ],
+      );
+      return;
+    }
+    void store();
+  }
+
+  async function store() {
     setSaving(true);
     setError(null);
     try {
       await savePlan(isNew ? null : planId, name, visibility, allowAdopt, days);
+      if (orderChanged) track("plan_days_reordered");
       router.back();
     } catch (saveError) {
       setError(`Speichern fehlgeschlagen. ${describeError(saveError)}`);
@@ -212,7 +244,7 @@ export default function PlanEditorScreen() {
 
   return (
     <KeyboardAvoidingView style={styles.screen} behavior={Platform.OS === "ios" ? "padding" : undefined}>
-      <ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
+      <ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled" scrollEnabled={!dragging}>
         <SectionHeader title="Plan" />
         <View style={styles.padded}>
           <TextField
@@ -252,15 +284,57 @@ export default function PlanEditorScreen() {
           Die Tage wiederholen sich in dieser Reihenfolge, unabhängig von Wochentagen. Ein Ruhetag gilt für den Tag
           nach dem vorherigen Training.
         </Text>
+        {days.length > 1 && (
+          <>
+            <Text style={styles.orderTitle}>Reihenfolge</Text>
+            <View style={styles.group}>
+              <DraggableList
+                items={days}
+                keyOf={(day) => day.key}
+                onMove={(from, to) => setDays((c) => moveTo(c, from, to))}
+                onDragChange={setDragging}
+                renderItem={(day, index, handle) => (
+                  <View style={[styles.orderRow, index > 0 && styles.orderDivider]}>
+                    {handle}
+                    <View style={styles.flex}>
+                      <Text style={styles.orderText} numberOfLines={1}>
+                        {index + 1}. {dayName(day, index)}
+                      </Text>
+                      <Text style={styles.orderMeta}>{day.type === "rest" ? "Ruhetag" : `${day.exercises.length} Übungen`}</Text>
+                    </View>
+                    <IconButton
+                      icon="chevron-up"
+                      label={moveLabel(dayName(day, index), index, days.length, "up")}
+                      onPress={() => setDays((c) => moveItem(c, index, -1))}
+                      disabled={index === 0}
+                    />
+                    <IconButton
+                      icon="chevron-down"
+                      label={moveLabel(dayName(day, index), index, days.length, "down")}
+                      onPress={() => setDays((c) => moveItem(c, index, 1))}
+                      disabled={index === days.length - 1}
+                    />
+                  </View>
+                )}
+              />
+            </View>
+            <Text style={styles.hint}>Zum Ziehen den Griff kurz gedrückt halten.</Text>
+          </>
+        )}
         {days.map((day, index) => (
           <View key={day.key} style={styles.day}>
             <View style={styles.dayHeader}>
               <Text style={styles.dayLabel}>Tag {index + 1}</Text>
               <View style={styles.dayActions}>
-                <IconButton icon="chevron-up" label={`Tag ${index + 1} nach oben`} onPress={() => setDays((c) => moveItem(c, index, -1))} disabled={index === 0} />
+                <IconButton
+                  icon="chevron-up"
+                  label={moveLabel(dayName(day, index), index, days.length, "up")}
+                  onPress={() => setDays((c) => moveItem(c, index, -1))}
+                  disabled={index === 0}
+                />
                 <IconButton
                   icon="chevron-down"
-                  label={`Tag ${index + 1} nach unten`}
+                  label={moveLabel(dayName(day, index), index, days.length, "down")}
                   onPress={() => setDays((c) => moveItem(c, index, 1))}
                   disabled={index === days.length - 1}
                 />
@@ -289,19 +363,26 @@ export default function PlanEditorScreen() {
             />
             {day.type === "training" && (
               <>
-                {day.exercises.map((exercise, exIndex) => (
-                  <ExerciseEditor
-                    key={exercise.key}
-                    exercise={exercise}
-                    label={`Übung ${exIndex + 1}`}
-                    knownNames={knownNames}
-                    isFirst={exIndex === 0}
-                    isLast={exIndex === day.exercises.length - 1}
-                    onChange={(change) => updateExercise(day.key, exercise.key, change)}
-                    onMove={(by) => updateDay(day.key, { exercises: moveItem(day.exercises, exIndex, by) })}
-                    onRemove={() => updateDay(day.key, { exercises: day.exercises.filter((e) => e.key !== exercise.key) })}
-                  />
-                ))}
+                <DraggableList
+                  items={day.exercises}
+                  keyOf={(exercise) => exercise.key}
+                  onMove={(from, to) => updateDay(day.key, { exercises: moveTo(day.exercises, from, to) })}
+                  onDragChange={setDragging}
+                  renderItem={(exercise, exIndex, handle) => (
+                    <ExerciseEditor
+                      exercise={exercise}
+                      label={`Übung ${exIndex + 1}`}
+                      knownNames={knownNames}
+                      isFirst={exIndex === 0}
+                      isLast={exIndex === day.exercises.length - 1}
+                      position={{ index: exIndex, total: day.exercises.length }}
+                      handle={day.exercises.length > 1 ? handle : undefined}
+                      onChange={(change) => updateExercise(day.key, exercise.key, change)}
+                      onMove={(by) => updateDay(day.key, { exercises: moveItem(day.exercises, exIndex, by) })}
+                      onRemove={() => updateDay(day.key, { exercises: day.exercises.filter((e) => e.key !== exercise.key) })}
+                    />
+                  )}
+                />
                 <Button
                   label="Übung hinzufügen"
                   icon="add"
@@ -347,7 +428,15 @@ export default function PlanEditorScreen() {
           </Text>
         )}
         <View style={[styles.padded, styles.actions]}>
-          <Button label="Speichern" onPress={() => void save()} loading={saving} />
+          <Button label="Speichern" onPress={save} loading={saving} />
+          {plan?.isActive === true && (
+            <Button
+              label="Plan deaktivieren"
+              variant="ghost"
+              onPress={() => confirmDeactivatePlan(() => router.back())}
+              disabled={saving}
+            />
+          )}
           {plan !== null && <Button label="Plan löschen" variant="ghost" destructive onPress={confirmDelete} disabled={saving} />}
         </View>
       </ScrollView>
@@ -409,6 +498,36 @@ const useStyles = makeStyles(({ colors }) =>
     dayLabel: {
       ...typography.bodyStrong,
       color: colors.text,
+    },
+    orderTitle: {
+      ...typography.label,
+      color: colors.textSecondary,
+      paddingHorizontal: spacing.md,
+    },
+    orderRow: {
+      minHeight: 52,
+      flexDirection: "row",
+      alignItems: "center",
+      gap: spacing.xs,
+      paddingRight: spacing.xs,
+      backgroundColor: colors.surface,
+    },
+    orderDivider: {
+      borderTopWidth: StyleSheet.hairlineWidth,
+      borderTopColor: colors.divider,
+    },
+    orderText: {
+      ...typography.body,
+      color: colors.text,
+    },
+    orderMeta: {
+      ...typography.caption,
+      color: colors.textSecondary,
+    },
+    hint: {
+      ...typography.caption,
+      color: colors.textSecondary,
+      paddingHorizontal: spacing.md,
     },
     dayActions: {
       flexDirection: "row",
