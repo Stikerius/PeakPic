@@ -1,7 +1,7 @@
 import { createContext, use, useCallback, useEffect, useState, type ReactNode } from "react";
 
 import { useAccountStatus } from "@/lib/accountStatus";
-import { fetchMyLegalStatus, type LegalStatus } from "@/lib/legalRepo";
+import { confirmLegalDocuments, fetchMyLegalStatus, type LegalStatus } from "@/lib/legalRepo";
 import { useSession } from "@/lib/session";
 
 type LegalGateState = {
@@ -28,6 +28,24 @@ function withTimeout<T>(promise: Promise<T>): Promise<T> {
   ]);
 }
 
+// The versions accepted in the sign-up form. The session (and with it the first check below)
+// starts inside supabase.auth.signUp, before the form could confirm them; so the gate confirms
+// them itself before its first check. Otherwise the new account is asked for them again.
+let signUpConfirmation: string[] | null = null;
+
+/** Set right before signUp; null when sign-up failed or waits for the e-mail confirmation. */
+export function confirmOnSignUp(documentIds: string[] | null): void {
+  signUpConfirmation = documentIds;
+}
+
+async function checkStatus(): Promise<LegalStatus[]> {
+  const ids = signUpConfirmation;
+  signUpConfirmation = null;
+  // If this fails (network), the gate simply asks for the texts again.
+  if (ids !== null) await confirmLegalDocuments(ids).catch(() => undefined);
+  return fetchMyLegalStatus();
+}
+
 /**
  * After login: which current legal texts are still unconfirmed. If the check fails (offline),
  * the app opens and the check runs again on the next start. Postponing lasts for this session.
@@ -41,7 +59,7 @@ export function LegalGateProvider({ children }: { children: ReactNode }) {
   const load = useCallback(() => {
     if (userId === null) return () => undefined;
     let active = true;
-    withTimeout(fetchMyLegalStatus())
+    withTimeout(checkStatus())
       .then((status) => {
         if (active) setResult({ userId, status });
       })

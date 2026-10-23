@@ -25,7 +25,8 @@ import {
   signIn,
   signUp,
 } from "@/lib/auth";
-import { confirmLegalDocuments, fetchCurrentLegalDocuments, type LegalDocument } from "@/lib/legalRepo";
+import { confirmOnSignUp } from "@/lib/legalGate";
+import { fetchCurrentLegalDocuments, type LegalDocument } from "@/lib/legalRepo";
 import { useLegalViewed } from "@/lib/legalViewed";
 import { DISPLAY_NAME_MAX_LENGTH } from "@/lib/names";
 import { makeStyles, useTheme } from "@/lib/theme";
@@ -118,12 +119,12 @@ export default function LoginScreen() {
         setError("Bitte bestätige die Nutzungsbedingungen, die Datenschutzerklärung und dein Alter.");
         return;
       }
+      // Confirmed by the legal gate as soon as the new session exists (see confirmOnSignUp).
+      confirmOnSignUp([terms.id, privacy.id]);
       const result = await signUp(email, password, username, displayName);
+      // Without a session here, the legal screen after the first login asks for them.
+      if (result.status !== "signed-in") confirmOnSignUp(null);
       if (result.status === "error") setError(result.message);
-      if (result.status === "signed-in") {
-        // If this fails (network), the legal screen after login asks again.
-        await confirmLegalDocuments([terms.id, privacy.id]).catch(() => undefined);
-      }
       if (result.status === "confirm-email") {
         setInfo(
           "Fast geschafft! Wir haben dir eine E-Mail geschickt. Bestätige den Link darin und melde dich dann hier an.",

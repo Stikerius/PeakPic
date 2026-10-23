@@ -8,6 +8,7 @@ import { Button } from "@/components/ui/button";
 import { spacing, typography } from "@/constants/theme";
 import { signOut } from "@/lib/auth";
 import { useLegalGate } from "@/lib/legalGate";
+import { useOnboarding } from "@/lib/onboarding";
 import { makeStyles } from "@/lib/theme";
 
 /**
@@ -19,6 +20,7 @@ export default function LegalUpdateScreen() {
   const styles = useStyles();
   const insets = useSafeAreaInsets();
   const { pending, postpone, markConfirmed } = useLegalGate();
+  const { needed: onboardingNeeded } = useOnboarding();
   const [signingOut, setSigningOut] = useState(false);
   // Postponed on this screen: hidden here. Texts postponed earlier still show when the screen
   // is opened from the notice.
@@ -27,14 +29,15 @@ export default function LegalUpdateScreen() {
   const mustConfirm = remaining.some((doc) => !doc.canPostpone);
   const done = remaining.length === 0;
 
-  // Leave only after the gate state has changed, so the router guards already let the app
-  // through. Opened from a notice: back. As the gate after login: on into the app (the router
-  // then shows the intro or the app, whichever comes next).
+  // Leave only after the gate state has changed, so the router guards already let the next
+  // screen through. Opened from a notice: back. As the gate after login: on to the intro for a
+  // new account (the app stays guarded until it is done; replacing with "/" would go nowhere and
+  // leave this empty screen), otherwise into the app.
   useEffect(() => {
     if (!done) return;
     if (router.canGoBack()) router.back();
-    else router.replace("/");
-  }, [done]);
+    else router.replace(onboardingNeeded === true ? "/onboarding" : "/");
+  }, [done, onboardingNeeded]);
 
   return (
     <ScrollView

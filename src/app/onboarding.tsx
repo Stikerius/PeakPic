@@ -58,7 +58,8 @@ export default function OnboardingScreen() {
   const { width } = useWindowDimensions();
   // "Einführung nochmal ansehen" from the settings: nothing is saved, it just closes.
   const replay = useLocalSearchParams<{ replay?: string }>().replay === "1";
-  const { markSeen, complete } = useOnboarding();
+  const { needed, markSeen, complete } = useOnboarding();
+  const [closing, setClosing] = useState(false);
   const scroller = useRef<ScrollView>(null);
   const [step, setStep] = useState(0);
   const [displayName, setDisplayName] = useState("");
@@ -80,13 +81,19 @@ export default function OnboardingScreen() {
       .catch(() => undefined);
   }, []);
 
+  // Into the app only once the intro counts as done, so the router guards already let it through
+  // (replacing earlier would go nowhere and leave the intro on screen).
+  useEffect(() => {
+    if (closing && needed === false) router.replace("/");
+  }, [closing, needed]);
+
   function close() {
     if (replay) {
       router.back();
       return;
     }
     complete();
-    router.replace("/");
+    setClosing(true);
   }
 
   function goTo(next: number) {
