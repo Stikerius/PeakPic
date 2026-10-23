@@ -4,7 +4,8 @@ import type {
 } from "@supabase/supabase-js";
 
 import { getSignedPhotoUrls } from "@/lib/photoUpload";
-import { deletedProfile, PROFILE_COLUMNS, toPublicProfiles, unavailableProfile } from "@/lib/profiles";
+import { absentPartner } from "@/lib/chatPartner";
+import { PROFILE_COLUMNS, toPublicProfiles, unavailableProfile } from "@/lib/profiles";
 import { requireUserId } from "@/lib/session";
 import { supabase } from "@/lib/supabase";
 import type {
@@ -84,6 +85,7 @@ export async function shareCommentWithUser(
 
 /** Short text for quotes, banners and previews of an already loaded message. */
 export function messagePreview(message: ChatMessage): string {
+  if (message.notice === true) return message.body ?? "";
   if (message.tag !== null) return "Markierung";
   if (message.body !== null) return message.body;
   if (message.comment !== null) return "Kommentar geteilt";
@@ -91,6 +93,7 @@ export function messagePreview(message: ChatMessage): string {
 }
 
 function previewText(row: MessageRow): string {
+  if (row.kind === "notice") return row.body ?? "";
   if (row.kind === "tag") return "Markierung";
   if (row.body !== null) return row.body;
   if (row.comment_id !== null) return "Kommentar geteilt";
@@ -144,10 +147,12 @@ export async function listConversations(): Promise<ConversationSummary[]> {
     }),
   );
 
+  // No other member left: the partner left the chat or deleted the account. The chat stays, read-only.
+  const absent = await partnerStates(conversationIds.filter((id) => !partnerByConversation.has(id)));
+
   return details
     .flatMap(({ membership, last, unreadCount }): ConversationSummary[] => {
-      // No other member left: the partner deleted their account. The chat stays, read-only.
-      const partner = partnerByConversation.get(membership.conversation_id) ?? deletedProfile();
+      const partner = partnerByConversation.get(membership.conversation_id) ?? absentPartner(absent.get(membership.conversation_id));
       return [
         {
           id: membership.conversation_id,
@@ -164,6 +169,14 @@ export async function listConversations(): Promise<ConversationSummary[]> {
     .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
 }
 
+/** 'left' or 'deleted' for my chats without another member (no names, no ids of the other person). */
+async function partnerStates(conversationIds: string[]): Promise<Map<string, string>> {
+  if (conversationIds.length === 0) return new Map();
+  const { data, error } = await supabase.rpc("get_chat_partner_states", { p_conversation_ids: conversationIds });
+  if (error) throw error;
+  return new Map(data.map((row) => [row.conversation_id, row.state]));
+}
+
 export async function getConversationPartner(conversationId: string): Promise<PublicProfile | null> {
   const userId = await requireUserId();
   const { data, error } = await supabase
@@ -173,7 +186,7 @@ export async function getConversationPartner(conversationId: string): Promise<Pu
     .neq("user_id", userId)
     .maybeSingle();
   if (error) throw error;
-  if (data === null) return deletedProfile();
+  if (data === null) return absentPartner((await partnerStates([conversationId])).get(conversationId));
   if (data.profile === null) return unavailableProfile(data.user_id);
   return (await toPublicProfiles([data.profile])).get(data.user_id) ?? unavailableProfile(data.user_id);
 }
@@ -267,6 +280,7 @@ async function hydrateMessages(rows: MessageRow[]): Promise<ChatMessage[]> {
     pinnedAt: r.pinned_at,
     reactions: reactions.get(r.id) ?? [],
     tag: tagCard(r),
+    notice: r.kind === "notice",
     createdAt: r.created_at,
   }));
 }
@@ -426,6 +440,23 @@ export function subscribeToMessageDeletes(onDelete: (messageId: string) => void)
   const channel = supabase
     .channel(`message-deletes:${Date.now()}`)
     .on("postgres_changes", { event: "DELETE", schema: "public", table: "messages" }, (payload) => {
+      const id: unknown = (payload.old as { id?: unknown }).id;
+      if (typeof id === "string") onDelete(id);
+    })
+    .subscribe();
+  return () => {
+    void supabase.removeChannel(channel);
+  };
+}
+
+/**
+ * Live: chats ended for everybody (a data reset). The event carries only the chat's id; deletes
+ * can't be filtered, so every subscriber hears every ended chat and checks its own ids.
+ */
+export function subscribeToConversationDeletes(onDelete: (conversationId: string) => void): () => void {
+  const channel = supabase
+    .channel(`conversation-deletes:${Date.now()}`)
+    .on("postgres_changes", { event: "DELETE", schema: "public", table: "conversations" }, (payload) => {
       const id: unknown = (payload.old as { id?: unknown }).id;
       if (typeof id === "string") onDelete(id);
     })

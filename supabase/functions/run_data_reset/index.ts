@@ -1,7 +1,13 @@
-// Supabase Edge Function: runs one batch of a confirmed data reset job ("App-Neustart").
+// Supabase Edge Function: runs a confirmed data reset job ("App-Neustart") and sends the
+// notification mails.
 //
-// Body: {job_id}. The dashboard calls it again and again until the answer says the job is no
-// longer "running". Each call works on at most 25 people (batch_size in reset_limits()).
+// Body:
+//  * {job_id}                          one batch of at most 25 chosen people (batch_size in
+//                                      reset_limits()); the dashboard calls again until the
+//                                      answer is no longer "running". When the job is finished,
+//                                      the same call sends the notification mails.
+//  * {job_id, action: "send_mails"}    "Offene Mails senden": mails still waiting (quota).
+//  * {action: "mail_status"}           whether a mail provider is set up (no addresses).
 //
 // Security
 //  * The caller's JWT is checked first (Supabase Auth), then is_admin() (role admin + aal2).
@@ -9,30 +15,105 @@
 //    which check again that the caller is an admin and the creator of the job, that the job is
 //    confirmed or running, and skip people who became protected in the meantime.
 //  * The service_role key (SUPABASE_SERVICE_ROLE_KEY, provided by Supabase) is used only for
-//    what the caller's session can't do: removing files in storage, finish_account_deletion()
-//    and deleting auth users (whole accounts), exactly as delete_account does.
+//    what the caller's session can't do: removing files in storage, finish_account_deletion(),
+//    deleting auth users (whole accounts, as delete_account does) and the mail queue
+//    (reset_mail_*: the addresses never reach the admin's session or the browser).
 //  * Files are removed only in the person's own folder, and only the paths the database
 //    returned (checked again here). Nothing about people is logged or returned, only counts.
+//  * Mails: only to people of whom something was actually removed; the address was read on the
+//    server right before (before deleting an account) and is deleted when the mail is out, after
+//    7 days at the latest. No links, no tracking. A reached quota stops sending; the rest waits.
 //
 // Resumable: every person has its own state in reset_job_targets ('pending' -> 'claimed' ->
 // 'files_pending' -> 'done' | 'failed' | 'skipped'); every step can be repeated. After an
 // interruption the same job is simply started again ("Fortsetzen").
 //
-// Deploy: npx supabase functions deploy run_data_reset
-// Secret (optional): ADMIN_ORIGIN=http://127.0.0.1:5174 (where the dashboard runs)
+// Deploy:  npx supabase functions deploy run_data_reset --use-api
+// Secrets: EMAIL_API_KEY, EMAIL_FROM, SUPPORT_EMAIL (see _shared/mail.ts); optional ADMIN_ORIGIN
 
-import { createClient } from "npm:@supabase/supabase-js@2";
+import { createClient, type SupabaseClient } from "npm:@supabase/supabase-js@2";
 
 import { corsHeaders, json } from "../_shared/http.ts";
+import { Mailer, mailerFromEnv } from "../_shared/mail.ts";
+import { MAIL_FAILURE_TEXTS, stopsBatch, type MailFailure } from "../_shared/mailErrors.ts";
 import { filesForUser, isUuid, resetErrorCode } from "../_shared/resetPaths.ts";
+import { buildResetMail, textToHtml } from "../_shared/resetMail.ts";
 import { deleteUserFiles, removePaths } from "../_shared/storage.ts";
 
 const PHOTO_BUCKET = "photos";
+// Per call: mails sent at most, and time spent on them (Edge Functions have a time limit).
+const MAILS_PER_CALL = 60;
+const MAIL_TIME_BUDGET_MS = 90_000;
 
 type Claimed = { target_id: string; user_id: string | null; status: string };
+type QueuedMail = {
+  target_id: string;
+  email: string;
+  role: "selected" | "collateral";
+  mode: "categories" | "full";
+  categories: string[];
+  reason: string;
+  subject: string | null;
+  user_message: string | null;
+};
+type MailRun = { sent: number; failed: number; stopped: MailFailure | null; configured: boolean };
 
 function record(value: unknown): Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value) ? (value as Record<string, unknown>) : {};
+}
+
+/** Sends the waiting notification mails of a finished job (or marks them "not configured"). */
+async function sendResetMails(service: SupabaseClient, mailer: Mailer | null, jobId: string): Promise<MailRun> {
+  if (mailer === null) {
+    await service.rpc("reset_mail_not_configured", { p_job_id: jobId });
+    return { sent: 0, failed: 0, stopped: null, configured: false };
+  }
+  const started = Date.now();
+  const run: MailRun = { sent: 0, failed: 0, stopped: null, configured: true };
+  while (run.sent + run.failed < MAILS_PER_CALL && Date.now() - started < MAIL_TIME_BUDGET_MS) {
+    const { data, error } = await service.rpc("reset_mail_claim", { p_job_id: jobId, p_limit: 20 });
+    if (error) throw new Error("mail_claim_failed");
+    const queue = (data ?? []) as QueuedMail[];
+    if (queue.length === 0) break;
+    for (const item of queue) {
+      const mail = buildResetMail({
+        role: item.role,
+        mode: item.mode,
+        categories: item.categories,
+        reason: item.reason,
+        subject: item.subject,
+        userMessage: item.user_message,
+        supportEmail: mailer.supportEmail,
+      });
+      const result = await mailer.send(item.email, mail.subject, mail.text, textToHtml(mail.text), undefined, undefined, {
+        idempotencyKey: `reset-${item.target_id}`,
+      });
+      if (result.ok) {
+        run.sent += 1;
+        await service.rpc("reset_mail_result", { p_target_id: item.target_id, p_status: "sent" });
+      } else if (!stopsBatch(result.failure)) {
+        run.failed += 1;
+        await service.rpc("reset_mail_result", { p_target_id: item.target_id, p_status: "failed" });
+      } else {
+        // Quota, rate limit, provider down or misconfigured: the rest stays queued.
+        run.stopped = result.failure;
+        return run;
+      }
+    }
+  }
+  return run;
+}
+
+function mailAnswer(run: MailRun): Record<string, unknown> {
+  return {
+    mail: {
+      configured: run.configured,
+      sent: run.sent,
+      failed: run.failed,
+      stopped: run.stopped,
+      message: run.stopped !== null ? MAIL_FAILURE_TEXTS[run.stopped] : null,
+    },
+  };
 }
 
 Deno.serve(async (request) => {
@@ -66,8 +147,26 @@ Deno.serve(async (request) => {
   } catch {
     body = null;
   }
-  const jobId = record(body).job_id;
+  const input = record(body);
+  const { mailer, reason: mailReason } = mailerFromEnv();
+  if (input.action === "mail_status") return json(200, { configured: mailer !== null, reason: mailReason });
+
+  const jobId = input.job_id;
   if (!isUuid(jobId)) return json(400, { error: "invalid_job" });
+  const service = createClient(supabaseUrl, serviceKey, { auth: { persistSession: false, autoRefreshToken: false } });
+
+  if (input.action === "send_mails") {
+    // Any admin may send what waits; the job must exist and be finished (checked by the database).
+    const { data: status, error: statusError } = await caller.rpc("admin_reset_job_status", { p_job_id: jobId });
+    if (statusError) return json(409, { error: resetErrorCode(statusError.message) });
+    const state = record(status).status;
+    if (state !== "done" && state !== "failed") return json(409, { error: "job_wrong_state" });
+    try {
+      return json(200, mailAnswer(await sendResetMails(service, mailer, jobId)));
+    } catch {
+      return json(500, { error: "failed" });
+    }
+  }
 
   // 3) Start or continue (confirmed / running / failed), one job at a time.
   const { data: started, error: startError } = await caller.rpc("admin_reset_run_start", { p_job_id: jobId });
@@ -78,7 +177,6 @@ Deno.serve(async (request) => {
   const { data: claimed, error: claimError } = await caller.rpc("admin_reset_claim_batch", { p_job_id: jobId });
   if (claimError) return json(409, { error: resetErrorCode(claimError.message) });
 
-  const service = createClient(supabaseUrl, serviceKey, { auth: { persistSession: false, autoRefreshToken: false } });
   let processed = 0;
   let failed = 0;
 
@@ -93,8 +191,8 @@ Deno.serve(async (request) => {
         if (step.skipped === true) continue;
         await removePaths(service, PHOTO_BUCKET, filesForUser(String(step.user_id), step.files));
       } else {
-        // Whole account: same steps as delete_account (status 'deleting', files, log
-        // pseudonymised, auth user deleted; the rows go with it).
+        // Whole account: chats ended and the address read (database), then the same steps as
+        // delete_account (files, log pseudonymised, auth user deleted; the rows go with it).
         const { data, error } = await caller.rpc("admin_reset_full_prepare", ids);
         if (error) throw new Error("prepare_failed");
         const step = record(data);
@@ -127,8 +225,16 @@ Deno.serve(async (request) => {
     }
   }
 
-  // 4) Done when nobody is open any more ('done', or 'failed' if someone failed).
+  // 4) Done when nobody is open any more ('done', or 'failed' if someone failed). Then the
+  //    notifications: in-app notices are written by the database, the mails here.
   const { data: progress, error: finishError } = await caller.rpc("admin_reset_run_finish", { p_job_id: jobId });
   if (finishError) return json(500, { error: "failed" });
-  return json(200, { ...record(progress), processed, failed_in_batch: failed });
+  const answer: Record<string, unknown> = { ...record(progress), processed, failed_in_batch: failed };
+  if (answer.status === "running") return json(200, answer);
+  try {
+    return json(200, { ...answer, ...mailAnswer(await sendResetMails(service, mailer, jobId)) });
+  } catch {
+    // The reset is complete; the mails wait for "Offene Mails senden".
+    return json(200, { ...answer, mail: { configured: mailer !== null, sent: 0, failed: 0, stopped: "unavailable", message: MAIL_FAILURE_TEXTS.unavailable } });
+  }
 });

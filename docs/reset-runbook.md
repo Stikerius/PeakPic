@@ -11,6 +11,14 @@ Schritt-für-Schritt-Anleitung für den Einsatz im Dashboard unter **Bereinigung
 3. Du bist im Dashboard als **Admin** mit Zwei-Faktor angemeldet. Moderatoren sehen die Seite nicht.
 4. Kein anderer Auftrag ist bestätigt oder läuft (die Liste „Frühere Aufträge“ zeigt das).
 
+## Chats und Benachrichtigung: die Regeln
+
+- **Chats werden für alle beendet.** Mit der Kategorie „Chats“ (und beim kompletten Löschen) verschwindet jede Unterhaltung der ausgewählten Personen für alle Beteiligten, auch für Konten, die nicht ausgewählt sind. Geteilte Beiträge bleiben, Kopien gemeldeter Nachrichten und das Audit-Log auch.
+- **Ausnahme geschützte Konten:** Ist ein geschütztes Konto (Hauptkonto, Testkonto, Admin, Moderator) in der Unterhaltung, bleibt sie bestehen. Dort verschwinden nur die Nachrichten und die Mitgliedschaft der ausgewählten Person; das geschützte Konto sieht eine neutrale Zeile „Eine Person ist nicht mehr in diesem Chat.“ und „Nicht mehr im Chat“ statt eines Namens. Die Option „Chats mit geschützten Konten ebenfalls beenden“ in der Vorschau ändert das (eigene Bestätigung, steht im Audit-Log, verlangt einen neuen Trockenlauf).
+- **Mitbetroffene:** Wer nicht ausgewählt ist, aber eine Unterhaltung verliert, steht in der Vorschau unter „Mitbetroffene Konten“. Sie sind nicht abwählbar.
+- **Benachrichtigung:** Nur wer tatsächlich etwas verliert, wird informiert: ausgewählte Personen mit Löschungen und Mitbetroffene. Wer sein Konto behält, bekommt eine Mitteilung in der App und eine E-Mail; gelöschte Konten nur die E-Mail. Mitbetroffene bekommen einen eigenen Text ohne Namen der anderen Person. Ohne Mail-Dienst gibt es nur die Mitteilung in der App; gelöschte Konten erfahren dann nichts (Hinweis im Assistenten).
+- **Kontingent:** Reicht das Tageskontingent des Mail-Dienstes nicht, warten die übrigen Mails. Am nächsten Tag im Auftrag **Offene Mails senden**. Adressen werden nach dem Versand gelöscht, spätestens nach 7 Tagen.
+
 ## 1. Schutz eintragen
 
 1. In `supabase/reset-config.sql` die Benutzernamen eintragen, die nie gelöscht werden dürfen (Hauptkonto, Testkonten). Admins und Moderatoren sind immer geschützt, du selbst auch.
@@ -61,6 +69,29 @@ Schritt-für-Schritt-Anleitung für den Einsatz im Dashboard unter **Bereinigung
 - **Fehlercode `storage_remove_failed` oder `storage_list_failed`:** Storage-Problem. Später fortsetzen. Die Zeilen sind dann schon gelöscht, die Dateien folgen beim Fortsetzen.
 - **Fehlercode `auth_delete_failed` oder `finish_failed`:** Das Konto steht auf „Wird gelöscht“ und ist unsichtbar. Fortsetzen schliesst die Löschung ab.
 - **Komplettes Löschen wurde ausgeschaltet, während ein Auftrag bestätigt war:** Der Auftrag lässt sich nicht starten. Entweder `allow_full_reset` vorübergehend wieder einschalten oder den Auftrag abbrechen.
+
+## Testliste: Chats und Benachrichtigung
+
+Vorbereitung mit vier Testkonten und einem Admin mit Zwei-Faktor:
+
+- **A** (wird ausgewählt), **B** (nicht ausgewählt), **C** (geschützt, in `reset-config.sql`), **D** (wird ausgewählt, hat aber keine Benachrichtigungen).
+- A hat je einen Chat mit B und mit C, in beiden einige Nachrichten. In den Chat A–B einen Beitrag teilen.
+- B und C haben die App geöffnet, B im Chat mit A.
+
+1. Auftrag „Nur Daten löschen“, Kategorie **Chats**, Auswahl **A**. Die Vorschau zeigt unter „Mitbetroffene Konten“ **B** (1 Unterhaltung), nicht C. Hinweis: 1 Chat mit geschütztem Konto bleibt.
+2. Bestätigen und ausführen.
+   - B: Der offene Chat schliesst sich mit „Dieser Chat wurde beendet.“, die Chat-Liste zeigt ihn nicht mehr, der Ungelesen-Zähler stimmt. Der geteilte Beitrag existiert weiter.
+   - C: Der Chat mit A ist noch da, ohne die Nachrichten von A, mit der Zeile „Eine Person ist nicht mehr in diesem Chat.“ und „Nicht mehr im Chat“ als Name (nicht „Gelöschtes Konto“, weil A noch existiert).
+   - Ergebnis: Vorschau und gelöschte Zahlen stimmen überein, auch bei B.
+3. Benachrichtigung:
+   - **B** bekommt eine Mitteilung in der App und eine E-Mail „Unterhaltungen beendet“ (ohne den Namen von A).
+   - **A** bekommt Mitteilung und E-Mail mit Betreff und Text des Auftrags.
+   - **C** bekommt nichts.
+4. Zweiter Auftrag „Nur Daten löschen“, Kategorie **Benachrichtigungen**, Auswahl **D** (ohne Benachrichtigungen). Ergebnis: Bei D steht „E-Mail: –“, keine Mitteilung, keine E-Mail.
+5. Dritter Auftrag: Kategorie Chats, Auswahl **A** mit einem neuen Chat A–C, Option **„Chats mit geschützten Konten ebenfalls beenden“** an. Die Option verlangt eine Bestätigung und einen neuen Trockenlauf; C steht jetzt unter „Mitbetroffene“. Nach dem Lauf ist der Chat für C weg, C wird benachrichtigt, und im Audit-Log steht `reset_protected_chats_on`.
+6. Nur für die Testphase: Auftrag „Konten komplett löschen“ für ein Wegwerfkonto mit einem Chat mit C. Danach zeigt der Chat bei C „Gelöschtes Konto“.
+7. Kontingent: Wenn es erreicht ist, zeigt der Auftrag „Kontingent erreicht“ und „Offene Mails senden (n)“. Später erneut senden; danach steht der Mail-Status auf „Gesendet“.
+8. `supabase/reset-checks.sql` ausführen: alle Zeilen `ok = true`.
 
 ## Vor dem echten Start
 

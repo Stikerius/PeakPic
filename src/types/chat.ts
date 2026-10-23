@@ -46,6 +46,8 @@ export type ChatMessage = {
   reactions: MessageReaction[];
   /** Set for tag cards (the post / comment previews come from `post` and `comment`). */
   tag: TagCard | null;
+  /** Server-made neutral line ("Eine Person ist nicht mehr in diesem Chat."), shown centred. */
+  notice?: boolean;
   createdAt: string;
   /** Optimistic message that the server hasn't confirmed yet. */
   pending?: boolean;

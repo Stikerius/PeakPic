@@ -11,11 +11,15 @@ import {
   setResetTargets,
   updateResetJob,
   verifyTotpAgain,
+  fetchResetMailStatus,
+  setResetProtectedChats,
+  type ResetCollateralRow,
   type ResetJob,
   type ResetJobDraft,
   type ResetSettings,
 } from "../lib/api";
 import { downloadJson, fileStamp } from "../lib/download";
+import { buildResetMail } from "../lib/resetMail";
 import { ACCOUNT_STATUS_LABELS, formatDateTime, label } from "../lib/format";
 import {
   blockerFor,
@@ -35,7 +39,6 @@ import {
   previousStep,
   pruneSelection,
   REASON_MAX,
-  renderMessage,
   selectAllExceptProtected,
   selectability,
   stepForJob,
@@ -50,12 +53,20 @@ import {
 } from "../lib/reset";
 
 type PreviewRow = { key: string; username: string; displayName: string; flagged: boolean; counts: Counts };
-type Preview = { totals: Counts; files: number; rows: PreviewRow[]; raw: unknown };
+type Preview = {
+  totals: Counts;
+  files: number;
+  rows: PreviewRow[];
+  collateral: ResetCollateralRow[];
+  protectedChatsKept: number;
+  raw: unknown;
+};
 
 type Dialog =
   | { kind: "flag-one"; candidate: Candidate }
   | { kind: "select-all"; count: number; flaggedIncluded: boolean }
   | { kind: "discard" }
+  | { kind: "protected-chats" }
   | { kind: "confirm" };
 
 type ListFilter = "all" | "unflagged" | "flagged" | "selected";
@@ -107,7 +118,7 @@ export function ResetWizard({
   const [categories, setCategories] = useState<string[]>(job?.mode === "categories" ? job.categories : []);
   const [includeFlagged, setIncludeFlagged] = useState(job?.includeFlagged ?? false);
   const [picked, setSelected] = useState<ReadonlySet<string>>(
-    () => new Set((job?.targets ?? []).flatMap((t) => (t.userId === null ? [] : [t.userId]))),
+    () => new Set((job?.targets ?? []).flatMap((t) => (t.userId === null || t.role !== "selected" ? [] : [t.userId]))),
   );
   const [known, setKnown] = useState<ReadonlyMap<string, Candidate>>(new Map());
   // A choice made invalid later (other mode) is dropped from what counts.
@@ -118,22 +129,8 @@ export function ResetWizard({
   const [candidates, setCandidates] = useState<Candidate[] | null>(null);
   const [query, setQuery] = useState("");
   const [filter, setFilter] = useState<ListFilter>("all");
-  const [preview, setPreview] = useState<Preview | null>(() =>
-    job !== null && job.previewedAt !== null && job.previewedAt >= job.updatedAt
-      ? {
-          totals: job.previewTotals,
-          files: job.previewFiles,
-          rows: job.targets.map((t) => ({
-            key: t.targetId,
-            username: t.username ?? "",
-            displayName: t.displayName ?? "",
-            flagged: t.flagged,
-            counts: t.counts,
-          })),
-          raw: { job_id: job.id, totals: job.previewTotals, files: job.previewFiles, targets: job.targets },
-        }
-      : null,
-  );
+  // A reopened draft runs its dry run again (fresh numbers, collateral and mail reach).
+  const [preview, setPreview] = useState<Preview | null>(null);
   const [reason, setReason] = useState(job?.reason ?? "");
   const [subject, setSubject] = useState(job?.subject || DEFAULT_SUBJECT);
   const [message, setMessage] = useState(job?.userMessage || DEFAULT_MESSAGE);
@@ -144,6 +141,21 @@ export function ResetWizard({
   const [dialog, setDialog] = useState<Dialog | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [includeProtectedChats, setIncludeProtectedChats] = useState(job?.includeProtectedChats ?? false);
+  // Whether mails can go out at all (the Edge Function knows the secrets; no addresses here).
+  const [mailStatus, setMailStatus] = useState<{ configured: boolean; reason: string | null } | null>(null);
+
+  useEffect(() => {
+    let active = true;
+    fetchResetMailStatus()
+      .then((status) => {
+        if (active) setMailStatus(status);
+      })
+      .catch(() => undefined);
+    return () => {
+      active = false;
+    };
+  }, []);
 
   const draft: ResetJobDraft = {
     mode: mode ?? "categories",
@@ -210,9 +222,30 @@ export function ResetWizard({
         totals: result.totals,
         files: result.files,
         rows: result.targets.map((t) => ({ key: t.targetId, username: t.username, displayName: t.displayName, flagged: t.flagged, counts: t.counts })),
+        collateral: result.collateral,
+        protectedChatsKept: result.protectedChatsKept,
         raw: result.raw,
       });
       setStep("preview");
+    });
+  }
+
+  /** "Chats mit geschützten Konten ebenfalls beenden": saved (logged), then a new dry run. */
+  function changeProtectedChats(include: boolean) {
+    if (jobId === null) return;
+    void task(async () => {
+      await setResetProtectedChats(jobId, include);
+      setIncludeProtectedChats(include);
+      setDialog(null);
+      const result = await previewResetJob(jobId);
+      setPreview({
+        totals: result.totals,
+        files: result.files,
+        rows: result.targets.map((t) => ({ key: t.targetId, username: t.username, displayName: t.displayName, flagged: t.flagged, counts: t.counts })),
+        collateral: result.collateral,
+        protectedChatsKept: result.protectedChatsKept,
+        raw: result.raw,
+      });
     });
   }
 
@@ -305,7 +338,20 @@ export function ResetWizard({
     return c !== undefined && isFlagged(c);
   }).length;
   const categoriesShown = mode === "full" ? CATEGORIES.map((c) => c.key) : categories;
-  const mailText = renderMessage(message, { categories, reason, mode: mode ?? "categories" });
+  const mailConfigured = mailStatus?.configured === true;
+  const chatsEnded = mode === "full" || categories.includes("chats");
+  const selectedMail = buildResetMail({
+    role: "selected",
+    mode: mode ?? "categories",
+    categories,
+    reason,
+    subject,
+    userMessage: message,
+    supportEmail: null,
+  });
+  const collateralMail = buildResetMail({ role: "collateral", mode: "categories", categories: [], reason, subject: null, userMessage: null, supportEmail: null });
+  const collateralCount = preview?.collateral.length ?? 0;
+  const collateralReachable = mailConfigured ? (preview?.collateral.filter((c) => c.hasEmail).length ?? 0) : 0;
 
   return (
     <div className="wizard">
@@ -360,7 +406,7 @@ export function ResetWizard({
               <strong>Konten komplett löschen</strong>
               <span className="muted">
                 {settings.allowFullReset
-                  ? " Konto, alle Daten und alle Dateien, endgültig. Wie „Konto löschen“."
+                  ? " Konto, alle Daten und alle Dateien, endgültig. Wie „Konto löschen“. Chats werden auch hier für alle Beteiligten beendet."
                   : " Ausgeschaltet (allow_full_reset = false)."}
               </span>
             </span>
@@ -410,6 +456,14 @@ export function ResetWizard({
               Auswahl leeren
             </button>
           </div>
+          {mailStatus !== null && !mailConfigured && (
+            <p className="notice">
+              Kein Mail-Dienst eingerichtet ({mailStatus.reason ?? "unbekannt"}).{" "}
+              {mode === "full"
+                ? "Gelöschte Konten erhalten keine Benachrichtigung."
+                : "Betroffene erhalten nur eine Mitteilung in der App, keine E-Mail."}
+            </p>
+          )}
           {selectedFlagged > 0 && (
             <p className="notice">
               {selectedFlagged} markierte Konten ausgewählt. Gemeldete oder moderierte Inhalte bleiben als Beweis erhalten, alles andere der
@@ -539,6 +593,66 @@ export function ResetWizard({
               ))}
             </ul>
           </details>
+          {chatsEnded && (
+            <>
+              <h4>Chats</h4>
+              <p>
+                Jede Unterhaltung der ausgewählten Personen wird für <strong>alle Beteiligten</strong> beendet, auch für Konten, die nicht
+                ausgewählt sind. Geteilte Beiträge bleiben, nur die Nachrichten verschwinden. Kopien gemeldeter Nachrichten und das Protokoll
+                bleiben erhalten.
+              </p>
+              <label className="choice">
+                <input
+                  type="checkbox"
+                  checked={includeProtectedChats}
+                  disabled={busy || jobId === null}
+                  onChange={(e) => (e.target.checked ? setDialog({ kind: "protected-chats" }) : changeProtectedChats(false))}
+                />
+                <span>
+                  <strong>Chats mit geschützten Konten ebenfalls beenden</strong>
+                  <span className="muted">
+                    {" "}
+                    {includeProtectedChats
+                      ? "An: auch Chats mit geschützten Konten und Admins werden beendet."
+                      : `Aus: ${preview.protectedChatsKept} Chats mit geschützten Konten bleiben; dort verschwindet nur die Seite der Ausgewählten.`}
+                  </span>
+                </span>
+              </label>
+              <h4>Mitbetroffene Konten ({collateralCount})</h4>
+              {collateralCount === 0 ? (
+                <p className="muted">Keine: niemand ausserhalb der Auswahl verliert eine Unterhaltung.</p>
+              ) : (
+                <table className="table compact">
+                  <thead>
+                    <tr>
+                      <th>Nutzer</th>
+                      <th className="numeric">Beendete Unterhaltungen</th>
+                      <th className="numeric">Eigene Nachrichten</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {preview.collateral.map((c) => (
+                      <tr key={c.targetId}>
+                        <td>
+                          @{c.username} {c.protected && <span className="pill warn">geschützt</span>}
+                        </td>
+                        <td className="numeric">{c.counts.chats?.conversations_lost ?? 0}</td>
+                        <td className="numeric">{c.counts.chats?.messages ?? 0}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              )}
+              <p className="muted">Mitbetroffene sind nicht abwählbar; sie entstehen aus den ausgewählten Personen.</p>
+            </>
+          )}
+          <h4>Benachrichtigung</h4>
+          <p>
+            Benachrichtigt wird nur, wer tatsächlich etwas verliert: die ausgewählten Personen mit Löschungen
+            {chatsEnded ? ` und ${collateralCount} Mitbetroffene (davon per E-Mail erreichbar: ${collateralReachable})` : ""}. Wer sein Konto
+            behält, bekommt zusätzlich eine Mitteilung in der App.
+            {!mailConfigured && " Ohne Mail-Dienst gibt es keine E-Mails."}
+          </p>
           <div className="action-row">
             <button type="button" className="button" disabled={busy} onClick={runPreview}>
               Trockenlauf wiederholen
@@ -578,16 +692,28 @@ export function ResetWizard({
             </span>
             <textarea value={message} onChange={(e) => setMessage(e.target.value)} maxLength={MESSAGE_MAX} rows={7} />
           </label>
-          <h4>Vorschau der E-Mail</h4>
+          <h4>Vorschau der E-Mail an ausgewählte Personen</h4>
           <div className="mail-preview">
             <p>
-              <strong>{subject}</strong>
+              <strong>{selectedMail.subject}</strong>
             </p>
-            <p className="user-text">{mailText}</p>
+            <p className="user-text">{selectedMail.text}</p>
           </div>
+          {chatsEnded && collateralCount > 0 && (
+            <>
+              <h4>Vorschau der E-Mail an Mitbetroffene ({collateralCount})</h4>
+              <div className="mail-preview">
+                <p>
+                  <strong>{collateralMail.subject}</strong>
+                </p>
+                <p className="user-text">{collateralMail.text}</p>
+              </div>
+            </>
+          )}
           <p className="muted">
-            Eine E-Mail bekommen nur Personen, bei denen tatsächlich etwas gelöscht wird. Die Mail ergänzt automatisch, was unverändert
-            bleibt, und die Kontaktadresse. Keine Links.
+            Eine E-Mail bekommen nur Personen, bei denen tatsächlich etwas gelöscht wird. Die Kontaktadresse (SUPPORT_EMAIL) setzt der Server
+            ein; in der Vorschau fehlt sie. Keine Links, kein Tracking. Ohne Mail-Dienst bekommen behaltene Konten nur die Mitteilung in der
+            App.
           </p>
         </section>
       )}
@@ -663,7 +789,9 @@ export function ResetWizard({
               ? `${dialog.count} Personen auswählen?`
               : dialog?.kind === "discard"
                 ? "Entwurf verwerfen?"
-                : `Auftrag für ${selected.size} Personen bestätigen?`
+                : dialog?.kind === "protected-chats"
+                  ? "Chats mit geschützten Konten beenden?"
+                  : `Auftrag für ${selected.size} Personen bestätigen?`
         }
         confirmLabel={
           dialog?.kind === "flag-one"
@@ -672,15 +800,21 @@ export function ResetWizard({
               ? "Auswählen"
               : dialog?.kind === "discard"
                 ? "Verwerfen"
-                : "Endgültig bestätigen"
+                : dialog?.kind === "protected-chats"
+                  ? "Ebenfalls beenden"
+                  : "Endgültig bestätigen"
         }
-        danger={dialog?.kind === "flag-one" || dialog?.kind === "confirm"}
+        danger={dialog?.kind === "flag-one" || dialog?.kind === "confirm" || dialog?.kind === "protected-chats"}
         busy={busy}
         onCancel={() => setDialog(null)}
         onConfirm={() => {
           if (dialog === null) return;
           if (dialog.kind === "discard") {
             discard();
+            return;
+          }
+          if (dialog.kind === "protected-chats") {
+            changeProtectedChats(true);
             return;
           }
           if (mode === null) return;
@@ -711,6 +845,12 @@ export function ResetWizard({
           </p>
         )}
         {dialog?.kind === "discard" && <p>Der Auftrag wird abgebrochen. Gelöscht wird nichts.</p>}
+        {dialog?.kind === "protected-chats" && (
+          <p>
+            Dann werden auch Unterhaltungen mit geschützten Konten (Hauptkonto, Testkonten, Admins, Moderatoren) für alle beendet. Diese
+            Konten werden benachrichtigt. Die Einstellung wird im Protokoll festgehalten und verlangt einen neuen Trockenlauf.
+          </p>
+        )}
         {dialog?.kind === "confirm" && (
           <p>
             {mode === "full" ? "Konten komplett löschen" : `Daten löschen: ${categories.map(categoryLabel).join(", ")}`}. Danach sind Umfang

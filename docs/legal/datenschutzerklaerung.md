@@ -36,7 +36,13 @@ TODO: Anzahl der Kontextnachrichten und Aufbewahrungsdauer eintragen.
 
 **Mitteilungen in der App:** zum Beispiel neue Follower, Likes, Kommentare und Hinweise zu geänderten Rechtstexten. Die App sendet derzeit keine Push-Mitteilungen.
 
-**E-Mails:** für die Anmeldung (Bestätigung, Passwort zurücksetzen) und gegebenenfalls eine Erinnerung, geänderte Rechtstexte zu bestätigen. Für Erinnerungen nutzen wir {{EMAIL_ANBIETER}}.
+**E-Mails:** für die Anmeldung (Bestätigung, Passwort zurücksetzen), gegebenenfalls eine Erinnerung, geänderte Rechtstexte zu bestätigen, und eine Benachrichtigung nach einer Datenbereinigung (siehe unten). Für diese E-Mails nutzen wir {{EMAIL_ANBIETER}}. Die E-Mails enthalten keine Links mit Zugangsdaten und keine Tracking-Pixel.
+
+**Datenbereinigung und Benachrichtigung:** In der Testphase und bei Bedarf im Betrieb können wir Daten bereinigen, also ganze Konten oder einzelne Datenarten (zum Beispiel Beiträge, Storys oder Chats) ausgewählter Konten löschen. Wird bei dir dabei tatsächlich etwas gelöscht, informieren wir dich mit einer Mitteilung in der App (wenn dein Konto bestehen bleibt) und per E-Mail: was gelöscht wurde, warum, was unverändert bleibt und wie du uns erreichst. Wer nicht betroffen ist, bekommt nichts. Für den Versand lesen wir deine E-Mail-Adresse erst unmittelbar vor der Bereinigung aus deinem Konto und bewahren sie nur bis zum Versand auf, höchstens 7 Tage; danach wird sie aus diesem Vorgang gelöscht, auch wenn der Versand nicht geklappt hat. Wird dein ganzes Konto gelöscht, lesen wir die Adresse vor dem Löschen, damit wir dich noch benachrichtigen können.
+
+**Chats bei einer Datenbereinigung:** Werden die Chats eines Kontos bereinigt, beenden wir jede Unterhaltung dieses Kontos für alle Beteiligten. Du kannst also eine Unterhaltung verlieren, auch wenn dein eigenes Konto nicht ausgewählt war. In diesem Fall informieren wir dich ebenfalls (in der App und per E-Mail), ohne den Namen der anderen Person zu nennen. Kopien gemeldeter Nachrichten, die die Moderation als Nachweis aufbewahrt, bleiben davon unberührt.
+
+TODO: Rechtsgrundlage der Benachrichtigung (berechtigtes Interesse, Informationspflicht) und die Bereinigung im Betrieb mit einer Fachperson prüfen.
 
 **Chat-Hintergründe:** Wählst du für einen Chat ein eigenes Hintergrundbild, bleibt es auf deinem Gerät. Es wird nicht hochgeladen und ist für niemanden ausser dir sichtbar, auch nicht für die anderen im Chat. Die App verkleinert das Bild und speichert es neu, dabei werden Bild-Metadaten wie der Aufnahmeort entfernt. „Standard wiederherstellen“ löscht es; beim Löschen deines Kontos entfernt die App alle deine Hintergrundbilder vom Gerät. Beim Abmelden bleibt die Auswahl auf dem Gerät erhalten.
 
@@ -65,7 +71,7 @@ TODO: Rechtsgrundlagen und Pflichten aus dem Digital Services Act prüfen.
 - **Trainingsstatistik:** Standard „Nur ich“ (Einstellungen → Datenschutz → Wer sieht deine Trainingsstatistik). Mit „Follower“ oder „Alle“ (wie oben nur bei öffentlichem Profil) sehen andere nur zusammengefasste Zahlen, keine einzelnen Trainings, Titel oder Notizen. Blockierte Personen sehen nie etwas.
 - Moderatoren und Administratoren sehen gemeldete Inhalte und die für die Prüfung nötigen Kontodaten. Jeder Zugriff auf private Inhalte wird protokolliert. Deine E-Mail-Adresse sehen nur Administratoren, mit Begründung und Protokoll.
 - Unser Hosting-Anbieter Supabase speichert die Daten in unserem Auftrag (Region: {{SUPABASE_REGION}}).
-- {{EMAIL_ANBIETER}} für den Versand von Erinnerungs-E-Mails, falls eingerichtet.
+- {{EMAIL_ANBIETER}} für den Versand von Erinnerungs-E-Mails und Benachrichtigungen nach einer Datenbereinigung (Empfängeradresse, Betreff und Text), falls eingerichtet.
 - Behörden, wenn wir gesetzlich dazu verpflichtet sind.
 
 TODO: Auftragsverarbeitungsverträge und Übermittlung ins Ausland (zum Beispiel USA) angeben.
@@ -74,6 +80,7 @@ TODO: Auftragsverarbeitungsverträge und Übermittlung ins Ausland (zum Beispiel
 
 - Solange dein Konto besteht. Storys sind nach 24 Stunden nicht mehr sichtbar.
 - Bestätigungen von Rechtstexten: solange dein Konto besteht.
+- E-Mail-Adresse für die Benachrichtigung nach einer Datenbereinigung: bis die E-Mail versendet ist, höchstens 7 Tage. Im Protokoll der Bereinigung bleibt nur ein nicht umkehrbarer Prüfwert (Hash) deiner Kennung, wenn dein Konto gelöscht wurde.
 - Mitteilungen in der App (zum Beispiel Markierungen, Workout-Verlinkungen, Follower-Anfragen, übernommene Pläne, Hinweise auf geänderte Rechtstexte): Eine Mitteilung, die du noch nicht gesehen hast, wird 14 Tage nach ihrer Erstellung gelöscht. Hast du sie in der Liste gesehen, wird sie 7 Tage danach gelöscht, spätestens aber 14 Tage nach ihrer Erstellung. Was hinter einer Mitteilung steht, bleibt davon unberührt: offene Follower-Anfragen findest du weiter unter „Follower-Anfragen“, ausstehende Rechtstexte in den Einstellungen, Workout-Verlinkungen laufen nach ihrer eigenen Frist ab. Mitteilungen des Moderationsteams sind davon nicht betroffen.
 - Hinweise auf Aktivität (zum Beispiel Likes, Kommentare, neue Beiträge von Personen, denen du folgst) werden nicht gespeichert, sondern beim Öffnen aus den Inhalten der letzten 7 Tage zusammengestellt.
 

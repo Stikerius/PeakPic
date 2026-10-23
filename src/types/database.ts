@@ -468,8 +468,8 @@ export type Database = {
           reply_to_id: Uuid | null;
           pinned_at: Timestamp | null;
           pinned_by: Uuid | null;
-          /** "tag" for server-made "hat dich markiert" cards. */
-          kind: "tag" | null;
+          /** Server-made: "tag" for "hat dich markiert" cards, "notice" for neutral lines. */
+          kind: "tag" | "notice" | null;
           story_id: Uuid | null;
           created_at: Timestamp;
         };
@@ -644,6 +644,10 @@ export type Database = {
       };
       confirm_legal_documents: { Args: { p_document_ids: Uuid[]; p_app_version: string }; Returns: number };
       track_events: { Args: { events: Json }; Returns: number };
+      get_chat_partner_states: {
+        Args: { p_conversation_ids: Uuid[] };
+        Returns: { conversation_id: Uuid; state: "left" | "deleted" }[];
+      };
       get_my_account_status: {
         Args: Record<string, never>;
         Returns: { status: AccountStatus; suspended_until: Timestamp | null; reason_code: string | null; message: string | null }[];

@@ -7676,16 +7676,74 @@ create index if not exists reset_job_targets_user_idx on public.reset_job_target
 alter table public.reset_job_targets enable row level security;
 revoke all on public.reset_job_targets from public, anon, authenticated;
 
--- Fixed numbers (the dashboard reads them through admin_reset_settings()).
-create or replace function public.reset_limits()
-returns jsonb
-language sql immutable set search_path = ''
-as $$
-  select jsonb_build_object(
-    'max_targets', 500, 'batch_size', 25, 'phrase', 'NEUSTART', 'totp_max_age_seconds', 300, 'max_attempts', 5,
-    'categories', jsonb_build_array('chats', 'activities', 'plans', 'posts', 'stories', 'social', 'notifications', 'other')
-  );
+-- Chats are ended for everybody (chats category, also before deleting whole accounts), except
+-- chats with a protected account (protected_accounts, admin_roles) unless the job says
+-- include_protected_chats (set only through admin_reset_set_protected_chats, logged).
+alter table public.reset_jobs add column if not exists include_protected_chats boolean not null default false;
+-- 'collateral': not chosen, but lost a chat that was ended (counted in result, notified, never
+-- processed on their own and never deselectable).
+alter table public.reset_job_targets add column if not exists role text not null default 'selected';
+do $$
+begin
+  if not exists (select 1 from pg_constraint where conname = 'reset_job_targets_role_check') then
+    alter table public.reset_job_targets add constraint reset_job_targets_role_check check (role in ('selected', 'collateral'));
+  end if;
+end;
 $$;
+-- When the address was read (it is deleted when the mail is out, after 7 days at the latest) and
+-- when the in-app notice was written.
+alter table public.reset_job_targets add column if not exists email_captured_at timestamptz;
+alter table public.reset_job_targets add column if not exists notice_sent_at timestamptz;
+
+-- Someone who left a chat while the account stays (a reset removed only their side of a chat
+-- with a protected account). The chat then shows "Nicht mehr im Chat" instead of "Gelöschtes
+-- Konto"; when the account is deleted later, user_id becomes null and it shows "Gelöschtes
+-- Konto" again. No client access; read through get_chat_partner_states().
+create table if not exists public.conversation_departures (
+  conversation_id uuid not null references public.conversations (id) on delete cascade,
+  user_id         uuid references public.profiles (id) on delete set null,
+  departed_at     timestamptz not null default now()
+);
+create index if not exists conversation_departures_conversation_idx on public.conversation_departures (conversation_id);
+alter table public.conversation_departures enable row level security;
+revoke all on public.conversation_departures from public, anon, authenticated;
+
+-- Server-made line in a chat: kind 'notice' ("Eine Person ist nicht mehr in diesem Chat."). Like
+-- tag cards, clients can't write it (the insert policy requires kind is null).
+alter table public.messages drop constraint if exists messages_kind_check;
+alter table public.messages add constraint messages_kind_check check (kind is null or kind in ('tag', 'notice'));
+
+-- Open chat screens learn that a chat was ended: Realtime sends the delete with the id only.
+do $$
+begin
+  if not exists (
+    select 1 from pg_publication_tables
+    where pubname = 'supabase_realtime' and schemaname = 'public' and tablename = 'conversations'
+  ) then
+    alter publication supabase_realtime add table public.conversations;
+  end if;
+end;
+$$;
+
+-- For my chats without another member: 'left' (the other person left, the account still
+-- exists) or 'deleted' (the account is gone). No names, no ids of the other person.
+create or replace function public.get_chat_partner_states(p_conversation_ids uuid[])
+returns table (conversation_id uuid, state text)
+language sql stable security definer set search_path = ''
+as $$
+  select c.id,
+    case when exists (
+      select 1 from public.conversation_departures d where d.conversation_id = c.id and d.user_id is not null
+    ) then 'left' else 'deleted' end
+  from public.conversations c
+  where c.id = any (coalesce(p_conversation_ids, '{}'))
+    and cardinality(coalesce(p_conversation_ids, '{}')) <= 500
+    and exists (select 1 from public.conversation_members m where m.conversation_id = c.id and m.user_id = (select auth.uid()))
+    and not exists (select 1 from public.conversation_members m where m.conversation_id = c.id and m.user_id <> (select auth.uid()));
+$$;
+revoke all on function public.get_chat_partner_states(uuid[]) from public, anon;
+grant execute on function public.get_chat_partner_states(uuid[]) to authenticated;
+
 
 create or replace function public.reset_category_keys()
 returns text[]
@@ -7735,33 +7793,134 @@ as $$
   from public.profiles p where p.id = p_user;
 $$;
 
--- A chat that is deleted completely: every remaining member is selected and no message in it
--- was moderated. Internal.
-create or replace function public.reset_conversation_full(p_conversation uuid, p_selected uuid[])
+
+
+-- Sum of all numbers in a counts object ({category: {what: n}}). Internal.
+create or replace function public.reset_counts_total(p_counts jsonb)
+returns bigint
+language sql immutable set search_path = ''
+as $$
+  select coalesce(sum(v.value::bigint), 0)
+  from jsonb_each(coalesce(p_counts, '{}')) cat,
+       jsonb_each_text(case when jsonb_typeof(cat.value) = 'object' then cat.value else '{}'::jsonb end) v;
+$$;
+
+-- Adds counts objects up per category and key. Internal.
+create or replace function public.reset_counts_sum(p_list jsonb[])
+returns jsonb
+language sql immutable set search_path = ''
+as $$
+  select coalesce(jsonb_object_agg(s.cat, s.totals), '{}')
+  from (
+    select v.cat, jsonb_object_agg(v.k, v.total) as totals
+    from (
+      select c.key as cat, e.key as k, sum(e.value::bigint) as total
+      from unnest(coalesce(p_list, '{}')) l(item),
+           jsonb_each(coalesce(l.item, '{}')) c,
+           jsonb_each_text(case when jsonb_typeof(c.value) = 'object' then c.value else '{}'::jsonb end) e
+      group by c.key, e.key
+    ) v
+    group by v.cat
+  ) s;
+$$;
+
+create or replace function public.reset_limits()
+returns jsonb
+language sql immutable set search_path = ''
+as $$
+  select jsonb_build_object(
+    'max_targets', 500, 'batch_size', 25, 'phrase', 'NEUSTART', 'totp_max_age_seconds', 300, 'max_attempts', 5,
+    'email_keep_days', 7,
+    'categories', jsonb_build_array('chats', 'activities', 'plans', 'posts', 'stories', 'social', 'notifications', 'other')
+  );
+$$;
+
+-- German name of a category (in-app notices). Internal.
+create or replace function public.reset_category_label(p_key text)
+returns text
+language sql immutable set search_path = ''
+as $$
+  select case p_key
+    when 'chats' then 'Chats' when 'activities' then 'Aktivitäten' when 'plans' then 'Pläne'
+    when 'posts' then 'Beiträge' when 'stories' then 'Storys' when 'social' then 'Follower und Gefolgte'
+    when 'notifications' then 'Benachrichtigungen' when 'other' then 'Sonstiges (Einstellungen, abgegebene Meldungen)'
+    else p_key
+  end;
+$$;
+
+-- A protected account in the sense of chats: protected_accounts or a staff role. Internal.
+create or replace function public.reset_member_protected(p_user uuid)
 returns boolean
 language sql stable security definer set search_path = ''
 as $$
-  select not exists (
-      select 1 from public.conversation_members m
-      where m.conversation_id = p_conversation and not (m.user_id = any (p_selected))
-    )
-    and not exists (
-      select 1 from public.messages x where x.conversation_id = p_conversation and x.moderation_state is not null
-    );
+  select exists (select 1 from public.admin_roles r where r.user_id = p_user)
+    or exists (select 1 from public.protected_accounts pa where pa.user_id = p_user);
+$$;
+
+drop function if exists public.reset_conversation_full(uuid, uuid[]);
+
+-- Is this chat ended for everybody? Yes, unless a protected account is a member and the job
+-- doesn't include chats with protected accounts. Internal.
+create or replace function public.reset_conversation_ends(p_conversation uuid, p_include_protected boolean)
+returns boolean
+language sql stable security definer set search_path = ''
+as $$
+  select coalesce(p_include_protected, false) or not exists (
+    select 1 from public.conversation_members m
+    where m.conversation_id = p_conversation and public.reset_member_protected(m.user_id)
+  );
+$$;
+
+-- Records that a person who was not chosen lost a chat (one row per job and person, numbers
+-- added up; a step runs once per chat, so nothing is counted twice). Internal.
+create or replace function public.reset_add_collateral(p_job_id uuid, p_user uuid, p_messages bigint)
+returns void
+language plpgsql security definer set search_path = ''
+as $$
+declare
+  t public.reset_job_targets%rowtype;
+begin
+  select * into t from public.reset_job_targets x where x.job_id = p_job_id and x.user_id = p_user for update;
+  if not found then
+    insert into public.reset_job_targets (job_id, user_id, user_hash, role, selected, status)
+    values (p_job_id, p_user, encode(pg_catalog.sha256(convert_to(p_user::text, 'UTF8')), 'hex'), 'collateral', false, 'pending')
+    returning * into t;
+  end if;
+  if t.role <> 'collateral' then
+    return;
+  end if;
+  update public.reset_job_targets
+  set result = jsonb_build_object('chats', jsonb_build_object(
+        'conversations_lost', coalesce((t.result #>> '{chats,conversations_lost}')::bigint, 0) + 1,
+        'messages', coalesce((t.result #>> '{chats,messages}')::bigint, 0) + p_messages)),
+      updated_at = now()
+  where id = t.id;
+end;
 $$;
 
 -- THE place that decides what a category reset removes for one person. p_apply = false only
 -- counts (dry run); p_apply = true counts the same way first, then deletes. p_selected:
--- everybody selected in the job. Returns {counts: {category: {what: n}}, files: [paths]}.
---   * Moderated content and what hangs on it stays (evidence).
---   * What goes anyway with the content of another selected person (my like on their post, my
---     follow of them, a complete chat) is counted once only, for its owner (for follows and
---     complete chats: the one with the smaller id). So the dry run and the run give the same
---     numbers, in whatever order the people are processed.
+-- everybody chosen in the job. Returns {counts: {category: {what: n}}, files: [paths]}.
+--   * Chats: every chat of the person is ended for ALL members (messages, members, reactions,
+--     pins, "für mich gelöscht"), deleted by its chosen member with the smallest id; members who
+--     were not chosen are recorded as 'collateral' of the job (p_job_id). Shared posts and
+--     comments stay, only the message cards go. report_snapshots and moderation_actions are
+--     not touched. A chat with a protected account stays (unless p_include_protected): only the
+--     person's messages and membership go, a neutral line tells the others, and the departure is
+--     noted ("Nicht mehr im Chat").
+--   * Other categories: moderated content and what hangs on it stays (evidence).
+--   * What goes anyway with the content of another chosen person (my like on their post, my
+--     follow of them, a chat) is counted once only, for its owner (for follows and chats: the
+--     one with the smaller id). So the dry run and the run give the same numbers, in whatever
+--     order the people are processed.
 --   * files: photos of removed posts and stories in the person's own folder that nothing else
 --     still uses (a story can share its file with a post).
 -- Internal (dry run and run functions).
-create or replace function public.reset_user_categories(p_user uuid, p_categories text[], p_selected uuid[], p_apply boolean)
+drop function if exists public.reset_user_categories(uuid, text[], uuid[], boolean);
+create or replace function public.reset_user_categories(
+  p_user uuid, p_categories text[], p_selected uuid[], p_apply boolean,
+  p_job_id uuid default null, p_include_protected boolean default false
+)
 returns jsonb
 language plpgsql security definer set search_path = ''
 as $$
@@ -7776,7 +7935,8 @@ declare
   with_social boolean := 'social' = any (p_categories);
   with_notifications boolean := 'notifications' = any (p_categories);
   with_other boolean := 'other' = any (p_categories);
-  full_convs uuid[] := '{}';
+  ended_convs uuid[] := '{}';
+  my_ended uuid[] := '{}';
   part_convs uuid[] := '{}';
   my_posts uuid[] := '{}';
   my_stories uuid[] := '{}';
@@ -7785,19 +7945,24 @@ declare
   candidates text[] := '{}';
   files text[];
   counts jsonb := '{}';
+  conv uuid;
+  member record;
 begin
   -- ------------------------------------------------------------ what goes
   if with_chats then
-    -- Complete chats are deleted by their member with the smallest id.
-    full_convs := array(
+    ended_convs := array(
       select m.conversation_id from public.conversation_members m
-      where m.user_id = p_user
-        and public.reset_conversation_full(m.conversation_id, p_selected)
-        and (select min(o.user_id::text) from public.conversation_members o where o.conversation_id = m.conversation_id) = p_user::text
+      where m.user_id = p_user and public.reset_conversation_ends(m.conversation_id, p_include_protected)
+    );
+    -- Deleted (and counted) by the chosen member with the smallest id.
+    my_ended := array(
+      select c from unnest(ended_convs) c
+      where (select min(o.user_id::text) from public.conversation_members o
+             where o.conversation_id = c and o.user_id = any (coalesce(p_selected, '{}') || p_user)) = p_user::text
     );
     part_convs := array(
       select m.conversation_id from public.conversation_members m
-      where m.user_id = p_user and not public.reset_conversation_full(m.conversation_id, p_selected)
+      where m.user_id = p_user and not (m.conversation_id = any (ended_convs))
     );
   end if;
   if with_posts then
@@ -7851,10 +8016,12 @@ begin
 
   if with_chats then
     counts := counts || jsonb_build_object('chats', jsonb_build_object(
-      'conversations', cardinality(full_convs),
+      'conversations', cardinality(my_ended),
+      -- Messages of ended chats count for the member who ends the chat (those of chosen people;
+      -- the others count as collateral), my own messages in chats that stay count for me.
       'messages', (select count(*) from public.messages x
-                   where x.conversation_id = any (full_convs)
-                      or (x.conversation_id = any (part_convs) and x.sender_id = p_user and x.moderation_state is null)),
+                   where (x.conversation_id = any (my_ended) and x.sender_id = any (coalesce(p_selected, '{}') || p_user))
+                      or (x.conversation_id = any (part_convs) and x.sender_id = p_user)),
       'memberships', cardinality(part_convs)
     ));
   end if;
@@ -7952,13 +8119,33 @@ begin
     delete from public.notifications x where x.user_id = p_user;
   end if;
   if with_chats then
-    delete from public.message_reactions x where x.user_id = p_user and x.conversation_id = any (part_convs);
-    delete from public.message_hidden x using public.messages mm
-    where x.user_id = p_user and mm.id = x.message_id and mm.conversation_id = any (part_convs);
-    delete from public.messages x
-    where x.conversation_id = any (part_convs) and x.sender_id = p_user and x.moderation_state is null;
-    delete from public.conversation_members x where x.user_id = p_user and x.conversation_id = any (part_convs);
-    delete from public.conversations x where x.id = any (full_convs);
+    foreach conv in array my_ended loop
+      if p_job_id is not null then
+        for member in
+          select m.user_id, (select count(*) from public.messages x where x.conversation_id = conv and x.sender_id = m.user_id) as n
+          from public.conversation_members m
+          where m.conversation_id = conv and not (m.user_id = any (coalesce(p_selected, '{}') || p_user))
+        loop
+          perform public.reset_add_collateral(p_job_id, member.user_id, member.n);
+        end loop;
+      end if;
+      delete from public.conversations x where x.id = conv;
+    end loop;
+    foreach conv in array part_convs loop
+      delete from public.message_reactions x where x.user_id = p_user and x.conversation_id = conv;
+      delete from public.message_hidden x using public.messages mm
+      where x.user_id = p_user and mm.id = x.message_id and mm.conversation_id = conv;
+      delete from public.messages x where x.conversation_id = conv and x.sender_id = p_user;
+      delete from public.conversation_members x where x.user_id = p_user and x.conversation_id = conv;
+      insert into public.conversation_departures (conversation_id, user_id) values (conv, p_user);
+      -- A neutral line for who stays (written in the name of a remaining member, shown centred).
+      insert into public.messages (conversation_id, sender_id, body, kind)
+      select conv, m.user_id, 'Eine Person ist nicht mehr in diesem Chat.', 'notice'
+      from public.conversation_members m
+      where m.conversation_id = conv
+      order by public.reset_member_protected(m.user_id) desc, m.user_id::text
+      limit 1;
+    end loop;
   end if;
   if with_posts then
     delete from public.post_tags x where x.user_id = p_user;
@@ -8006,33 +8193,514 @@ begin
 end;
 $$;
 
--- Sum of all numbers in a counts object ({category: {what: n}}). Internal.
-create or replace function public.reset_counts_total(p_counts jsonb)
-returns bigint
+-- Did the job actually remove something of this person (then they are told)? Internal.
+create or replace function public.reset_target_affected(p_target public.reset_job_targets, p_mode text)
+returns boolean
 language sql immutable set search_path = ''
 as $$
-  select coalesce(sum(v.value::bigint), 0)
-  from jsonb_each(coalesce(p_counts, '{}')) cat,
-       jsonb_each_text(case when jsonb_typeof(cat.value) = 'object' then cat.value else '{}'::jsonb end) v;
+  select case
+    when p_target.role = 'collateral' then coalesce((p_target.result #>> '{chats,conversations_lost}')::bigint, 0) > 0
+    when p_target.status <> 'done' then false
+    when p_mode = 'full' then true
+    else public.reset_counts_total(p_target.result) > 0
+  end;
 $$;
 
--- Adds counts objects up per category and key. Internal.
-create or replace function public.reset_counts_sum(p_list jsonb[])
-returns jsonb
+-- Reads the e-mail address of an affected person for the notification mail, right before it is
+-- needed (before deleting an account). Kept only until the mail is out, at most email_keep_days.
+-- Internal (definer: the only place that reads auth.users for resets).
+create or replace function public.reset_capture_email(p_target_id uuid)
+returns void
+language sql security definer set search_path = ''
+as $$
+  update public.reset_job_targets t
+  set email_address = u.email, email_captured_at = now(), email_status = 'pending', updated_at = now()
+  from auth.users u
+  where t.id = p_target_id and u.id = t.user_id and t.email_status = 'none' and u.email is not null;
+$$;
+
+-- Text of the in-app notice for people who keep their account (max. 1000 characters). Internal.
+create or replace function public.reset_notice_text(p_role text, p_categories text[], p_reason text)
+returns text
 language sql immutable set search_path = ''
 as $$
-  select coalesce(jsonb_object_agg(s.cat, s.totals), '{}')
-  from (
-    select v.cat, jsonb_object_agg(v.k, v.total) as totals
-    from (
-      select c.key as cat, e.key as k, sum(e.value::bigint) as total
-      from unnest(coalesce(p_list, '{}')) l(item),
-           jsonb_each(coalesce(l.item, '{}')) c,
-           jsonb_each_text(case when jsonb_typeof(c.value) = 'object' then c.value else '{}'::jsonb end) e
-      group by c.key, e.key
-    ) v
-    group by v.cat
-  ) s;
+  select left(
+    case when p_role = 'collateral' then
+      'Eine oder mehrere deiner Unterhaltungen wurden im Rahmen einer Datenbereinigung beendet.'
+    else
+      'Im Rahmen einer Datenbereinigung wurden folgende Daten in deinem Konto gelöscht: '
+      || (select string_agg(public.reset_category_label(k), ', ' order by array_position(public.reset_category_keys(), k))
+          from unnest(p_categories) k) || '.'
+    end
+    || E'\n\nGrund: ' || coalesce(p_reason, '')
+    || E'\n\nDein Konto, dein Benutzername und alle anderen Daten bleiben unverändert.',
+    1000);
+$$;
+
+-- Dry run: what the job would remove, per person and in total, and who else loses a chat
+-- (collateral). Deletes nothing. Stores the numbers (needed for confirming).
+create or replace function public.admin_reset_preview(p_job_id uuid)
+returns jsonb
+language plpgsql security definer set search_path = ''
+as $$
+declare
+  job public.reset_jobs%rowtype := public.reset_own_job(p_job_id, array['draft']);
+  selected uuid[] := public.reset_selected_ids(p_job_id);
+  t record;
+  r jsonb;
+  file_count bigint := 0;
+  totals jsonb;
+  ended uuid[] := '{}';
+begin
+  for t in select * from public.reset_job_targets x where x.job_id = p_job_id and x.role = 'selected' for update loop
+    r := public.reset_user_categories(t.user_id, job.categories, selected, false, null, job.include_protected_chats);
+    file_count := file_count + jsonb_array_length(r -> 'files');
+    update public.reset_job_targets
+    set counts = r -> 'counts', flagged = cardinality(public.reset_flags(t.user_id)) > 0, updated_at = now()
+    where id = t.id;
+  end loop;
+  totals := public.reset_counts_sum(array(
+    select x.counts from public.reset_job_targets x where x.job_id = p_job_id and x.role = 'selected'
+  ));
+
+  -- Who else loses a chat: members of ended chats who were not chosen.
+  delete from public.reset_job_targets where job_id = p_job_id and role = 'collateral';
+  if 'chats' = any (job.categories) then
+    ended := array(
+      select distinct m.conversation_id from public.conversation_members m
+      where m.user_id = any (selected) and public.reset_conversation_ends(m.conversation_id, job.include_protected_chats)
+    );
+    insert into public.reset_job_targets (job_id, user_id, user_hash, role, selected, status, counts)
+    select p_job_id, m.user_id, encode(pg_catalog.sha256(convert_to(m.user_id::text, 'UTF8')), 'hex'),
+      'collateral', false, 'pending',
+      jsonb_build_object('chats', jsonb_build_object(
+        'conversations_lost', count(*),
+        'messages', sum((select count(*) from public.messages x where x.conversation_id = m.conversation_id and x.sender_id = m.user_id))
+      ))
+    from public.conversation_members m
+    where m.conversation_id = any (ended) and not (m.user_id = any (selected))
+    group by m.user_id;
+  end if;
+
+  update public.reset_jobs
+  set preview = jsonb_build_object(
+        'totals', totals,
+        'targets', (select count(*) from public.reset_job_targets x where x.job_id = p_job_id and x.role = 'selected'),
+        'files', file_count,
+        'collateral', (select jsonb_build_object(
+                         'accounts', count(*),
+                         'totals', public.reset_counts_sum(array_agg(x.counts)),
+                         'with_email', count(*) filter (where exists (select 1 from auth.users u where u.id = x.user_id and u.email is not null)))
+                       from public.reset_job_targets x where x.job_id = p_job_id and x.role = 'collateral')),
+      previewed_at = now()
+  where id = p_job_id;
+  return jsonb_build_object(
+    'job_id', p_job_id, 'mode', job.mode, 'categories', to_jsonb(job.categories), 'totals', totals, 'files', file_count,
+    'include_protected_chats', job.include_protected_chats,
+    'targets', coalesce((
+      select jsonb_agg(jsonb_build_object(
+        'target_id', x.id, 'user_id', x.user_id, 'username', p.username, 'display_name', p.display_name,
+        'flagged', x.flagged, 'counts', x.counts, 'total', public.reset_counts_total(x.counts)
+      ) order by p.username)
+      from public.reset_job_targets x join public.profiles p on p.id = x.user_id
+      where x.job_id = p_job_id and x.role = 'selected'
+    ), '[]'::jsonb),
+    'collateral', coalesce((
+      select jsonb_agg(jsonb_build_object(
+        'target_id', x.id, 'username', p.username, 'display_name', p.display_name, 'counts', x.counts,
+        'protected', public.reset_member_protected(x.user_id),
+        'has_email', exists (select 1 from auth.users u where u.id = x.user_id and u.email is not null)
+      ) order by p.username)
+      from public.reset_job_targets x join public.profiles p on p.id = x.user_id
+      where x.job_id = p_job_id and x.role = 'collateral'
+    ), '[]'::jsonb),
+    -- Chats with a protected account that stay (only the chosen person's side goes).
+    'protected_chats_kept', case when 'chats' = any (job.categories) and not job.include_protected_chats then (
+      select count(distinct m.conversation_id) from public.conversation_members m
+      where m.user_id = any (selected) and not public.reset_conversation_ends(m.conversation_id, false)
+    ) else 0 end
+  );
+end;
+$$;
+
+-- "Chats mit geschützten Konten ebenfalls beenden": only in a draft, only its creator, asks for
+-- a new dry run, and switching it on is logged.
+create or replace function public.admin_reset_set_protected_chats(p_job_id uuid, p_include boolean)
+returns void
+language plpgsql security definer set search_path = ''
+as $$
+declare
+  job public.reset_jobs%rowtype := public.reset_own_job(p_job_id, array['draft']);
+begin
+  if coalesce(p_include, false) = job.include_protected_chats then
+    return;
+  end if;
+  update public.reset_jobs
+  set include_protected_chats = coalesce(p_include, false), preview = null, previewed_at = null, updated_at = now()
+  where id = p_job_id;
+  perform public.log_moderation_action(
+    case when p_include then 'reset_protected_chats_on' else 'reset_protected_chats_off' end,
+    'reset_job', p_job_id, null, null,
+    coalesce(job.reason, 'Chats mit geschützten Konten (Bereinigung)'), null, jsonb_build_object('mode', job.mode)
+  );
+end;
+$$;
+
+-- Confirms a draft: only its creator, after a dry run newer than the last change, with a reason,
+-- the exact word and a TOTP step at most 5 minutes old. From now on scope and people are frozen.
+create or replace function public.admin_reset_confirm(p_job_id uuid, p_phrase text)
+returns void
+language plpgsql security definer set search_path = ''
+as $$
+declare
+  job public.reset_jobs%rowtype := public.reset_own_job(p_job_id, array['draft']);
+  limits jsonb := public.reset_limits();
+  n integer;
+begin
+  if p_phrase is distinct from limits ->> 'phrase' then
+    raise exception 'wrong_phrase';
+  end if;
+  if not public.reset_fresh_totp((limits ->> 'totp_max_age_seconds')::integer) then
+    raise exception 'totp_required';
+  end if;
+  if job.reason is null or char_length(job.reason) < 10 then
+    raise exception 'reason_too_short';
+  end if;
+  if job.previewed_at is null or job.previewed_at < job.updated_at then
+    raise exception 'preview_required';
+  end if;
+  if job.mode = 'full' and not public.reset_full_allowed() then
+    raise exception 'full_reset_disabled';
+  end if;
+  select count(*) into n from public.reset_job_targets t where t.job_id = p_job_id and t.role = 'selected';
+  if n = 0 then
+    raise exception 'no_targets';
+  end if;
+  -- Protection or flags may have changed since the people were chosen.
+  if exists (select 1 from public.reset_job_targets t
+             where t.job_id = p_job_id and t.role = 'selected' and public.reset_protection(t.user_id) is not null) then
+    raise exception 'protected_target';
+  end if;
+  if not job.include_flagged and exists (
+    select 1 from public.reset_job_targets t
+    where t.job_id = p_job_id and t.role = 'selected' and cardinality(public.reset_flags(t.user_id)) > 0
+  ) then
+    raise exception 'flagged_not_confirmed';
+  end if;
+  perform pg_advisory_xact_lock(hashtext('peakpic.reset_jobs'));
+  if exists (select 1 from public.reset_jobs j where j.id <> p_job_id and j.status in ('confirmed', 'running')) then
+    raise exception 'other_job_active';
+  end if;
+  update public.reset_jobs set status = 'confirmed', confirmed_at = now() where id = p_job_id;
+  perform public.log_moderation_action(
+    'reset_confirmed', 'reset_job', p_job_id, null, null, job.reason, null,
+    jsonb_build_object('mode', job.mode, 'categories', to_jsonb(job.categories), 'targets', n,
+                       'include_flagged', job.include_flagged, 'include_protected_chats', job.include_protected_chats,
+                       'preview', job.preview -> 'totals', 'collateral', job.preview -> 'collateral')
+  );
+end;
+$$;
+
+-- Earlier jobs (newest first).
+create or replace function public.admin_reset_jobs()
+returns table (
+  id uuid, status text, mode text, categories text[], created_at timestamptz, confirmed_at timestamptz,
+  finished_at timestamptz, targets bigint, own boolean
+)
+language plpgsql stable security definer set search_path = ''
+as $$
+#variable_conflict use_column
+begin
+  perform public.require_admin();
+  return query
+  select j.id, j.status, j.mode, j.categories, j.created_at, j.confirmed_at, j.finished_at,
+         (select count(*) from public.reset_job_targets t where t.job_id = j.id and t.role = 'selected'),
+         j.created_by = auth.uid()
+  from public.reset_jobs j
+  order by j.created_at desc
+  limit 100;
+end;
+$$;
+
+-- One job with its progress and, per person, role, status, numbers and mail status. Never
+-- e-mail addresses. Deleted accounts appear only with the start of their hash.
+create or replace function public.admin_reset_job_status(p_job_id uuid)
+returns jsonb
+language plpgsql stable security definer set search_path = ''
+as $$
+declare
+  job public.reset_jobs%rowtype;
+begin
+  perform public.require_admin();
+  select * into job from public.reset_jobs j where j.id = p_job_id;
+  if not found then
+    raise exception 'job_not_found';
+  end if;
+  return jsonb_build_object(
+    'id', job.id, 'status', job.status, 'mode', job.mode, 'categories', to_jsonb(job.categories),
+    'reason', job.reason, 'subject', job.subject, 'user_message', job.user_message,
+    'include_flagged', job.include_flagged, 'include_protected_chats', job.include_protected_chats,
+    'preview', job.preview, 'previewed_at', job.previewed_at,
+    'result', job.result, 'own', job.created_by = auth.uid(),
+    'created_at', job.created_at, 'updated_at', job.updated_at, 'confirmed_at', job.confirmed_at,
+    'started_at', job.started_at, 'finished_at', job.finished_at,
+    'progress', (
+      select jsonb_build_object(
+        'total', count(*),
+        'done', count(*) filter (where t.status = 'done'),
+        'failed', count(*) filter (where t.status = 'failed'),
+        'skipped', count(*) filter (where t.status = 'skipped'),
+        'open', count(*) filter (where t.status in ('pending', 'claimed', 'files_pending'))
+      )
+      from public.reset_job_targets t where t.job_id = p_job_id and t.role = 'selected'
+    ),
+    'mail', (
+      select jsonb_build_object(
+        'pending', count(*) filter (where t.email_status = 'pending'),
+        'sent', count(*) filter (where t.email_status = 'sent'),
+        'failed', count(*) filter (where t.email_status = 'failed'),
+        'not_configured', count(*) filter (where t.email_status = 'not_configured'),
+        'in_app', count(*) filter (where t.notice_sent_at is not null)
+      )
+      from public.reset_job_targets t where t.job_id = p_job_id
+    ),
+    'targets', coalesce((
+      select jsonb_agg(jsonb_build_object(
+        'target_id', t.id, 'user_id', t.user_id, 'username', p.username, 'display_name', p.display_name,
+        'user_hash', left(t.user_hash, 12), 'role', t.role, 'flagged', t.flagged, 'status', t.status, 'error', t.error,
+        'counts', t.counts, 'result', t.result, 'email_status', t.email_status,
+        'in_app', t.notice_sent_at is not null, 'attempts', t.attempts
+      ) order by t.role desc, p.username nulls last, t.user_hash)
+      from public.reset_job_targets t left join public.profiles p on p.id = t.user_id
+      where t.job_id = p_job_id
+    ), '[]'::jsonb)
+  );
+end;
+$$;
+
+-- Categories: removes the person's rows (exactly like the dry run counted them) and returns the
+-- files the Edge Function must remove. Repeating it after the rows are gone returns the same
+-- files again.
+create or replace function public.admin_reset_apply_user(p_job_id uuid, p_target_id uuid)
+returns jsonb
+language plpgsql security definer set search_path = ''
+as $$
+declare
+  job public.reset_jobs%rowtype := public.reset_own_job(p_job_id, array['running']);
+  t public.reset_job_targets%rowtype := public.reset_target_for_step(p_job_id, p_target_id);
+  r jsonb;
+begin
+  if job.mode <> 'categories' then
+    raise exception 'wrong_mode';
+  end if;
+  if t.status = 'files_pending' then
+    return jsonb_build_object('user_id', t.user_id, 'files', coalesce(t.files, '[]'::jsonb));
+  end if;
+  if t.user_id is null or public.reset_protection(t.user_id) is not null
+    or exists (select 1 from public.profiles p where p.id = t.user_id and p.account_status = 'deleting') then
+    update public.reset_job_targets set status = 'skipped', error = 'not_allowed_anymore', updated_at = now() where id = t.id;
+    return jsonb_build_object('skipped', true);
+  end if;
+  r := public.reset_user_categories(t.user_id, job.categories, public.reset_selected_ids(p_job_id), true,
+                                    p_job_id, job.include_protected_chats);
+  update public.reset_job_targets
+  set status = 'files_pending', result = r -> 'counts', files = r -> 'files', updated_at = now()
+  where id = t.id;
+  return jsonb_build_object('user_id', t.user_id, 'files', r -> 'files');
+end;
+$$;
+
+-- Whole account: ends the person's chats (like the chats category, others are recorded as
+-- collateral), counts the rest for the report, reads the e-mail address for the notification
+-- (afterwards it is gone), then marks the account 'deleting' (hidden at once, can't write; an
+-- account already 'deleting' is simply finished). The Edge Function then deletes the files,
+-- calls finish_account_deletion() and deletes the auth user, like delete_account.
+-- {deleted: true} when the account is gone already (interrupted earlier).
+create or replace function public.admin_reset_full_prepare(p_job_id uuid, p_target_id uuid)
+returns jsonb
+language plpgsql security definer set search_path = ''
+as $$
+declare
+  job public.reset_jobs%rowtype := public.reset_own_job(p_job_id, array['running']);
+  t public.reset_job_targets%rowtype := public.reset_target_for_step(p_job_id, p_target_id);
+  chats jsonb;
+  rest jsonb;
+begin
+  if job.mode <> 'full' then
+    raise exception 'wrong_mode';
+  end if;
+  if not public.reset_full_allowed() then
+    raise exception 'full_reset_disabled';
+  end if;
+  if t.user_id is null then
+    return jsonb_build_object('deleted', true);
+  end if;
+  if public.reset_protection(t.user_id) is not null then
+    update public.reset_job_targets set status = 'skipped', error = 'not_allowed_anymore', updated_at = now() where id = t.id;
+    return jsonb_build_object('skipped', true);
+  end if;
+  if t.result is null then
+    chats := public.reset_user_categories(t.user_id, array['chats'], public.reset_selected_ids(p_job_id), true,
+                                          p_job_id, job.include_protected_chats);
+    rest := public.reset_user_categories(t.user_id, array(select k from unnest(public.reset_category_keys()) k where k <> 'chats'),
+                                         public.reset_selected_ids(p_job_id), false);
+    update public.reset_job_targets
+    set result = (rest -> 'counts') || (chats -> 'counts') || jsonb_build_object('account', jsonb_build_object('account', 1))
+    where id = t.id;
+  end if;
+  perform public.reset_capture_email(t.id);
+  update public.profiles
+  set account_status = 'deleting', suspended_until = null, suspension_reason_code = null, moderation_updated_at = now()
+  where id = t.user_id and account_status <> 'deleting';
+  update public.reset_job_targets set status = 'files_pending', updated_at = now() where id = t.id;
+  return jsonb_build_object('user_id', t.user_id);
+end;
+$$;
+
+-- Ends the job once nobody chosen is open any more: 'done', or 'failed' if someone failed.
+-- Settles the collateral, writes the in-app notices for affected people who keep their account
+-- and reads their addresses for the mails (sent by the Edge Function afterwards). Logs the
+-- totals per category (no names). Returns the progress either way.
+create or replace function public.admin_reset_run_finish(p_job_id uuid)
+returns jsonb
+language plpgsql security definer set search_path = ''
+as $$
+declare
+  job public.reset_jobs%rowtype := public.reset_own_job(p_job_id, array['running']);
+  progress jsonb;
+  totals jsonb;
+  collateral jsonb;
+  final_status text;
+  t public.reset_job_targets%rowtype;
+begin
+  select jsonb_build_object(
+    'total', count(*),
+    'done', count(*) filter (where x.status = 'done'),
+    'failed', count(*) filter (where x.status = 'failed'),
+    'skipped', count(*) filter (where x.status = 'skipped'),
+    'open', count(*) filter (where x.status in ('pending', 'claimed', 'files_pending'))
+  ) into progress
+  from public.reset_job_targets x where x.job_id = p_job_id and x.role = 'selected';
+  if (progress ->> 'open')::integer > 0 then
+    return progress || jsonb_build_object('status', 'running');
+  end if;
+  final_status := case when (progress ->> 'failed')::integer > 0 then 'failed' else 'done' end;
+
+  update public.reset_job_targets
+  set status = case when result is not null then 'done' else 'skipped' end, updated_at = now()
+  where job_id = p_job_id and role = 'collateral' and status = 'pending';
+
+  -- Affected people who keep their account: in-app notice (once) and the address for the mail.
+  for t in
+    select x.* from public.reset_job_targets x
+    join public.profiles p on p.id = x.user_id
+    where x.job_id = p_job_id
+  loop
+    continue when not public.reset_target_affected(t, job.mode);
+    if t.notice_sent_at is null then
+      insert into public.moderation_notices (user_id, kind, message)
+      values (t.user_id, 'info', public.reset_notice_text(t.role, job.categories, job.reason));
+      update public.reset_job_targets set notice_sent_at = now() where id = t.id;
+    end if;
+    perform public.reset_capture_email(t.id);
+  end loop;
+
+  totals := public.reset_counts_sum(array(
+    select x.result from public.reset_job_targets x where x.job_id = p_job_id and x.role = 'selected' and x.status = 'done'
+  ));
+  select jsonb_build_object('accounts', count(*), 'totals', public.reset_counts_sum(array_agg(x.result)))
+  into collateral
+  from public.reset_job_targets x where x.job_id = p_job_id and x.role = 'collateral' and x.status = 'done';
+  update public.reset_jobs
+  set status = final_status, finished_at = now(),
+      result = jsonb_build_object('totals', totals, 'collateral', collateral, 'progress', progress)
+  where id = p_job_id;
+  perform public.log_moderation_action(
+    'reset_finished', 'reset_job', p_job_id, null, null, job.reason, null,
+    jsonb_build_object('mode', job.mode, 'status', final_status, 'totals', totals, 'collateral', collateral, 'progress', progress)
+  );
+  return progress || jsonb_build_object('status', final_status);
+end;
+$$;
+
+-- ---------------------------------------------------------------- notification mails
+-- Only the Edge Function run_data_reset calls these, with the service role (addresses never go
+-- through the admin's session or the browser).
+
+-- Addresses older than email_keep_days are deleted, also when the mail never went out.
+create or replace function public.reset_purge_emails()
+returns integer
+language plpgsql security definer set search_path = ''
+as $$
+declare
+  n integer;
+begin
+  update public.reset_job_targets
+  set email_address = null,
+      email_status = case when email_status = 'pending' then 'failed' else email_status end,
+      error = case when email_status = 'pending' then 'mail_expired' else error end,
+      updated_at = now()
+  where email_address is not null
+    and email_captured_at < now() - make_interval(days => (public.reset_limits() ->> 'email_keep_days')::integer);
+  get diagnostics n = row_count;
+  return n;
+end;
+$$;
+
+-- The next mails of a job (at most p_limit): address, role and the texts of the job.
+create or replace function public.reset_mail_claim(p_job_id uuid, p_limit integer)
+returns table (
+  target_id uuid, email text, role text, mode text, categories text[], reason text, subject text, user_message text
+)
+language plpgsql security definer set search_path = ''
+as $$
+#variable_conflict use_column
+begin
+  perform public.reset_purge_emails();
+  return query
+  select t.id, t.email_address, t.role, j.mode, j.categories, j.reason, j.subject, j.user_message
+  from public.reset_job_targets t join public.reset_jobs j on j.id = t.job_id
+  where t.job_id = p_job_id and j.status in ('done', 'failed')
+    and t.email_status = 'pending' and t.email_address is not null
+  order by t.role, t.id
+  limit least(greatest(coalesce(p_limit, 0), 0), 100);
+end;
+$$;
+
+-- Outcome of one mail: 'sent' or 'failed' delete the address; 'pending' (quota, provider
+-- unavailable) keeps it for "Offene Mails senden".
+create or replace function public.reset_mail_result(p_target_id uuid, p_status text)
+returns void
+language plpgsql security definer set search_path = ''
+as $$
+begin
+  if p_status not in ('sent', 'failed', 'pending') then
+    raise exception 'invalid_status';
+  end if;
+  update public.reset_job_targets
+  set email_status = p_status,
+      email_address = case when p_status = 'pending' then email_address end,
+      error = case when p_status = 'failed' then 'mail_failed' else error end,
+      updated_at = now()
+  where id = p_target_id and email_status = 'pending';
+end;
+$$;
+
+-- No mail provider set up: nobody of the job gets a mail (people who keep their account have
+-- the in-app notice); the addresses are deleted at once.
+create or replace function public.reset_mail_not_configured(p_job_id uuid)
+returns integer
+language plpgsql security definer set search_path = ''
+as $$
+declare
+  n integer;
+begin
+  update public.reset_job_targets
+  set email_status = 'not_configured', email_address = null, updated_at = now()
+  where job_id = p_job_id and email_status = 'pending';
+  get diagnostics n = row_count;
+  return n;
+end;
 $$;
 
 -- The job of the caller in a given state, locked. Internal.
@@ -8225,46 +8893,6 @@ begin
 end;
 $$;
 
--- Dry run: what the job would remove, per person and in total. Deletes nothing. Stores the
--- numbers (needed for confirming).
-create or replace function public.admin_reset_preview(p_job_id uuid)
-returns jsonb
-language plpgsql security definer set search_path = ''
-as $$
-declare
-  job public.reset_jobs%rowtype := public.reset_own_job(p_job_id, array['draft']);
-  selected uuid[] := public.reset_selected_ids(p_job_id);
-  t record;
-  r jsonb;
-  file_count bigint := 0;
-  totals jsonb;
-begin
-  for t in select * from public.reset_job_targets x where x.job_id = p_job_id for update loop
-    r := public.reset_user_categories(t.user_id, job.categories, selected, false);
-    file_count := file_count + jsonb_array_length(r -> 'files');
-    update public.reset_job_targets
-    set counts = r -> 'counts', flagged = cardinality(public.reset_flags(t.user_id)) > 0, updated_at = now()
-    where id = t.id;
-  end loop;
-  totals := public.reset_counts_sum(array(select x.counts from public.reset_job_targets x where x.job_id = p_job_id));
-  update public.reset_jobs
-  set preview = jsonb_build_object('totals', totals, 'targets', (select count(*) from public.reset_job_targets x where x.job_id = p_job_id),
-                                   'files', file_count),
-      previewed_at = now()
-  where id = p_job_id;
-  return jsonb_build_object(
-    'job_id', p_job_id, 'mode', job.mode, 'categories', to_jsonb(job.categories), 'totals', totals, 'files', file_count,
-    'targets', coalesce((
-      select jsonb_agg(jsonb_build_object(
-        'target_id', x.id, 'user_id', x.user_id, 'username', p.username, 'display_name', p.display_name,
-        'flagged', x.flagged, 'counts', x.counts, 'total', public.reset_counts_total(x.counts)
-      ) order by p.username)
-      from public.reset_job_targets x join public.profiles p on p.id = x.user_id
-      where x.job_id = p_job_id
-    ), '[]'::jsonb)
-  );
-end;
-$$;
 
 -- Was the last TOTP step of this session at most p_seconds ago (amr claim of the JWT)?
 create or replace function public.reset_fresh_totp(p_seconds integer)
@@ -8278,57 +8906,6 @@ as $$
   ), false);
 $$;
 
--- Confirms a draft: only its creator, after a dry run newer than the last change, with a reason,
--- the exact word and a TOTP step at most 5 minutes old. From now on scope and people are frozen.
-create or replace function public.admin_reset_confirm(p_job_id uuid, p_phrase text)
-returns void
-language plpgsql security definer set search_path = ''
-as $$
-declare
-  job public.reset_jobs%rowtype := public.reset_own_job(p_job_id, array['draft']);
-  limits jsonb := public.reset_limits();
-  n integer;
-begin
-  if p_phrase is distinct from limits ->> 'phrase' then
-    raise exception 'wrong_phrase';
-  end if;
-  if not public.reset_fresh_totp((limits ->> 'totp_max_age_seconds')::integer) then
-    raise exception 'totp_required';
-  end if;
-  if job.reason is null or char_length(job.reason) < 10 then
-    raise exception 'reason_too_short';
-  end if;
-  if job.previewed_at is null or job.previewed_at < job.updated_at then
-    raise exception 'preview_required';
-  end if;
-  if job.mode = 'full' and not public.reset_full_allowed() then
-    raise exception 'full_reset_disabled';
-  end if;
-  select count(*) into n from public.reset_job_targets t where t.job_id = p_job_id and t.selected;
-  if n = 0 then
-    raise exception 'no_targets';
-  end if;
-  -- Protection or flags may have changed since the people were chosen.
-  if exists (select 1 from public.reset_job_targets t where t.job_id = p_job_id and public.reset_protection(t.user_id) is not null) then
-    raise exception 'protected_target';
-  end if;
-  if not job.include_flagged and exists (
-    select 1 from public.reset_job_targets t where t.job_id = p_job_id and cardinality(public.reset_flags(t.user_id)) > 0
-  ) then
-    raise exception 'flagged_not_confirmed';
-  end if;
-  perform pg_advisory_xact_lock(hashtext('peakpic.reset_jobs'));
-  if exists (select 1 from public.reset_jobs j where j.id <> p_job_id and j.status in ('confirmed', 'running')) then
-    raise exception 'other_job_active';
-  end if;
-  update public.reset_jobs set status = 'confirmed', confirmed_at = now() where id = p_job_id;
-  perform public.log_moderation_action(
-    'reset_confirmed', 'reset_job', p_job_id, null, null, job.reason, null,
-    jsonb_build_object('mode', job.mode, 'categories', to_jsonb(job.categories), 'targets', n,
-                       'include_flagged', job.include_flagged, 'preview', job.preview -> 'totals')
-  );
-end;
-$$;
 
 -- Cancels a job that hasn't started (draft or confirmed). Only its creator.
 create or replace function public.admin_reset_cancel(p_job_id uuid)
@@ -8489,70 +9066,7 @@ revoke all on function public.reset_export_user(uuid, text[]) from public, anon,
 revoke all on function public.admin_reset_export(uuid) from public, anon;
 grant execute on function public.admin_reset_export(uuid) to authenticated;
 
--- Earlier jobs (newest first).
-create or replace function public.admin_reset_jobs()
-returns table (
-  id uuid, status text, mode text, categories text[], created_at timestamptz, confirmed_at timestamptz,
-  finished_at timestamptz, targets bigint, own boolean
-)
-language plpgsql stable security definer set search_path = ''
-as $$
-#variable_conflict use_column
-begin
-  perform public.require_admin();
-  return query
-  select j.id, j.status, j.mode, j.categories, j.created_at, j.confirmed_at, j.finished_at,
-         (select count(*) from public.reset_job_targets t where t.job_id = j.id),
-         j.created_by = auth.uid()
-  from public.reset_jobs j
-  order by j.created_at desc
-  limit 100;
-end;
-$$;
 
--- One job with its progress and, per person, status and numbers. Never e-mail addresses. Deleted
--- accounts appear only with the start of their hash.
-create or replace function public.admin_reset_job_status(p_job_id uuid)
-returns jsonb
-language plpgsql stable security definer set search_path = ''
-as $$
-declare
-  job public.reset_jobs%rowtype;
-begin
-  perform public.require_admin();
-  select * into job from public.reset_jobs j where j.id = p_job_id;
-  if not found then
-    raise exception 'job_not_found';
-  end if;
-  return jsonb_build_object(
-    'id', job.id, 'status', job.status, 'mode', job.mode, 'categories', to_jsonb(job.categories),
-    'reason', job.reason, 'subject', job.subject, 'user_message', job.user_message,
-    'include_flagged', job.include_flagged, 'preview', job.preview, 'previewed_at', job.previewed_at,
-    'result', job.result, 'own', job.created_by = auth.uid(),
-    'created_at', job.created_at, 'updated_at', job.updated_at, 'confirmed_at', job.confirmed_at,
-    'started_at', job.started_at, 'finished_at', job.finished_at,
-    'progress', (
-      select jsonb_build_object(
-        'total', count(*),
-        'done', count(*) filter (where t.status = 'done'),
-        'failed', count(*) filter (where t.status = 'failed'),
-        'skipped', count(*) filter (where t.status = 'skipped'),
-        'open', count(*) filter (where t.status in ('pending', 'claimed', 'files_pending'))
-      )
-      from public.reset_job_targets t where t.job_id = p_job_id
-    ),
-    'targets', coalesce((
-      select jsonb_agg(jsonb_build_object(
-        'target_id', t.id, 'user_id', t.user_id, 'username', p.username, 'display_name', p.display_name,
-        'user_hash', left(t.user_hash, 12), 'flagged', t.flagged, 'status', t.status, 'error', t.error,
-        'counts', t.counts, 'result', t.result, 'email_status', t.email_status, 'attempts', t.attempts
-      ) order by p.username nulls last, t.user_hash)
-      from public.reset_job_targets t left join public.profiles p on p.id = t.user_id
-      where t.job_id = p_job_id
-    ), '[]'::jsonb)
-  );
-end;
-$$;
 
 -- ---------------------------------------------------------------- run (Edge Function run_data_reset)
 -- Called with the admin's own session; the Edge Function only adds storage and the Auth admin
@@ -8645,76 +9159,7 @@ begin
 end;
 $$;
 
--- Categories: removes the person's rows (exactly like the dry run counted them) and returns the
--- files the Edge Function must remove. Repeating it after the rows are gone returns the same
--- files again.
-create or replace function public.admin_reset_apply_user(p_job_id uuid, p_target_id uuid)
-returns jsonb
-language plpgsql security definer set search_path = ''
-as $$
-declare
-  job public.reset_jobs%rowtype := public.reset_own_job(p_job_id, array['running']);
-  t public.reset_job_targets%rowtype := public.reset_target_for_step(p_job_id, p_target_id);
-  r jsonb;
-begin
-  if job.mode <> 'categories' then
-    raise exception 'wrong_mode';
-  end if;
-  if t.status = 'files_pending' then
-    return jsonb_build_object('user_id', t.user_id, 'files', coalesce(t.files, '[]'::jsonb));
-  end if;
-  if t.user_id is null or public.reset_protection(t.user_id) is not null
-    or exists (select 1 from public.profiles p where p.id = t.user_id and p.account_status = 'deleting') then
-    update public.reset_job_targets set status = 'skipped', error = 'not_allowed_anymore', updated_at = now() where id = t.id;
-    return jsonb_build_object('skipped', true);
-  end if;
-  r := public.reset_user_categories(t.user_id, job.categories, public.reset_selected_ids(p_job_id), true);
-  update public.reset_job_targets
-  set status = 'files_pending', result = r -> 'counts', files = r -> 'files', updated_at = now()
-  where id = t.id;
-  return jsonb_build_object('user_id', t.user_id, 'files', r -> 'files');
-end;
-$$;
 
--- Whole account: counts what goes (for the report), then marks the account 'deleting' (it is
--- hidden at once and can't write; an account already 'deleting' is simply finished). The Edge
--- Function then deletes the files, calls finish_account_deletion() and deletes the auth user,
--- like delete_account. {deleted: true} when the account is gone already (interrupted earlier).
-create or replace function public.admin_reset_full_prepare(p_job_id uuid, p_target_id uuid)
-returns jsonb
-language plpgsql security definer set search_path = ''
-as $$
-declare
-  job public.reset_jobs%rowtype := public.reset_own_job(p_job_id, array['running']);
-  t public.reset_job_targets%rowtype := public.reset_target_for_step(p_job_id, p_target_id);
-  r jsonb;
-begin
-  if job.mode <> 'full' then
-    raise exception 'wrong_mode';
-  end if;
-  if not public.reset_full_allowed() then
-    raise exception 'full_reset_disabled';
-  end if;
-  if t.user_id is null then
-    return jsonb_build_object('deleted', true);
-  end if;
-  if public.reset_protection(t.user_id) is not null then
-    update public.reset_job_targets set status = 'skipped', error = 'not_allowed_anymore', updated_at = now() where id = t.id;
-    return jsonb_build_object('skipped', true);
-  end if;
-  if t.result is null then
-    r := public.reset_user_categories(t.user_id, public.reset_category_keys(), public.reset_selected_ids(p_job_id), false);
-    update public.reset_job_targets
-    set result = (r -> 'counts') || jsonb_build_object('account', jsonb_build_object('account', 1))
-    where id = t.id;
-  end if;
-  update public.profiles
-  set account_status = 'deleting', suspended_until = null, suspension_reason_code = null, moderation_updated_at = now()
-  where id = t.user_id and account_status <> 'deleting';
-  update public.reset_job_targets set status = 'files_pending', updated_at = now() where id = t.id;
-  return jsonb_build_object('user_id', t.user_id);
-end;
-$$;
 
 create or replace function public.admin_reset_target_done(p_job_id uuid, p_target_id uuid)
 returns void
@@ -8746,43 +9191,6 @@ begin
 end;
 $$;
 
--- Ends the job once nobody is open any more: 'done', or 'failed' if someone failed. Logs the
--- totals per category (no names). Returns the progress either way.
-create or replace function public.admin_reset_run_finish(p_job_id uuid)
-returns jsonb
-language plpgsql security definer set search_path = ''
-as $$
-declare
-  job public.reset_jobs%rowtype := public.reset_own_job(p_job_id, array['running']);
-  progress jsonb;
-  totals jsonb;
-  final_status text;
-begin
-  select jsonb_build_object(
-    'total', count(*),
-    'done', count(*) filter (where t.status = 'done'),
-    'failed', count(*) filter (where t.status = 'failed'),
-    'skipped', count(*) filter (where t.status = 'skipped'),
-    'open', count(*) filter (where t.status in ('pending', 'claimed', 'files_pending'))
-  ) into progress
-  from public.reset_job_targets t where t.job_id = p_job_id;
-  if (progress ->> 'open')::integer > 0 then
-    return progress || jsonb_build_object('status', 'running');
-  end if;
-  final_status := case when (progress ->> 'failed')::integer > 0 then 'failed' else 'done' end;
-  totals := public.reset_counts_sum(array(
-    select t.result from public.reset_job_targets t where t.job_id = p_job_id and t.status = 'done'
-  ));
-  update public.reset_jobs
-  set status = final_status, finished_at = now(), result = jsonb_build_object('totals', totals, 'progress', progress)
-  where id = p_job_id;
-  perform public.log_moderation_action(
-    'reset_finished', 'reset_job', p_job_id, null, null, job.reason, null,
-    jsonb_build_object('mode', job.mode, 'status', final_status, 'totals', totals, 'progress', progress)
-  );
-  return progress || jsonb_build_object('status', final_status);
-end;
-$$;
 
 do $$
 declare
@@ -8790,8 +9198,11 @@ declare
 begin
   foreach f in array array[
     'public.reset_limits()', 'public.reset_category_keys()', 'public.reset_full_allowed()',
-    'public.reset_protection(uuid)', 'public.reset_flags(uuid)', 'public.reset_conversation_full(uuid, uuid[])',
-    'public.reset_user_categories(uuid, text[], uuid[], boolean)', 'public.reset_counts_total(jsonb)',
+    'public.reset_protection(uuid)', 'public.reset_flags(uuid)', 'public.reset_conversation_ends(uuid, boolean)',
+    'public.reset_user_categories(uuid, text[], uuid[], boolean, uuid, boolean)', 'public.reset_counts_total(jsonb)',
+    'public.reset_category_label(text)', 'public.reset_member_protected(uuid)', 'public.reset_add_collateral(uuid, uuid, bigint)',
+    'public.reset_target_affected(public.reset_job_targets, text)', 'public.reset_capture_email(uuid)',
+    'public.reset_notice_text(text, text[], text)',
     'public.reset_counts_sum(jsonb[])', 'public.reset_own_job(uuid, text[])', 'public.reset_selected_ids(uuid)',
     'public.reset_checked_categories(text, text[])', 'public.reset_fresh_totp(integer)',
     'public.reset_target_for_step(uuid, uuid)'
@@ -8807,10 +9218,18 @@ begin
     'public.admin_reset_job_status(uuid)', 'public.admin_reset_run_start(uuid)', 'public.admin_reset_claim_batch(uuid)',
     'public.admin_reset_apply_user(uuid, uuid)', 'public.admin_reset_full_prepare(uuid, uuid)',
     'public.admin_reset_target_done(uuid, uuid)', 'public.admin_reset_target_failed(uuid, uuid, text)',
-    'public.admin_reset_run_finish(uuid)'
+    'public.admin_reset_run_finish(uuid)', 'public.admin_reset_set_protected_chats(uuid, boolean)'
   ] loop
     execute format('revoke all on function %s from public, anon', f);
     execute format('grant execute on function %s to authenticated', f);
+  end loop;
+  -- Mails: only the Edge Function with the service role (addresses never reach a client).
+  foreach f in array array[
+    'public.reset_purge_emails()', 'public.reset_mail_claim(uuid, integer)', 'public.reset_mail_result(uuid, text)',
+    'public.reset_mail_not_configured(uuid)'
+  ] loop
+    execute format('revoke all on function %s from public, anon, authenticated', f);
+    execute format('grant execute on function %s to service_role', f);
   end loop;
 end;
 $$;

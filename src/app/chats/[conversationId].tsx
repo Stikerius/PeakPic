@@ -52,6 +52,7 @@ import {
   setMessagePinned,
   setReaction,
   subscribeToChatChanges,
+  subscribeToConversationDeletes,
   subscribeToMessages,
 } from "@/lib/chatRepo";
 import { emitAppEvent } from "@/lib/events";
@@ -125,6 +126,8 @@ export default function ChatScreen() {
     else next();
   }
   const [jumpTarget, setJumpTarget] = useState<string | null>(null);
+  // The chat was ended for everybody (data reset): nothing more is sent or restored.
+  const closedRef = useRef(false);
   const [highlightedId, setHighlightedId] = useState<string | null>(null);
 
   const partnerName = partner?.username ?? "";
@@ -268,11 +271,27 @@ export default function ChatScreen() {
       }
     });
 
+    // Ended for everybody: drop what is typed and loaded, clear the local background, back to the list.
+    const unsubscribeDeletes = subscribeToConversationDeletes((deletedId) => {
+      if (deletedId !== conversationId || closedRef.current) return;
+      closedRef.current = true;
+      setDraft("");
+      setReplyTo(null);
+      setPicker(null);
+      setMessages([]);
+      setPinned([]);
+      if (myId !== undefined) resetChatBackground(myId, conversationId);
+      emitAppEvent("chatRead", undefined);
+      Alert.alert("Dieser Chat wurde beendet.");
+      router.dismissTo("/chats");
+    });
+
     return () => {
       active = false;
       unsubscribeMessages();
       unsubscribeChanges();
-      markRead(conversationId);
+      unsubscribeDeletes();
+      if (!closedRef.current) markRead(conversationId);
     };
   }, [conversationId, myId]);
 
@@ -439,7 +458,7 @@ export default function ChatScreen() {
 
   async function send() {
     const body = draft.trim();
-    if (body.length === 0 || myId === undefined) return;
+    if (body.length === 0 || myId === undefined || closedRef.current) return;
     const quoted = replyTo;
     const temp: ChatMessage = {
       id: `temp-${Date.now()}`,
@@ -465,6 +484,7 @@ export default function ChatScreen() {
       setMessages((current) => mergeMessages((current ?? []).filter((m) => m.id !== temp.id), [sent]));
     } catch {
       setMessages((current) => (current ?? []).filter((m) => m.id !== temp.id));
+      if (closedRef.current) return;
       setDraft(body);
       setReplyTo(quoted);
       setError("Nachricht konnte nicht gesendet werden.");
@@ -592,7 +612,13 @@ export default function ChatScreen() {
                   keyExtractor={(m) => m.id}
                   contentContainerStyle={styles.list}
                   keyboardShouldPersistTaps="handled"
-                  renderItem={({ item }) => (
+                  renderItem={({ item }) =>
+                    item.notice === true ? (
+                      // Neutral line from the server: no sender, no actions.
+                      <View style={styles.noticeRow} accessibilityRole="text">
+                        <Text style={styles.noticeText}>{item.body}</Text>
+                      </View>
+                    ) : (
                     <SwipeableMessage
                       mine={item.senderId === myId}
                       pinned={item.pinnedAt !== null}
@@ -610,7 +636,8 @@ export default function ChatScreen() {
                         onPressReaction={(emoji) => void react(item, emoji)}
                       />
                     </SwipeableMessage>
-                  )}
+                    )
+                  }
                   onScrollToIndexFailed={({ index, averageItemLength }) => {
                     // Rows have different heights: jump close, then retry once they are measured.
                     listRef.current?.scrollToOffset({ offset: index * averageItemLength, animated: false });
@@ -800,6 +827,16 @@ const useStyles = makeStyles(({ colors }) =>
     emptyText: {
       color: colors.textSecondary,
       fontSize: fontSize.md,
+    },
+    noticeRow: {
+      alignItems: "center",
+      paddingVertical: spacing.sm,
+      paddingHorizontal: spacing.lg,
+    },
+    noticeText: {
+      ...typography.caption,
+      color: colors.textSecondary,
+      textAlign: "center",
     },
     error: {
       color: colors.danger,

@@ -10,7 +10,12 @@ export type ResetMode = "categories" | "full";
 export type CategoryKey = "chats" | "activities" | "plans" | "posts" | "stories" | "social" | "notifications" | "other";
 
 export const CATEGORIES: readonly { key: CategoryKey; label: string; description: string }[] = [
-  { key: "chats", label: "Chats", description: "Nachrichten und Mitgliedschaften; Unterhaltungen nur ganz, wenn alle Mitglieder ausgewählt sind." },
+  {
+    key: "chats",
+    label: "Chats",
+    description:
+      "Jede Unterhaltung der Ausgewählten wird für alle Beteiligten beendet, auch für nicht ausgewählte Konten. Chats mit geschützten Konten bleiben, dort verschwindet nur die Seite der Ausgewählten.",
+  },
   { key: "activities", label: "Aktivitäten", description: "Aufgezeichnete Trainings mit Übungen und Sätzen, Verlinkungen, Ruhetage." },
   { key: "plans", label: "Pläne", description: "Trainingspläne samt Fortschritt, Abweichungen und bestätigten Ruhetagen." },
   { key: "posts", label: "Beiträge", description: "Beiträge mit Fotos, eigene Kommentare, Likes, Reposts und Markierungen." },
@@ -31,6 +36,7 @@ export const COUNT_LABELS: Record<string, string> = {
   conversations: "Unterhaltungen",
   messages: "Nachrichten",
   memberships: "Mitgliedschaften",
+  conversations_lost: "Beendete Unterhaltungen",
   workouts: "Trainings",
   sets: "Sätze",
   links: "Verlinkungen",

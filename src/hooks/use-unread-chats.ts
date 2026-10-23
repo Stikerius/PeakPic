@@ -1,9 +1,9 @@
 import { useEffect, useState } from "react";
 
-import { listConversations, subscribeToMessages } from "@/lib/chatRepo";
+import { listConversations, subscribeToConversationDeletes, subscribeToMessages } from "@/lib/chatRepo";
 import { onAppEvent } from "@/lib/events";
 
-/** Number of chats with unread messages; updates on new messages and when a chat is read. */
+/** Number of chats with unread messages; updates on new messages, ended chats and when a chat is read. */
 export function useUnreadChatCount(): number {
   const [count, setCount] = useState(0);
 
@@ -18,10 +18,13 @@ export function useUnreadChatCount(): number {
     };
     reload();
     const unsubscribeRealtime = subscribeToMessages(reload);
+    // An ended chat takes its unread messages with it.
+    const unsubscribeDeletes = subscribeToConversationDeletes(reload);
     const unsubscribeRead = onAppEvent("chatRead", reload);
     return () => {
       active = false;
       unsubscribeRealtime();
+      unsubscribeDeletes();
       unsubscribeRead();
     };
   }, []);

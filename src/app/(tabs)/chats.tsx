@@ -6,7 +6,12 @@ import { ActivityIndicator, FlatList, Pressable, RefreshControl, StyleSheet, Tex
 import { Avatar } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
 import { fontSize, radius, spacing, typography } from "@/constants/theme";
-import { listConversations, subscribeToMessageDeletes, subscribeToMessages } from "@/lib/chatRepo";
+import {
+  listConversations,
+  subscribeToConversationDeletes,
+  subscribeToMessageDeletes,
+  subscribeToMessages,
+} from "@/lib/chatRepo";
 import { formatRelativeTime } from "@/lib/format";
 import { makeStyles, useTheme } from "@/lib/theme";
 import type { ConversationSummary } from "@/types/chat";
@@ -46,6 +51,15 @@ export default function ChatListScreen() {
     () =>
       subscribeToMessageDeletes((messageId) => {
         if (lastMessageIds.current.has(messageId)) void load();
+      }),
+    [],
+  );
+
+  // A chat ended for everybody (data reset): gone from the list at once, with its unread count.
+  useEffect(
+    () =>
+      subscribeToConversationDeletes((conversationId) => {
+        setConversations((current) => current?.filter((c) => c.id !== conversationId) ?? current);
       }),
     [],
   );

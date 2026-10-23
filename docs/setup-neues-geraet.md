@@ -268,7 +268,7 @@ Nur nötig, wenn du Functions deployst. Die Supabase-CLI läuft über `npx`, ohn
    | `delete_account` | Löscht ein Konto endgültig: selbst aus der App oder durch einen Admin im Dashboard. |
    | `login_with_username` | Anmeldung mit Username und Passwort; die E-Mail-Adresse verlässt den Server nicht. |
    | `send_legal_notice_email` | E-Mail-Erinnerung an Konten, die geänderte Rechtstexte noch nicht bestätigt haben (nur Admins). |
-   | `run_data_reset` | Führt einen bestätigten Bereinigungsauftrag in Batches aus (nur Admins). |
+   | `run_data_reset` | Führt einen bestätigten Bereinigungsauftrag in Batches aus und verschickt danach die Benachrichtigungen (nur Admins). |
 
    `_shared/` enthält gemeinsamen Code und ist keine eigene Function.
 
@@ -278,12 +278,14 @@ Nur nötig, wenn du Functions deployst. Die Supabase-CLI läuft über `npx`, ohn
 
    | Secret | Zweck | Woher |
    |---|---|---|
-   | `EMAIL_API_KEY` | API-Schlüssel des Mail-Dienstes (`send_legal_notice_email`) | Resend → API Keys, nur mit Senderecht |
+   | `EMAIL_API_KEY` | API-Schlüssel des Mail-Dienstes (`send_legal_notice_email`, `run_data_reset`) | Resend → API Keys, nur mit Senderecht |
    | `EMAIL_FROM` | Absender, z.B. `PeakPic <noreply@<DEINE-DOMAIN>>` | eine Adresse der beim Mail-Dienst verifizierten Domain |
-   | `EMAIL_API_URL` | optional, anderer Anbieter mit gleicher HTTP-API (Standard im Code: Resend) | Dokumentation des Anbieters |
+   | `SUPPORT_EMAIL` | Antwortadresse (Reply-To) und Kontaktadresse im Text der Mails (`send_legal_notice_email`, `run_data_reset`) | das Postfach für den Support (Abschnitt 9) |
+   | `EMAIL_API_URL` | optional, anderer Endpunkt mit gleicher HTTP-API (Standard im Code: Resend) | Dokumentation des Anbieters |
+   | `EMAIL_PROVIDER` | optional, Name des Anbieters im Mail-Modul `_shared/mail.ts` (Standard: `resend`) | nur ändern, wenn ein weiterer Anbieter eingebaut ist |
    | `ADMIN_ORIGIN` | optional, Adresse des Dashboards für CORS (Standard im Code: `http://127.0.0.1:5174`) | nur ändern, wenn das Dashboard woanders läuft |
 
-   `SUPABASE_URL`, `SUPABASE_ANON_KEY` und `SUPABASE_SERVICE_ROLE_KEY` stellt Supabase den Functions selbst bereit; die trägst du nicht ein. Der service_role-Schlüssel gehört nie in App, `admin-web` oder Repo. Eine Support- bzw. Antwortadresse liest der Code derzeit noch nicht als Secret; sie kommt mit dem geplanten Mail-Modul (**noch zu klären**).
+   `SUPABASE_URL`, `SUPABASE_ANON_KEY` und `SUPABASE_SERVICE_ROLE_KEY` stellt Supabase den Functions selbst bereit; die trägst du nicht ein. Der service_role-Schlüssel gehört nie in App, `admin-web` oder Repo.
 
    Secrets leben nur auf dem Supabase-Server. Du musst sie nicht von Gerät zu Gerät kopieren.
 

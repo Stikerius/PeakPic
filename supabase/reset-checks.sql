@@ -25,7 +25,8 @@ select * from (
     p.prosecdef and coalesce(array_to_string(p.proconfig, ','), '') like '%search_path=%'
   from pg_proc p join pg_namespace n on n.oid = p.pronamespace
   where n.nspname = 'public' and (p.proname like 'admin_reset_%' or p.proname like 'reset_%')
-    and p.proname not in ('reset_limits', 'reset_category_keys', 'reset_counts_total', 'reset_counts_sum')
+    and p.proname not in ('reset_limits', 'reset_category_keys', 'reset_counts_total', 'reset_counts_sum',
+                          'reset_category_label', 'reset_notice_text', 'reset_target_affected')
 
   union all
   -- Internal functions are not callable by clients.

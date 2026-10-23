@@ -637,7 +637,40 @@ export type ResetPreviewRow = {
   total: number;
 };
 
-export type ResetPreview = { totals: Counts; files: number; targets: ResetPreviewRow[]; raw: Json };
+export type ResetCollateralRow = {
+  targetId: string;
+  username: string;
+  displayName: string;
+  counts: Counts;
+  protected: boolean;
+  hasEmail: boolean;
+};
+
+export type ResetPreview = {
+  totals: Counts;
+  files: number;
+  targets: ResetPreviewRow[];
+  /** Not chosen, but lose a chat that is ended for everybody. */
+  collateral: ResetCollateralRow[];
+  /** Chats with a protected account that stay (only the chosen person's side goes). */
+  protectedChatsKept: number;
+  includeProtectedChats: boolean;
+  raw: Json;
+};
+
+function collateralRows(value: unknown): ResetCollateralRow[] {
+  return asArray(value).map((item) => {
+    const r = asRecord(item);
+    return {
+      targetId: str(r.target_id),
+      username: str(r.username),
+      displayName: str(r.display_name),
+      counts: toCounts(r.counts),
+      protected: bool(r.protected),
+      hasEmail: bool(r.has_email),
+    };
+  });
+}
 
 /** Dry run: numbers per person and in total; deletes nothing. */
 export async function previewResetJob(jobId: string): Promise<ResetPreview> {
@@ -657,8 +690,16 @@ export async function previewResetJob(jobId: string): Promise<ResetPreview> {
         total: num(r.total),
       };
     }),
+    collateral: collateralRows(raw.collateral),
+    protectedChatsKept: num(raw.protected_chats_kept),
+    includeProtectedChats: bool(raw.include_protected_chats),
     raw,
   };
+}
+
+/** "Chats mit geschützten Konten ebenfalls beenden" (logged; needs a new dry run). */
+export async function setResetProtectedChats(jobId: string, include: boolean): Promise<void> {
+  await rpc("admin_reset_set_protected_chats", { p_job_id: jobId, p_include: include });
 }
 
 /** Backup of the affected rows (chats without text, no addresses, no files). Logged. */
@@ -724,8 +765,13 @@ export type ResetTargetRow = {
   counts: Counts;
   result: Counts;
   emailStatus: string;
+  /** In-app notice written (people who keep their account). */
+  inApp: boolean;
+  role: "selected" | "collateral";
   attempts: number;
 };
+
+export type ResetMailSummary = { pending: number; sent: number; failed: number; notConfigured: number; inApp: number };
 
 export type ResetProgress = { total: number; done: number; failed: number; skipped: number; open: number };
 
@@ -738,10 +784,13 @@ export type ResetJob = {
   subject: string;
   userMessage: string;
   includeFlagged: boolean;
+  includeProtectedChats: boolean;
   previewTotals: Counts;
   previewFiles: number;
   previewedAt: string | null;
   resultTotals: Counts;
+  resultCollateral: Counts;
+  mail: ResetMailSummary;
   own: boolean;
   createdAt: string;
   updatedAt: string;
@@ -770,10 +819,16 @@ export async function fetchResetJob(jobId: string): Promise<ResetJob> {
     subject: str(raw.subject),
     userMessage: str(raw.user_message),
     includeFlagged: bool(raw.include_flagged),
+    includeProtectedChats: bool(raw.include_protected_chats),
     previewTotals: toCounts(preview.totals),
     previewFiles: num(preview.files),
     previewedAt: strOrNull(raw.previewed_at),
     resultTotals: toCounts(asRecord(raw.result).totals),
+    resultCollateral: toCounts(asRecord(asRecord(raw.result).collateral).totals),
+    mail: (() => {
+      const m = asRecord(raw.mail);
+      return { pending: num(m.pending), sent: num(m.sent), failed: num(m.failed), notConfigured: num(m.not_configured), inApp: num(m.in_app) };
+    })(),
     own: bool(raw.own),
     createdAt: str(raw.created_at),
     updatedAt: str(raw.updated_at),
@@ -795,6 +850,8 @@ export async function fetchResetJob(jobId: string): Promise<ResetJob> {
         counts: toCounts(r.counts),
         result: toCounts(r.result),
         emailStatus: str(r.email_status),
+        inApp: bool(r.in_app),
+        role: str(r.role) === "collateral" ? "collateral" : "selected",
         attempts: num(r.attempts),
       };
     }),
@@ -813,7 +870,16 @@ const RUN_ERRORS: Record<string, string> = {
   other_job_active: "Ein anderer Auftrag läuft bereits.",
 };
 
-export type ResetBatchResult = ResetProgress & { status: string; failedInBatch: number };
+/** Outcome of sending notification mails (counts only, never addresses). */
+export type ResetMailRun = { configured: boolean; sent: number; failed: number; stopped: string | null; message: string | null };
+
+function mailRunOf(value: unknown): ResetMailRun | null {
+  if (value === undefined || value === null) return null;
+  const m = asRecord(value);
+  return { configured: bool(m.configured), sent: num(m.sent), failed: num(m.failed), stopped: strOrNull(m.stopped), message: strOrNull(m.message) };
+}
+
+export type ResetBatchResult = ResetProgress & { status: string; failedInBatch: number; mail: ResetMailRun | null };
 
 /** One batch of the Edge Function run_data_reset; returns the progress after it. */
 export async function runResetBatch(jobId: string): Promise<ResetBatchResult> {
@@ -831,7 +897,22 @@ export async function runResetBatch(jobId: string): Promise<ResetBatchResult> {
     throw new ApiError(RUN_ERRORS[code] ?? "Ausführung fehlgeschlagen. Ist die Edge Function run_data_reset deployt?");
   }
   const r = asRecord(data);
-  return { ...progressOf(r), status: str(r.status), failedInBatch: num(r.failed_in_batch) };
+  return { ...progressOf(r), status: str(r.status), failedInBatch: num(r.failed_in_batch), mail: mailRunOf(r.mail) };
+}
+
+/** "Offene Mails senden": notification mails of a finished job that are still waiting (quota). */
+export async function sendResetMails(jobId: string): Promise<ResetMailRun> {
+  const { data, error } = await supabase.functions.invoke("run_data_reset", { body: { job_id: jobId, action: "send_mails" } });
+  if (error) throw new ApiError("Mails konnten nicht gesendet werden. Ist die Edge Function run_data_reset deployt?");
+  return mailRunOf(asRecord(data).mail) ?? { configured: false, sent: 0, failed: 0, stopped: null, message: null };
+}
+
+/** Whether a mail provider is set up (secrets of the Edge Function). */
+export async function fetchResetMailStatus(): Promise<{ configured: boolean; reason: string | null }> {
+  const { data, error } = await supabase.functions.invoke("run_data_reset", { body: { action: "mail_status" } });
+  if (error) return { configured: false, reason: "Edge Function run_data_reset ist nicht erreichbar (nicht deployt?)." };
+  const r = asRecord(data);
+  return { configured: bool(r.configured), reason: strOrNull(r.reason) };
 }
 
 /**
