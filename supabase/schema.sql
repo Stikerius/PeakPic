@@ -8347,6 +8347,148 @@ begin
 end;
 $$;
 
+-- The rows a category touches for one person, as JSON (for the backup before a reset). Chats only
+-- as metadata (ids, members, sender and time of each message), never their text: nobody reads
+-- chats freely (moderators only through report_snapshots). No e-mail addresses. Internal.
+create or replace function public.reset_export_user(p_user uuid, p_categories text[])
+returns jsonb
+language plpgsql stable security definer set search_path = ''
+as $$
+declare
+  result jsonb;
+  cats text[] := p_categories;
+begin
+  select jsonb_build_object(
+    'user_id', p.id, 'username', p.username, 'display_name', p.display_name, 'created_at', p.created_at,
+    'account_status', p.account_status
+  ) into result
+  from public.profiles p where p.id = p_user;
+  if result is null then
+    return null;
+  end if;
+  if 'chats' = any (cats) then
+    result := result || jsonb_build_object('chats', jsonb_build_object(
+      'memberships', (select coalesce(jsonb_agg(to_jsonb(m)), '[]') from public.conversation_members m where m.user_id = p_user),
+      'messages', (select coalesce(jsonb_agg(jsonb_build_object(
+                     'id', x.id, 'conversation_id', x.conversation_id, 'sender_id', x.sender_id,
+                     'created_at', x.created_at, 'kind', x.kind, 'post_id', x.post_id)), '[]')
+                   from public.messages x
+                   where x.conversation_id in (select m.conversation_id from public.conversation_members m where m.user_id = p_user)
+                     and x.sender_id = p_user)
+    ));
+  end if;
+  if 'posts' = any (cats) then
+    result := result || jsonb_build_object('posts', jsonb_build_object(
+      'posts', (select coalesce(jsonb_agg(to_jsonb(x)), '[]') from public.posts x where x.user_id = p_user),
+      'post_media', (select coalesce(jsonb_agg(to_jsonb(x)), '[]') from public.post_media x where x.user_id = p_user),
+      'comments', (select coalesce(jsonb_agg(to_jsonb(x)), '[]') from public.comments x where x.user_id = p_user),
+      'post_likes', (select coalesce(jsonb_agg(to_jsonb(x)), '[]') from public.post_likes x where x.user_id = p_user),
+      'comment_likes', (select coalesce(jsonb_agg(to_jsonb(x)), '[]') from public.comment_likes x where x.user_id = p_user),
+      'post_reposts', (select coalesce(jsonb_agg(to_jsonb(x)), '[]') from public.post_reposts x where x.reposter_id = p_user),
+      'post_tags', (select coalesce(jsonb_agg(to_jsonb(x)), '[]') from public.post_tags x where x.user_id = p_user)
+    ));
+  end if;
+  if 'stories' = any (cats) then
+    result := result || jsonb_build_object('stories', jsonb_build_object(
+      'stories', (select coalesce(jsonb_agg(to_jsonb(x)), '[]') from public.stories x where x.user_id = p_user),
+      'highlights', (select coalesce(jsonb_agg(to_jsonb(x)), '[]') from public.highlights x where x.user_id = p_user),
+      'highlight_items', (select coalesce(jsonb_agg(to_jsonb(x)), '[]') from public.highlight_items x
+                          join public.highlights h on h.id = x.highlight_id where h.user_id = p_user),
+      'story_likes', (select coalesce(jsonb_agg(to_jsonb(x)), '[]') from public.story_likes x where x.user_id = p_user),
+      'story_views', (select coalesce(jsonb_agg(to_jsonb(x)), '[]') from public.story_views x where x.user_id = p_user)
+    ));
+  end if;
+  if 'activities' = any (cats) then
+    result := result || jsonb_build_object('activities', jsonb_build_object(
+      'workouts', (select coalesce(jsonb_agg(to_jsonb(x)), '[]') from public.workouts x where x.user_id = p_user),
+      'workout_exercises', (select coalesce(jsonb_agg(to_jsonb(x)), '[]') from public.workout_exercises x
+                            join public.workouts w on w.id = x.workout_id where w.user_id = p_user),
+      'workout_sets', (select coalesce(jsonb_agg(to_jsonb(x)), '[]') from public.workout_sets x
+                       join public.workout_exercises e on e.id = x.workout_exercise_id
+                       join public.workouts w on w.id = e.workout_id where w.user_id = p_user),
+      'workout_shares', (select coalesce(jsonb_agg(to_jsonb(x)), '[]') from public.workout_shares x where x.tagged_user_id = p_user),
+      'rest_day_uses', (select coalesce(jsonb_agg(to_jsonb(x)), '[]') from public.rest_day_uses x where x.user_id = p_user)
+    ));
+  end if;
+  if 'plans' = any (cats) then
+    result := result || jsonb_build_object('plans', jsonb_build_object(
+      'training_plans', (select coalesce(jsonb_agg(to_jsonb(x)), '[]') from public.training_plans x where x.user_id = p_user),
+      'plan_days', (select coalesce(jsonb_agg(to_jsonb(x)), '[]') from public.plan_days x
+                    join public.training_plans tp on tp.id = x.plan_id where tp.user_id = p_user),
+      'plan_exercises', (select coalesce(jsonb_agg(to_jsonb(x)), '[]') from public.plan_exercises x
+                         join public.plan_days d on d.id = x.plan_day_id
+                         join public.training_plans tp on tp.id = d.plan_id where tp.user_id = p_user),
+      'plan_rounds', (select coalesce(jsonb_agg(to_jsonb(x)), '[]') from public.plan_rounds x where x.user_id = p_user),
+      'plan_deviations', (select coalesce(jsonb_agg(to_jsonb(x)), '[]') from public.plan_deviations x where x.user_id = p_user),
+      'planned_rest_uses', (select coalesce(jsonb_agg(to_jsonb(x)), '[]') from public.planned_rest_uses x where x.user_id = p_user),
+      'plan_adoptions', (select coalesce(jsonb_agg(to_jsonb(x)), '[]') from public.plan_adoptions x where x.adopter_id = p_user)
+    ));
+  end if;
+  if 'social' = any (cats) then
+    result := result || jsonb_build_object('social', jsonb_build_object(
+      'follows', (select coalesce(jsonb_agg(to_jsonb(x)), '[]') from public.follows x
+                  where x.follower_id = p_user or x.following_id = p_user),
+      'user_blocks', (select coalesce(jsonb_agg(to_jsonb(x)), '[]') from public.user_blocks x where x.blocker_id = p_user),
+      'audience_restrictions', (select coalesce(jsonb_agg(to_jsonb(x)), '[]') from public.audience_restrictions x where x.owner_id = p_user)
+    ));
+  end if;
+  if 'notifications' = any (cats) then
+    result := result || jsonb_build_object('notifications', jsonb_build_object(
+      'notifications', (select coalesce(jsonb_agg(to_jsonb(x)), '[]') from public.notifications x where x.user_id = p_user)
+    ));
+  end if;
+  if 'other' = any (cats) then
+    result := result || jsonb_build_object('other', jsonb_build_object(
+      'reports_as_reporter', (select coalesce(jsonb_agg(jsonb_build_object(
+                                'id', x.id, 'target_type', x.target_type, 'target_id', x.target_id, 'reason', x.reason,
+                                'status', x.status, 'created_at', x.created_at)), '[]')
+                              from public.reports x where x.reporter_id = p_user),
+      'settings', (select jsonb_build_object(
+                     'is_private', p.is_private, 'story_visibility', p.story_visibility, 'post_visibility', p.post_visibility,
+                     'tag_permission', p.tag_permission, 'tag_notifications', p.tag_notifications,
+                     'tag_chat_messages', p.tag_chat_messages, 'notify_plan_adopted', p.notify_plan_adopted,
+                     'default_activity_visibility', p.default_activity_visibility,
+                     'training_stats_visibility', p.training_stats_visibility)
+                   from public.profiles p where p.id = p_user),
+      'rest_budgets', (select coalesce(jsonb_agg(to_jsonb(x)), '[]') from public.rest_budgets x where x.user_id = p_user)
+    ));
+  end if;
+  return result;
+end;
+$$;
+
+-- Backup before confirming: the rows of everybody in the job, per category (chats without their
+-- text, no e-mail addresses, no files). Only the job's creator, before it runs. Logged, because it
+-- shows private content.
+create or replace function public.admin_reset_export(p_job_id uuid)
+returns jsonb
+language plpgsql security definer set search_path = ''
+as $$
+declare
+  job public.reset_jobs%rowtype := public.reset_own_job(p_job_id, array['draft', 'confirmed']);
+  people jsonb;
+begin
+  if job.reason is null or char_length(job.reason) < 10 then
+    raise exception 'reason_too_short';
+  end if;
+  select coalesce(jsonb_agg(public.reset_export_user(t.user_id, job.categories)), '[]') into people
+  from public.reset_job_targets t where t.job_id = p_job_id and t.selected and t.user_id is not null;
+  perform public.log_moderation_action(
+    'reset_exported', 'reset_job', p_job_id, null, null, job.reason, null,
+    jsonb_build_object('mode', job.mode, 'categories', to_jsonb(job.categories), 'targets', jsonb_array_length(people))
+  );
+  return jsonb_build_object(
+    'job_id', job.id, 'mode', job.mode, 'categories', to_jsonb(job.categories), 'exported_at', now(),
+    'note', 'Ohne Dateien im Storage, ohne Chat-Texte und ohne E-Mail-Adressen.',
+    'people', people
+  );
+end;
+$$;
+
+revoke all on function public.reset_export_user(uuid, text[]) from public, anon, authenticated;
+revoke all on function public.admin_reset_export(uuid) from public, anon;
+grant execute on function public.admin_reset_export(uuid) to authenticated;
+
 -- Earlier jobs (newest first).
 create or replace function public.admin_reset_jobs()
 returns table (

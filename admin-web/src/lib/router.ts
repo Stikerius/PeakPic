@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 
 /**
  * Tiny hash router: #/queue, #/reports/<id>, #/users, #/users/<id>, #/audit, #/legal,
- * #/legal/<id>, #/pending, #/usage, #/ (overview).
+ * #/legal/<id>, #/pending, #/usage, #/reset, #/reset/<id>, #/ (overview).
  */
 export type Route =
   | { page: "overview" }
@@ -14,7 +14,9 @@ export type Route =
   | { page: "legal" }
   | { page: "legal-edit"; id: string }
   | { page: "pending" }
-  | { page: "usage" };
+  | { page: "usage" }
+  | { page: "reset" }
+  | { page: "reset-job"; id: string };
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -30,6 +32,8 @@ export function parseRoute(hash: string): Route {
   if (first === "legal") return { page: "legal" };
   if (first === "pending") return { page: "pending" };
   if (first === "usage") return { page: "usage" };
+  if (first === "reset" && second !== undefined && UUID.test(second)) return { page: "reset-job", id: second };
+  if (first === "reset") return { page: "reset" };
   return { page: "overview" };
 }
 
@@ -55,6 +59,10 @@ export function href(route: Route): string {
       return "#/pending";
     case "usage":
       return "#/usage";
+    case "reset":
+      return "#/reset";
+    case "reset-job":
+      return `#/reset/${route.id}`;
   }
 }
 

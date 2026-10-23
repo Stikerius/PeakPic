@@ -1,4 +1,5 @@
 import { asArray, asRecord, bool, isRecord, num, str, strOrNull, type Json } from "./decode";
+import { toCounts, type Candidate, type Counts, type JobStatus, type ResetMode } from "./reset";
 import { SIGNED_URL_SECONDS, supabase } from "./supabase";
 
 /**
@@ -25,6 +26,24 @@ const ERROR_TEXTS: Record<string, string> = {
   user_message_required: "Für eine Verwarnung ist eine Nachricht an den Nutzer nötig.",
   invalid_status: "Ungültiger Status.",
   invalid_reason_code: "Ungültiger Sperrgrund.",
+  // Data reset
+  invalid_mode: "Ungültiger Umfang.",
+  no_categories: "Mindestens eine Kategorie wählen.",
+  invalid_category: "Unbekannte Kategorie.",
+  full_reset_disabled: "Komplettes Löschen ist ausgeschaltet (app_settings.allow_full_reset).",
+  job_not_found: "Auftrag nicht gefunden.",
+  not_job_owner: "Nur wer den Auftrag erstellt hat, darf ihn ändern, bestätigen oder ausführen.",
+  job_wrong_state: "Der Auftrag ist in diesem Zustand nicht mehr änderbar.",
+  too_many_targets: "Höchstens 500 Personen pro Auftrag.",
+  unknown_user: "Mindestens ein Konto existiert nicht mehr. Bitte die Liste neu laden.",
+  protected_target: "Geschützte Konten, Admins, Moderatoren und das eigene Konto sind nicht wählbar.",
+  flagged_not_confirmed: "Markierte Konten brauchen die zusätzliche Bestätigung.",
+  target_deleting: "Konten im Löschen sind nur bei „Konten komplett löschen“ wählbar.",
+  wrong_phrase: "Das Bestätigungswort stimmt nicht.",
+  totp_required: "Der Zwei-Faktor-Code ist älter als 5 Minuten. Bitte einen neuen Code eingeben.",
+  preview_required: "Zuerst den Trockenlauf mit dem aktuellen Stand ausführen.",
+  no_targets: "Niemand ausgewählt.",
+  other_job_active: "Ein anderer Auftrag ist bereits bestätigt oder läuft.",
 };
 
 export class ApiError extends Error {}
@@ -552,4 +571,279 @@ export async function fetchStatsAreas(from: string, to: string): Promise<AreaRow
 
 export async function fetchStatsFirstDay(): Promise<string | null> {
   return strOrNull(await rpc("admin_stats_first_day", {}));
+}
+
+// ------------------------------------------------------------------ data reset (admins)
+
+export type ResetSettings = { allowFullReset: boolean; maxTargets: number; batchSize: number };
+
+export async function fetchResetSettings(): Promise<ResetSettings> {
+  const r = asRecord(await rpc("admin_reset_settings", {}));
+  return { allowFullReset: bool(r.allow_full_reset), maxTargets: num(r.max_targets), batchSize: num(r.batch_size) };
+}
+
+export async function fetchResetCandidates(query: string): Promise<Candidate[]> {
+  return asArray(await rpc("admin_reset_candidates", { p_query: query.trim() === "" ? null : query.trim() })).map((value) => {
+    const r = asRecord(value);
+    return {
+      userId: str(r.user_id),
+      username: str(r.username),
+      displayName: str(r.display_name),
+      accountStatus: str(r.account_status),
+      createdAt: str(r.created_at),
+      protection: strOrNull(r.protection),
+      flags: asArray(r.flags).map(str).filter((f) => f !== ""),
+    };
+  });
+}
+
+export type ResetJobDraft = {
+  mode: ResetMode;
+  categories: string[];
+  reason: string;
+  subject: string;
+  userMessage: string;
+};
+
+function draftArgs(draft: ResetJobDraft): Record<string, unknown> {
+  return {
+    p_mode: draft.mode,
+    p_categories: draft.mode === "full" ? null : draft.categories,
+    p_reason: draft.reason,
+    p_subject: draft.subject,
+    p_user_message: draft.userMessage,
+  };
+}
+
+export async function createResetJob(draft: ResetJobDraft): Promise<string> {
+  return str(await rpc("admin_reset_create_job", draftArgs(draft)));
+}
+
+export async function updateResetJob(jobId: string, draft: ResetJobDraft): Promise<void> {
+  await rpc("admin_reset_update_job", { p_job_id: jobId, ...draftArgs(draft) });
+}
+
+export async function setResetTargets(jobId: string, userIds: string[], includeFlagged: boolean): Promise<number> {
+  return num(await rpc("admin_reset_set_targets", { p_job_id: jobId, p_user_ids: userIds, p_include_flagged: includeFlagged }));
+}
+
+export type ResetPreviewRow = {
+  targetId: string;
+  userId: string;
+  username: string;
+  displayName: string;
+  flagged: boolean;
+  counts: Counts;
+  total: number;
+};
+
+export type ResetPreview = { totals: Counts; files: number; targets: ResetPreviewRow[]; raw: Json };
+
+/** Dry run: numbers per person and in total; deletes nothing. */
+export async function previewResetJob(jobId: string): Promise<ResetPreview> {
+  const raw = asRecord(await rpc("admin_reset_preview", { p_job_id: jobId }));
+  return {
+    totals: toCounts(raw.totals),
+    files: num(raw.files),
+    targets: asArray(raw.targets).map((value) => {
+      const r = asRecord(value);
+      return {
+        targetId: str(r.target_id),
+        userId: str(r.user_id),
+        username: str(r.username),
+        displayName: str(r.display_name),
+        flagged: bool(r.flagged),
+        counts: toCounts(r.counts),
+        total: num(r.total),
+      };
+    }),
+    raw,
+  };
+}
+
+/** Backup of the affected rows (chats without text, no addresses, no files). Logged. */
+export async function exportResetJob(jobId: string): Promise<Json> {
+  return asRecord(await rpc("admin_reset_export", { p_job_id: jobId }));
+}
+
+export async function confirmResetJob(jobId: string, phrase: string): Promise<void> {
+  await rpc("admin_reset_confirm", { p_job_id: jobId, p_phrase: phrase });
+}
+
+export async function cancelResetJob(jobId: string): Promise<void> {
+  await rpc("admin_reset_cancel", { p_job_id: jobId });
+}
+
+export type ResetJobRow = {
+  id: string;
+  status: JobStatus;
+  mode: ResetMode;
+  categories: string[];
+  createdAt: string;
+  confirmedAt: string | null;
+  finishedAt: string | null;
+  targets: number;
+  own: boolean;
+};
+
+function jobStatus(value: unknown): JobStatus {
+  const s = str(value);
+  return s === "confirmed" || s === "running" || s === "done" || s === "failed" || s === "cancelled" ? s : "draft";
+}
+
+function resetMode(value: unknown): ResetMode {
+  return str(value) === "full" ? "full" : "categories";
+}
+
+export async function fetchResetJobs(): Promise<ResetJobRow[]> {
+  return asArray(await rpc("admin_reset_jobs", {})).map((value) => {
+    const r = asRecord(value);
+    return {
+      id: str(r.id),
+      status: jobStatus(r.status),
+      mode: resetMode(r.mode),
+      categories: asArray(r.categories).map(str),
+      createdAt: str(r.created_at),
+      confirmedAt: strOrNull(r.confirmed_at),
+      finishedAt: strOrNull(r.finished_at),
+      targets: num(r.targets),
+      own: bool(r.own),
+    };
+  });
+}
+
+export type ResetTargetRow = {
+  targetId: string;
+  userId: string | null;
+  username: string | null;
+  displayName: string | null;
+  userHash: string;
+  flagged: boolean;
+  status: string;
+  error: string | null;
+  counts: Counts;
+  result: Counts;
+  emailStatus: string;
+  attempts: number;
+};
+
+export type ResetProgress = { total: number; done: number; failed: number; skipped: number; open: number };
+
+export type ResetJob = {
+  id: string;
+  status: JobStatus;
+  mode: ResetMode;
+  categories: string[];
+  reason: string;
+  subject: string;
+  userMessage: string;
+  includeFlagged: boolean;
+  previewTotals: Counts;
+  previewFiles: number;
+  previewedAt: string | null;
+  resultTotals: Counts;
+  own: boolean;
+  createdAt: string;
+  updatedAt: string;
+  confirmedAt: string | null;
+  startedAt: string | null;
+  finishedAt: string | null;
+  progress: ResetProgress;
+  targets: ResetTargetRow[];
+};
+
+function progressOf(value: unknown): ResetProgress {
+  const r = asRecord(value);
+  return { total: num(r.total), done: num(r.done), failed: num(r.failed), skipped: num(r.skipped), open: num(r.open) };
+}
+
+/** One job with progress and, per person, status and numbers (never e-mail addresses). */
+export async function fetchResetJob(jobId: string): Promise<ResetJob> {
+  const raw = asRecord(await rpc("admin_reset_job_status", { p_job_id: jobId }));
+  const preview = asRecord(raw.preview);
+  return {
+    id: str(raw.id),
+    status: jobStatus(raw.status),
+    mode: resetMode(raw.mode),
+    categories: asArray(raw.categories).map(str),
+    reason: str(raw.reason),
+    subject: str(raw.subject),
+    userMessage: str(raw.user_message),
+    includeFlagged: bool(raw.include_flagged),
+    previewTotals: toCounts(preview.totals),
+    previewFiles: num(preview.files),
+    previewedAt: strOrNull(raw.previewed_at),
+    resultTotals: toCounts(asRecord(raw.result).totals),
+    own: bool(raw.own),
+    createdAt: str(raw.created_at),
+    updatedAt: str(raw.updated_at),
+    confirmedAt: strOrNull(raw.confirmed_at),
+    startedAt: strOrNull(raw.started_at),
+    finishedAt: strOrNull(raw.finished_at),
+    progress: progressOf(raw.progress),
+    targets: asArray(raw.targets).map((value) => {
+      const r = asRecord(value);
+      return {
+        targetId: str(r.target_id),
+        userId: strOrNull(r.user_id),
+        username: strOrNull(r.username),
+        displayName: strOrNull(r.display_name),
+        userHash: str(r.user_hash),
+        flagged: bool(r.flagged),
+        status: str(r.status),
+        error: strOrNull(r.error),
+        counts: toCounts(r.counts),
+        result: toCounts(r.result),
+        emailStatus: str(r.email_status),
+        attempts: num(r.attempts),
+      };
+    }),
+  };
+}
+
+const RUN_ERRORS: Record<string, string> = {
+  unauthorized: "Nicht angemeldet.",
+  forbidden: "Nur Admins mit Zwei-Faktor-Anmeldung.",
+  invalid_job: "Ungültiger Auftrag.",
+  not_authorized: "Nur Admins mit Zwei-Faktor-Anmeldung.",
+  job_not_found: "Auftrag nicht gefunden.",
+  not_job_owner: "Nur wer den Auftrag erstellt hat, darf ihn ausführen.",
+  job_wrong_state: "Der Auftrag ist nicht bestätigt.",
+  full_reset_disabled: "Komplettes Löschen ist ausgeschaltet (app_settings.allow_full_reset).",
+  other_job_active: "Ein anderer Auftrag läuft bereits.",
+};
+
+export type ResetBatchResult = ResetProgress & { status: string; failedInBatch: number };
+
+/** One batch of the Edge Function run_data_reset; returns the progress after it. */
+export async function runResetBatch(jobId: string): Promise<ResetBatchResult> {
+  const { data, error } = await supabase.functions.invoke("run_data_reset", { body: { job_id: jobId } });
+  if (error) {
+    const context: unknown = (error as { context?: unknown }).context;
+    let code = "";
+    if (context instanceof Response) {
+      try {
+        code = str(asRecord(await context.json()).error);
+      } catch {
+        code = "";
+      }
+    }
+    throw new ApiError(RUN_ERRORS[code] ?? "Ausführung fehlgeschlagen. Ist die Edge Function run_data_reset deployt?");
+  }
+  const r = asRecord(data);
+  return { ...progressOf(r), status: str(r.status), failedInBatch: num(r.failed_in_batch) };
+}
+
+/**
+ * A fresh second factor before confirming a reset: the database accepts the confirmation only
+ * while the last TOTP step of this session is at most 5 minutes old.
+ */
+export async function verifyTotpAgain(code: string): Promise<void> {
+  const digits = code.replace(/\s/g, "");
+  const { data: factors, error } = await supabase.auth.mfa.listFactors();
+  if (error) throw new ApiError("Zwei-Faktor-Status konnte nicht geladen werden.");
+  const factor = factors.totp.find((f) => f.status === "verified");
+  if (factor === undefined) throw new ApiError("Kein bestätigter Zwei-Faktor-Code eingerichtet.");
+  const { error: verifyError } = await supabase.auth.mfa.challengeAndVerify({ factorId: factor.id, code: digits });
+  if (verifyError) throw new ApiError("Code ungültig oder abgelaufen.");
 }

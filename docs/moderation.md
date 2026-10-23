@@ -72,9 +72,9 @@ Bricht etwas ab, bleibt der Status `deleting`. Die App zeigt dann „Löschung w
 
 ## Datenbereinigung („App-Neustart“)
 
-Admins (nur Rolle `admin` mit Zwei-Faktor, nie Moderatoren) löschen entweder **Konten komplett** oder nur **ausgewählte Datenkategorien** ausgewählter Nutzer. Alles läuft als Auftrag über die Funktionen `admin_reset_*` und die Edge Function `run_data_reset`. Clients haben keine Rechte auf die Tabellen `app_settings`, `protected_accounts`, `reset_jobs` und `reset_job_targets`.
+Admins (nur Rolle `admin` mit Zwei-Faktor, nie Moderatoren) löschen entweder **Konten komplett** oder nur **ausgewählte Datenkategorien** ausgewählter Nutzer. Alles läuft als Auftrag über die Funktionen `admin_reset_*` und die Edge Function `run_data_reset`. Bedient wird es im Dashboard unter **Bereinigung** (Assistent in 7 Schritten); die Anleitung für den Einsatz steht in [reset-runbook.md](reset-runbook.md). Clients haben keine Rechte auf die Tabellen `app_settings`, `protected_accounts`, `reset_jobs` und `reset_job_targets`.
 
-**Ablauf:** Entwurf → Trockenlauf (`admin_reset_preview`, löscht nichts) → Bestätigen (`admin_reset_confirm`) → Ausführung in Batches von höchstens 25 Personen (`run_data_reset`) → `done` oder `failed`. Höchstens 500 Personen pro Auftrag, höchstens ein bestätigter oder laufender Auftrag gleichzeitig. Ändern, bestätigen, starten und abbrechen darf nur, wer den Auftrag erstellt hat.
+**Ablauf:** Entwurf → Trockenlauf (`admin_reset_preview`, löscht nichts) → Sicherung (`admin_reset_export`: betroffene Zeilen als JSON, Chats nur mit IDs und Zeiten, ohne Texte, ohne Adressen und Dateien, protokolliert als `reset_exported`) → Bestätigen (`admin_reset_confirm`) → Ausführung in Batches von höchstens 25 Personen (`run_data_reset`) → `done` oder `failed`. Höchstens 500 Personen pro Auftrag, höchstens ein bestätigter oder laufender Auftrag gleichzeitig. Ändern, bestätigen, starten und abbrechen darf nur, wer den Auftrag erstellt hat.
 
 **Bestätigen verlangt:** Zustand `draft`, einen Trockenlauf nach der letzten Änderung, eine Begründung mit mindestens 10 Zeichen, das Wort `NEUSTART` und einen frischen TOTP-Schritt (der letzte TOTP-Eintrag im `amr`-Claim des JWT höchstens 5 Minuten alt). Danach sind Umfang und Auswahl eingefroren.
 

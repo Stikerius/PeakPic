@@ -11,6 +11,7 @@ import { OverviewPage } from "./pages/OverviewPage";
 import { PendingPage } from "./pages/PendingPage";
 import { UsagePage } from "./pages/UsagePage";
 import { QueuePage } from "./pages/QueuePage";
+import { ResetPage } from "./pages/ResetPage";
 import { ReportDetailPage } from "./pages/ReportDetailPage";
 import { UserDetailPage } from "./pages/UserDetailPage";
 import { UsersPage } from "./pages/UsersPage";
@@ -64,6 +65,8 @@ export function App() {
       {route.page === "legal-edit" && isAdmin && <LegalEditPage key={route.id} id={route.id} />}
       {route.page === "pending" && isAdmin && <PendingPage />}
       {route.page === "usage" && isAdmin && <UsagePage />}
+      {route.page === "reset" && isAdmin && <ResetPage jobId={null} />}
+      {route.page === "reset-job" && isAdmin && <ResetPage key={route.id} jobId={route.id} />}
     </Layout>
   );
 }
