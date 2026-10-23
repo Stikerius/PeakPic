@@ -682,6 +682,11 @@ export type Database = {
       };
       activate_plan: { Args: { p_plan_id: Uuid; p_resume?: boolean }; Returns: undefined };
       deactivate_plan: { Args: Record<string, never>; Returns: undefined };
+      get_my_plan_round: { Args: Record<string, never>; Returns: Json };
+      resolve_plan_deviation: {
+        Args: { p_deviation_id: Uuid; p_decision: string; p_new_order: string[] | null; p_scope: string | null };
+        Returns: undefined;
+      };
       reorder_plan_days: { Args: { p_plan_id: Uuid; p_ordered_ids: Uuid[] }; Returns: undefined };
       reorder_plan_exercises: { Args: { p_day_id: Uuid; p_ordered_ids: Uuid[] }; Returns: undefined };
       duplicate_plan: { Args: { p_plan_id: Uuid }; Returns: Uuid };

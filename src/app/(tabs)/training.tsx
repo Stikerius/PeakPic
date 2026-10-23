@@ -3,6 +3,7 @@ import { router, useFocusEffect } from "expo-router";
 import { useCallback, useEffect, useState } from "react";
 import { ActivityIndicator, Alert, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 
+import { PlanDeviationPrompt } from "@/components/plans/plan-deviation-prompt";
 import { ActivityRow } from "@/components/training/activity-row";
 import { Button } from "@/components/ui/button";
 import { Divider } from "@/components/ui/divider";
@@ -10,8 +11,8 @@ import { SectionFooter, SectionHeader } from "@/components/ui/section-header";
 import { radius, spacing, typography } from "@/constants/theme";
 import { useActivityActions } from "@/hooks/use-activity-actions";
 import { randomUuid } from "@/lib/ids";
-import { fetchMyPlan, fetchPlanProofs, planEntries, type TrainingPlan } from "@/lib/planRepo";
-import { planRound } from "@/lib/streak";
+import { fetchMyPlan, fetchMyPlanRound, planEntries, type MyPlanRound, type TrainingPlan } from "@/lib/planRepo";
+import { roundNext } from "@/lib/planRoundState";
 import { makeStyles, useTheme } from "@/lib/theme";
 import { clearTrainingDraft, setTrainingDraft, useTrainingDraft } from "@/lib/trainingDraft";
 import { fetchMyWorkouts, type WorkoutListItem } from "@/lib/trainingRepo";
@@ -58,19 +59,21 @@ export default function TrainingScreen() {
   const styles = useStyles();
   const draft = useTrainingDraft();
   const [plan, setPlan] = useState<TrainingPlan | null>(null);
+  const [round, setRound] = useState<MyPlanRound>({ round: null, autoResolved: [] });
   const [selectedDay, setSelectedDay] = useState<string | null>(null);
   const [history, setHistory] = useState<WorkoutListItem[] | null>(null);
   const [now, setNow] = useState(() => Date.now());
 
   const load = useCallback(() => {
     let active = true;
-    Promise.all([fetchMyPlan(), fetchPlanProofs()])
-      .then(([myPlan, proofs]) => {
+    Promise.all([fetchMyPlan(), fetchMyPlanRound()])
+      .then(([myPlan, myRound]) => {
         if (!active) return;
         setPlan(myPlan);
+        setRound(myRound);
         if (myPlan !== null) {
-          const entries = planEntries(myPlan);
-          const next = planRound(entries, proofs).nextTrainingIndex;
+          // The next training day of the round the server keeps.
+          const next = roundNext(myRound.round, planEntries(myPlan)).nextTrainingIndex;
           setSelectedDay(myPlan.days[next]?.id ?? null);
         }
       })
@@ -115,6 +118,7 @@ export default function TrainingScreen() {
 
   return (
     <ScrollView style={styles.screen} contentContainerStyle={styles.content}>
+      <PlanDeviationPrompt plan={plan} round={round} onChanged={() => void load()} />
       {draft === undefined ? (
         <ActivityIndicator color={colors.textSecondary} />
       ) : draft !== null ? (

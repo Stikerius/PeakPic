@@ -131,9 +131,14 @@ describe("plan streak with planned rest days", () => {
     expect(planStreak(proofs, "2026-10-21")).toBe(3);
   });
 
-  it("still ends with a wrong training day", () => {
-    const proofs = [training("2026-10-19", "push"), training("2026-10-20", "legs")];
-    expect(planStreak(proofs, "2026-10-20")).toBe(0);
+  it("doesn't end with another unit of the plan (a deviation), only with a proof without unit", () => {
+    expect(planStreak([training("2026-10-19", "push"), training("2026-10-20", "legs")], "2026-10-20")).toBe(2);
+    expect(planStreak([training("2026-10-19", "push"), training("2026-10-20", null)], "2026-10-20")).toBe(0);
+  });
+
+  it("a proof without unit doesn't end it on a day with a confirmed planned rest day", () => {
+    const proofs = [training("2026-10-19", "push"), training("2026-10-20", "pull"), rest("2026-10-21", "rest1"), training("2026-10-21", null)];
+    expect(planStreak(proofs, "2026-10-21")).toBe(3);
   });
 
   it("picks the next training day for a post when a rest day is due", () => {

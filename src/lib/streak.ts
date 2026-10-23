@@ -263,21 +263,24 @@ export function nextPlanDayIndex(
 }
 
 /**
- * Days on which every training proof was on plan (see applyProof). A proof without a unit (or
- * with one that isn't in the plan) isn't on plan and doesn't move the round on.
+ * Plan-true days: every training proof of the day carries a unit of the plan. Training another unit
+ * than the one due next is a deviation the person answers (exception or new order) or hasn't
+ * answered yet; none of that breaks the plan streak. A proof without any unit does, except on a day
+ * with a confirmed planned rest day.
  */
 export function correctPlanDays(
   planDayIds: readonly string[],
   proofs: readonly PlanProof[],
-  restIds: ReadonlySet<string> = new Set(),
+  _restIds: ReadonlySet<string> = new Set(),
 ): Set<DayKey> {
   const verdict = new Map<DayKey, boolean>();
   if (planDayIds.length === 0) return new Set();
-  const entries = entriesOf(planDayIds, restIds);
-  const done = new Set<string>();
-  for (const proof of sortProofs(proofs)) {
-    const result = applyProof(entries, done, proof);
-    if (proof.kind !== "rest") verdict.set(proof.day, (verdict.get(proof.day) ?? true) && (result?.onPlan ?? false));
+  const inPlan = new Set(planDayIds);
+  const plannedRest = new Set(proofs.filter((p) => p.kind === "rest").map((p) => p.day));
+  for (const proof of proofs) {
+    if (proof.kind === "rest") continue;
+    const ok = (proof.planDayId !== null && inPlan.has(proof.planDayId)) || plannedRest.has(proof.day);
+    verdict.set(proof.day, (verdict.get(proof.day) ?? true) && ok);
   }
   return new Set([...verdict].filter(([, ok]) => ok).map(([day]) => day));
 }
@@ -296,10 +299,10 @@ export type PlanStreakInput = {
 };
 
 /**
- * Plan streak: consecutive training days within the normal streak run (rest days bridge)
- * on which every proof matched the unit due next. A training day with a wrong or missing
- * assignment (also a day that only counts through someone else's linked post, or one before
- * the last plan change) ends it. It never exceeds the normal streak.
+ * Plan streak: consecutive training days within the normal streak run (rest days bridge) that
+ * are plan-true (see correctPlanDays). A training day without a unit of the plan (also a day that
+ * only counts through someone else's linked post, or one before the plan was last started) ends
+ * it. It never exceeds the normal streak.
  */
 export function currentPlanStreak({ planDayIds, proofs, trainingDays, restDays, today, restIds }: PlanStreakInput): number {
   const correct = correctPlanDays(planDayIds, proofs, restIds);

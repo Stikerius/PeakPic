@@ -2,6 +2,7 @@ import { router } from "expo-router";
 import { useState } from "react";
 import { ActivityIndicator, Alert, ScrollView, StyleSheet, Text, View } from "react-native";
 
+import { PlanDeviationPrompt } from "@/components/plans/plan-deviation-prompt";
 import { MonthCalendar } from "@/components/streak/month-calendar";
 import { PlanStreakCard } from "@/components/streak/plan-streak-card";
 import { RestDaysCard } from "@/components/streak/rest-days-card";
@@ -12,14 +13,13 @@ import { useRestDayActions } from "@/hooks/use-rest-day-actions";
 import { useWorkoutDays } from "@/hooks/use-workout-days";
 import { describeError } from "@/lib/errors";
 import { confirmPlannedRestDay, planEntries } from "@/lib/planRepo";
+import { plannedRestDueFromRound, roundNext } from "@/lib/planRoundState";
 import {
   addDays,
   addMonths,
   computeStreakStatsFromDays,
   currentPlanStreak,
-  planRound,
   parseDayKey,
-  plannedRestDue,
   restEntryIds,
   runLengthByDay,
   toDayKey,
@@ -32,7 +32,7 @@ export default function HomeScreen() {
   const { colors } = useTheme();
   const styles = useStyles();
   const { days, sharedDays, restDays, loading, error, reload } = useWorkoutDays();
-  const { plan, proofs, rest, reload: reloadPlanAndRest } = usePlanAndRest();
+  const { plan, proofs, rest, round, reload: reloadPlanAndRest } = usePlanAndRest();
 
   const today = toDayKey(new Date());
   const { year: currentYear, month: currentMonth } = parseDayKey(today);
@@ -54,9 +54,8 @@ export default function HomeScreen() {
     plan !== null
       ? currentPlanStreak({ planDayIds, proofs, trainingDays: stats.trainingDays, restDays: restDaySet, today, restIds })
       : 0;
-  const restDue = planHasRest
-    ? plannedRestDue({ entries, proofs, today, trainingDays: stats.trainingDays, restDays: restDaySet })
-    : null;
+  // "Als Nächstes" and the due rest day come from the round the server keeps.
+  const restDue = planHasRest ? plannedRestDueFromRound(round.round, entries, today, stats.trainingDays, restDaySet) : null;
   const reloadAll = () => {
     reload();
     reloadPlanAndRest();
@@ -113,6 +112,7 @@ export default function HomeScreen() {
 
   return (
     <ScrollView style={styles.screen} contentContainerStyle={styles.content}>
+      <PlanDeviationPrompt plan={plan} round={round} onChanged={reloadAll} />
       {error !== null && <Text style={styles.error}>{error}</Text>}
       <StreakSummary
         current={stats.current}
@@ -123,7 +123,7 @@ export default function HomeScreen() {
         <PlanStreakCard
           plan={plan}
           streak={planStreak}
-          nextIndex={planRound(entries, proofs).nextIndex}
+          nextIndex={roundNext(round.round, entries).nextIndex}
           trainedToday={stats.trainingDays.has(today)}
           restDue={restDue?.day ?? null}
           today={today}

@@ -79,19 +79,44 @@ describe("plan streak", () => {
     expect(nextPlanDayIndex(PLAN, proofs)).toBe(2);
   });
 
-  it("ends on a unit in the wrong order and restarts with the next correct one", () => {
+  // Training another unit than the one due opens a question. Whatever the answer is (exception,
+  // new order), or while it is open or after it became an automatic exception, the day stays
+  // plan-true: the plan streak doesn't depend on the status of the question.
+  it("doesn't end on a deviation: exception, new order, open or automatic", () => {
     const proofs = [
       proof("2026-10-17", PUSH),
-      proof("2026-10-18", LEGS), // Pull was due; Legs is done for this round anyway
-      proof("2026-10-19", PULL), // the only open unit of the round
-      proof("2026-10-20", PUSH), // a new round starts with Push
+      proof("2026-10-18", LEGS), // Pull was due
+      proof("2026-10-19", PUSH), // trained again: an extra
+      proof("2026-10-20", PULL),
     ];
-    expect(planStreak(proofs, "2026-10-20")).toBe(2);
+    expect(planStreak(proofs, "2026-10-20")).toBe(4);
   });
 
-  it("doesn't count a unit done again in the same round", () => {
-    const proofs = [proof("2026-10-18", PUSH), proof("2026-10-19", LEGS), proof("2026-10-20", PUSH)];
-    expect(planStreak(proofs, "2026-10-20")).toBe(0);
+  it("goes on across the end of a round", () => {
+    const proofs = [proof("2026-10-18", PUSH), proof("2026-10-19", PULL), proof("2026-10-20", LEGS), proof("2026-10-21", PUSH)];
+    expect(planStreak(proofs, "2026-10-21")).toBe(4);
+  });
+
+  it("starts again after a plan change (proofs before it aren't passed in)", () => {
+    // Trained on the 19th before activating the plan anew: that day has no plan proof any more.
+    expect(planStreak([proof("2026-10-20", PUSH)], "2026-10-20", [], ["2026-10-19"])).toBe(1);
+  });
+
+  it("is 0 without an active plan (deactivated)", () => {
+    expect(
+      currentPlanStreak({
+        planDayIds: [],
+        proofs: [proof("2026-10-20", PUSH)],
+        trainingDays: new Set(["2026-10-20"]),
+        restDays: new Set(),
+        today: "2026-10-20",
+      }),
+    ).toBe(0);
+  });
+
+  it("works across month and year boundaries", () => {
+    expect(planStreak([proof("2026-10-31", PUSH), proof("2026-11-01", LEGS)], "2026-11-01")).toBe(2);
+    expect(planStreak([proof("2026-12-31", PULL), proof("2027-01-01", PUSH)], "2027-01-01")).toBe(2);
   });
 
   it("ends on a proof without assignment, which still counts for the normal streak", () => {
@@ -100,11 +125,11 @@ describe("plan streak", () => {
     expect(currentStreak(new Set(proofs.map((p) => p.day)), "2026-10-20")).toBe(3);
   });
 
-  it("needs every proof of a day to be in order", () => {
+  it("needs every proof of a day to have a unit of the plan", () => {
     const twoInOrder = [proof("2026-10-20", PUSH, "08:00"), proof("2026-10-20", PULL, "18:00")];
     expect(planStreak(twoInOrder, "2026-10-20")).toBe(1);
-    const secondWrong = [proof("2026-10-20", PUSH, "08:00"), proof("2026-10-20", PUSH, "18:00")];
-    expect(planStreak(secondWrong, "2026-10-20")).toBe(0);
+    const withoutUnit = [proof("2026-10-20", PUSH, "08:00"), proof("2026-10-20", null, "18:00")];
+    expect(planStreak(withoutUnit, "2026-10-20")).toBe(0);
   });
 
   it("is bridged by rest days like the normal streak", () => {

@@ -18,17 +18,12 @@ import { describeError } from "@/lib/errors";
 import { onAppEvent } from "@/lib/events";
 import { listMyHighlights, type Highlight } from "@/lib/highlightRepo";
 import { confirmDeactivatePlan } from "@/lib/planActivation";
-import { fetchMyPlan, fetchPlanProofs, planEntries, type TrainingPlan } from "@/lib/planRepo";
+import { fetchMyPlan, fetchMyPlanRound, planEntries, type TrainingPlan } from "@/lib/planRepo";
+import { roundNext, type PlanRoundState } from "@/lib/planRoundState";
 import { getMyProfile, updateMyAvatar, type Profile } from "@/lib/profileRepo";
 import { useSession } from "@/lib/session";
 import { fetchFollowCounts } from "@/lib/socialRepo";
-import {
-  computeStreakStatsFromDays,
-  flameTier,
-  planRound,
-  toDayKey,
-  type PlanProof,
-} from "@/lib/streak";
+import { computeStreakStatsFromDays, flameTier, toDayKey } from "@/lib/streak";
 import { makeStyles, useTheme } from "@/lib/theme";
 import { useTrackScreen } from "@/lib/usage";
 
@@ -50,7 +45,7 @@ export default function ProfileScreen() {
     if (requestedTab !== null) setTab(requestedTab);
   }
   const { days, restDays } = useWorkoutDays();
-  const [planProofs, setPlanProofs] = useState<PlanProof[]>([]);
+  const [planRoundState, setPlanRoundState] = useState<PlanRoundState | null>(null);
   const [profile, setProfile] = useState<Profile | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [uploading, setUploading] = useState(false);
@@ -89,7 +84,7 @@ export default function ProfileScreen() {
           ]);
           if (!active) return;
           setPlan(myPlan);
-          setPlanProofs(await fetchPlanProofs().catch(() => []));
+          setPlanRoundState((await fetchMyPlanRound().catch(() => null))?.round ?? null);
           setHighlights(mine);
           setCounts(followCounts);
         })
@@ -208,7 +203,7 @@ export default function ProfileScreen() {
         <View style={styles.padded}>
           <PlanSummary
             plan={plan}
-            nextIndex={planRound(planEntries(plan), planProofs).nextIndex}
+            nextIndex={roundNext(planRoundState, planEntries(plan)).nextIndex}
             onDeactivate={() => confirmDeactivatePlan(() => setVersion((v) => v + 1))}
           />
         </View>

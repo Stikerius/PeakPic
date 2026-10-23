@@ -55,9 +55,13 @@
 --                   'public', public only while the profile is public; can_view_plan).
 --                   Written only through save_plan() / activate_plan() / deactivate_plan() /
 --                   duplicate_plan() / delete_plan() / reorder_plan_days() / reorder_plan_exercises().
---                   No plan may be active at all. Progress is kept per day id within a round
---                   (plan_round_next()): reordering, adding or removing days never resets it;
---                   sequence_changed_at only moves when a plan is (re)started at day 1.
+--                   No plan may be active at all. Progress is stored per person and plan
+--                   (plan_rounds: the current round's order and the index of the next unit),
+--                   written only by functions. Training another unit than the next one is always
+--                   accepted; it opens one question (plan_deviations) that the person answers with
+--                   resolve_plan_deviation() ('exception' or 'reordered'), or that becomes an
+--                   'auto_exception' after 2 days. Reordering, adding or removing days never resets
+--                   progress; sequence_changed_at only moves when a plan is (re)started at day 1.
 --   * training stats get_my_training_stats() / get_training_stats(): aggregated numbers only
 --                   (per day and exercise, never single trainings), visible per
 --                   profiles.training_stats_visibility (default 'private'; can_view_training_stats).
@@ -636,6 +640,41 @@ begin
   end if;
 end;
 $$;
+
+-- Progress through the current round of a plan: the round's order (day ids) and the index of
+-- the unit due next; everything before it is done. After the last unit a new round starts in the
+-- plan's order. One row per person and plan, written only by the plan functions (no client
+-- writes). last_day: day of the last completed plan entry (for planned rest days).
+create table if not exists public.plan_rounds (
+  user_id    uuid not null references public.profiles (id) on delete cascade,
+  plan_id    uuid not null references public.training_plans (id) on delete cascade,
+  day_order  uuid[] not null default '{}' check (cardinality(day_order) <= 30),
+  next_index integer not null default 0 check (next_index >= 0),
+  last_day   date,
+  updated_at timestamptz not null default now(),
+  primary key (user_id, plan_id)
+);
+
+-- A proof (recorded training or post) of another unit than the one due next: always accepted,
+-- the person decides how the plan goes on. At most one open ('pending') question per person;
+-- further deviations update it (the latest one counts). proof_id is a plain uuid (the proof may
+-- be deleted later); the titles are kept for the question and the notice.
+create table if not exists public.plan_deviations (
+  id              uuid primary key default gen_random_uuid(),
+  user_id         uuid not null references public.profiles (id) on delete cascade,
+  plan_id         uuid not null references public.training_plans (id) on delete cascade,
+  proof_kind      text not null check (proof_kind in ('workout', 'post')),
+  proof_id        uuid not null,
+  done_day_id     uuid references public.plan_days (id) on delete set null,
+  expected_day_id uuid references public.plan_days (id) on delete set null,
+  done_title      text check (char_length(done_title) <= 30),
+  expected_title  text check (char_length(expected_title) <= 30),
+  status          text not null default 'pending' check (status in ('pending', 'exception', 'reordered', 'auto_exception')),
+  created_at      timestamptz not null default now(),
+  resolved_at     timestamptz
+);
+create unique index if not exists plan_deviations_one_pending_idx on public.plan_deviations (user_id) where status = 'pending';
+create index if not exists plan_deviations_user_idx on public.plan_deviations (user_id, created_at desc);
 
 -- When the plan was deactivated ("Plan deaktivieren"); set again on activation. Only a plan
 -- deactivated this way can be resumed where it stopped (activate_plan(p_resume)).
@@ -2314,6 +2353,8 @@ begin
   end loop;
 
   delete from public.plan_days where plan_id = plan and not (id = any (day_ids));
+  -- The template changed: the open part of the current round follows its order (done stays done).
+  perform public.plan_round_template_changed(plan);
   return plan;
 end;
 $$;
@@ -2343,11 +2384,18 @@ begin
   end if;
   update public.training_plans set is_active = false, deactivated_at = null
   where user_id = me and is_active and id <> p_plan_id;
+  -- An open question about another plan doesn't apply any more.
+  update public.plan_deviations set status = 'auto_exception', resolved_at = now()
+  where user_id = me and status = 'pending' and plan_id <> p_plan_id;
   if coalesce(p_resume, false) and target.deactivated_at is not null then
     update public.training_plans set is_active = true, deactivated_at = null, updated_at = now() where id = p_plan_id;
   else
     update public.training_plans set is_active = true, deactivated_at = null, sequence_changed_at = now(), updated_at = now()
     where id = p_plan_id;
+    -- Day 1: a fresh round in the plan's order.
+    delete from public.plan_rounds where user_id = me and plan_id = p_plan_id;
+    update public.plan_deviations set status = 'auto_exception', resolved_at = now()
+    where user_id = me and status = 'pending';
   end if;
 end;
 $$;
@@ -2403,6 +2451,7 @@ begin
   from unnest(p_ordered_ids) with ordinality as o(id, ord)
   where d.id = o.id and d.plan_id = p_plan_id;
   update public.training_plans set updated_at = now() where id = p_plan_id;
+  perform public.plan_round_template_changed(p_plan_id);
 end;
 $$;
 
@@ -2641,6 +2690,7 @@ declare
   counting_today integer;
   reason text;
   done_at timestamptz;
+  deviation uuid;
 begin
   if me is null then
     raise exception 'not authenticated';
@@ -2769,8 +2819,11 @@ begin
   if reason is null then
     delete from public.rest_day_uses where user_id = me and day = wday;
     delete from public.planned_rest_uses where user_id = me and day = wday;
+    -- The plan's round: on to the next unit, or (another unit) one open question. Never refused.
+    deviation := public.plan_record_proof(me, day_id, 'workout', new_id, wday);
   end if;
-  return jsonb_build_object('id', new_id, 'counts_for_streak', reason is null, 'reason', reason, 'workout_date', wday);
+  return jsonb_build_object('id', new_id, 'counts_for_streak', reason is null, 'reason', reason, 'workout_date', wday,
+                            'plan_deviation_id', deviation);
 end;
 $$;
 
@@ -3013,6 +3066,12 @@ begin
     raise exception 'rest_day_not_allowed' using hint = 'only today or yesterday';
   end if;
   delete from public.rest_day_uses where user_id = auth.uid() and day = d;
+  -- A planned rest day taken back: if it was the last step of the round, the round goes back.
+  update public.plan_rounds pr
+  set next_index = pr.next_index - 1, updated_at = now()
+  from public.planned_rest_uses u
+  where u.user_id = auth.uid() and u.day = d and pr.user_id = u.user_id and pr.plan_id = u.plan_id
+    and pr.next_index > 0 and pr.day_order[pr.next_index] = u.plan_day_id;
   delete from public.planned_rest_uses where user_id = auth.uid() and day = d;
 end;
 $$;
@@ -3053,75 +3112,383 @@ as $$
   order by x.day, x.created_at;
 $$;
 
--- Progress of the active plan's current round (same rule as planRound() in lib/streak.ts): the
--- days done in this round, kept by day id, so the current order decides what comes next. A
--- training proof done while only planned rest days come before it skips them (they count as
--- done); once every day is done a new round starts. Returns the day due next, its type and the
--- day of the last completed plan entry (null if none). Nothing without an active plan. Internal.
-create or replace function public.plan_round_next(p_user uuid)
-returns table (next_day_id uuid, next_type text, last_day date)
+-- The first version computed the round from the proofs each time.
+drop function if exists public.plan_round_next(uuid);
+
+-- The plan's days in its order. Internal.
+create or replace function public.plan_template_order(p_plan uuid)
+returns uuid[]
+language sql stable security definer set search_path = ''
+as $$
+  select coalesce(array_agg(d.id order by d.position), '{}') from public.plan_days d where d.plan_id = p_plan;
+$$;
+
+-- Days done in the current round, computed from the proofs (only used to start a stored round
+-- for people who trained with the plan before rounds were stored; same rule as planRound() in
+-- lib/streak.ts). Internal.
+create or replace function public.plan_round_from_proofs(p_user uuid, p_plan uuid)
+returns table (done uuid[], last_done date)
 language plpgsql stable security definer set search_path = ''
 as $$
 declare
-  active_plan uuid;
   ids uuid[];
   types text[];
-  done uuid[] := '{}';
+  done_ids uuid[] := '{}';
   entry record;
   pos integer;
   i integer;
   only_rest boolean;
-  last_done date;
+  last_seen date;
 begin
-  select tp.id into active_plan from public.training_plans tp where tp.user_id = p_user and tp.is_active;
-  if active_plan is null then
-    return;
-  end if;
   select array_agg(d.id order by d.position), array_agg(d.day_type order by d.position) into ids, types
-  from public.plan_days d where d.plan_id = active_plan;
-  if ids is null then
+  from public.plan_days d where d.plan_id = p_plan;
+  if ids is null or not exists (select 1 from public.training_plans tp where tp.id = p_plan and tp.is_active) then
+    return query select '{}'::uuid[], null::date;
     return;
   end if;
   for entry in select * from public.plan_progress(p_user) loop
     pos := array_position(ids, entry.plan_day_id);
     continue when pos is null;
-    if entry.kind = 'training' and not (ids[pos] = any (done)) then
+    -- A proof saved in this same transaction is recorded by the caller, not here.
+    continue when entry.created_at >= now();
+    if entry.kind = 'training' and not (ids[pos] = any (done_ids)) then
       only_rest := true;
       for i in 1 .. pos - 1 loop
-        if not (ids[i] = any (done)) and types[i] <> 'rest' then
+        if not (ids[i] = any (done_ids)) and types[i] <> 'rest' then
           only_rest := false;
         end if;
       end loop;
       if only_rest then
         for i in 1 .. pos - 1 loop
-          if not (ids[i] = any (done)) then
-            done := done || ids[i];
+          if not (ids[i] = any (done_ids)) then
+            done_ids := done_ids || ids[i];
           end if;
         end loop;
       end if;
     end if;
-    if not (ids[pos] = any (done)) then
-      done := done || ids[pos];
+    if not (ids[pos] = any (done_ids)) then
+      done_ids := done_ids || ids[pos];
     end if;
-    last_done := entry.day;
-    if cardinality(done) >= cardinality(ids) then
-      done := '{}';
+    last_seen := entry.day;
+    if cardinality(done_ids) >= cardinality(ids) then
+      done_ids := '{}';
     end if;
   end loop;
-  for i in 1 .. cardinality(ids) loop
-    if not (ids[i] = any (done)) then
-      return query select ids[i], types[i], last_done;
+  return query select done_ids, last_seen;
+end;
+$$;
+
+-- The stored round of a person's plan, created if missing and brought in line with the plan's
+-- days: days that are gone drop out, new days join the open part at the end, and after the last
+-- unit a new round starts in the plan's order. Locks the row. Internal.
+create or replace function public.plan_round_load(p_user uuid, p_plan uuid)
+returns public.plan_rounds
+language plpgsql security definer set search_path = ''
+as $$
+declare
+  r public.plan_rounds%rowtype;
+  template uuid[] := public.plan_template_order(p_plan);
+  done_part uuid[];
+  open_part uuid[];
+  started record;
+begin
+  select * into r from public.plan_rounds pr where pr.user_id = p_user and pr.plan_id = p_plan for update;
+  if not found then
+    select * into started from public.plan_round_from_proofs(p_user, p_plan);
+    done_part := array(select x from unnest(template) x where x = any (started.done));
+    open_part := array(select x from unnest(template) x where not (x = any (started.done)));
+    insert into public.plan_rounds (user_id, plan_id, day_order, next_index, last_day)
+    values (p_user, p_plan, done_part || open_part, cardinality(done_part), started.last_done)
+    on conflict (user_id, plan_id) do nothing;
+    select * into r from public.plan_rounds pr where pr.user_id = p_user and pr.plan_id = p_plan for update;
+    return r;
+  end if;
+  done_part := array(select x from unnest(r.day_order[1:r.next_index]) x where x = any (template));
+  open_part := array(select x from unnest(r.day_order[r.next_index + 1:]) x where x = any (template));
+  open_part := open_part || array(
+    select x from unnest(template) with ordinality t(x, n)
+    where not (x = any (done_part)) and not (x = any (open_part)) order by n
+  );
+  if cardinality(open_part) = 0 then
+    done_part := '{}';
+    open_part := template;
+  end if;
+  if done_part || open_part is distinct from r.day_order or cardinality(done_part) <> r.next_index then
+    update public.plan_rounds
+    set day_order = done_part || open_part, next_index = cardinality(done_part), updated_at = now()
+    where user_id = p_user and plan_id = p_plan
+    returning * into r;
+  end if;
+  return r;
+end;
+$$;
+
+-- The plan's order was changed (editor or "Plan dauerhaft ändern"): the open part of every round
+-- of this plan follows the new order; what is done stays done. Internal.
+create or replace function public.plan_round_template_changed(p_plan uuid)
+returns void
+language plpgsql security definer set search_path = ''
+as $$
+declare
+  template uuid[] := public.plan_template_order(p_plan);
+  r record;
+  done_part uuid[];
+  open_part uuid[];
+begin
+  for r in select * from public.plan_rounds pr where pr.plan_id = p_plan for update loop
+    done_part := array(select x from unnest(r.day_order[1:r.next_index]) x where x = any (template));
+    open_part := array(select x from unnest(template) x where not (x = any (done_part)));
+    if cardinality(open_part) = 0 then
+      done_part := '{}';
+      open_part := template;
+    end if;
+    update public.plan_rounds
+    set day_order = done_part || open_part, next_index = cardinality(done_part), updated_at = now()
+    where user_id = r.user_id and plan_id = p_plan;
+  end loop;
+end;
+$$;
+
+-- Moves the round on by `steps` units (and starts a new round after the last one). Internal.
+create or replace function public.plan_round_advance(p_user uuid, p_plan uuid, p_steps integer, p_day date)
+returns void
+language plpgsql security definer set search_path = ''
+as $$
+declare
+  r public.plan_rounds%rowtype := public.plan_round_load(p_user, p_plan);
+begin
+  if r.next_index + p_steps >= cardinality(r.day_order) then
+    update public.plan_rounds
+    set day_order = public.plan_template_order(p_plan), next_index = 0, last_day = greatest(r.last_day, p_day), updated_at = now()
+    where user_id = p_user and plan_id = p_plan;
+  else
+    update public.plan_rounds
+    set next_index = r.next_index + p_steps, last_day = greatest(r.last_day, p_day), updated_at = now()
+    where user_id = p_user and plan_id = p_plan;
+  end if;
+end;
+$$;
+
+-- A proof with a unit of the active plan (counting recorded training or post). The unit due next:
+-- the round moves on. Any other unit: accepted all the same, the round stays as it is and one
+-- question opens (or the open one is updated: the latest deviation counts). The same unit twice on
+-- the same day (e.g. a recorded training and its photos) counts once. Returns the open
+-- question's id, or null. Internal (save_workout and the posts trigger).
+create or replace function public.plan_record_proof(p_user uuid, p_day uuid, p_kind text, p_proof uuid, p_date date)
+returns uuid
+language plpgsql security definer set search_path = ''
+as $$
+declare
+  active_plan uuid;
+  r public.plan_rounds%rowtype;
+  expected uuid;
+  deviation uuid;
+begin
+  if p_day is null then
+    return null;
+  end if;
+  select tp.id into active_plan
+  from public.training_plans tp join public.plan_days d on d.plan_id = tp.id
+  where d.id = p_day and tp.user_id = p_user and tp.is_active and d.day_type = 'training';
+  if active_plan is null then
+    return null;
+  end if;
+  if exists (
+    select 1 from public.workouts w
+    where w.user_id = p_user and w.workout_date = p_date and w.plan_day_id = p_day
+      and w.counts_for_streak and w.moderation_state is null and w.id <> p_proof
+  ) or exists (
+    select 1 from public.posts po
+    where po.user_id = p_user and po.workout_date = p_date and po.plan_day_id = p_day
+      and po.moderation_state is null and po.id <> p_proof
+  ) then
+    return null;
+  end if;
+  perform 1 from public.profiles pr where pr.id = p_user for update;
+  r := public.plan_round_load(p_user, active_plan);
+  expected := r.day_order[r.next_index + 1];
+  if expected = p_day then
+    perform public.plan_round_advance(p_user, active_plan, 1, p_date);
+    return null;
+  end if;
+  update public.plan_rounds set last_day = greatest(last_day, p_date), updated_at = now()
+  where user_id = p_user and plan_id = active_plan;
+  update public.plan_deviations
+  set proof_kind = p_kind, proof_id = p_proof, done_day_id = p_day,
+      done_title = (select d.title from public.plan_days d where d.id = p_day),
+      expected_day_id = expected,
+      expected_title = (select d.title from public.plan_days d where d.id = expected)
+  where user_id = p_user and status = 'pending'
+  returning id into deviation;
+  if deviation is null then
+    insert into public.plan_deviations
+      (user_id, plan_id, proof_kind, proof_id, done_day_id, expected_day_id, done_title, expected_title)
+    values (
+      p_user, active_plan, p_kind, p_proof, p_day, expected,
+      (select d.title from public.plan_days d where d.id = p_day),
+      (select d.title from public.plan_days d where d.id = expected)
+    )
+    returning id into deviation;
+  end if;
+  return deviation;
+end;
+$$;
+
+-- Posts with a unit of the plan are proofs for the round (also when the unit is set later).
+create or replace function public.on_post_plan_proof()
+returns trigger
+language plpgsql security definer set search_path = ''
+as $$
+begin
+  if new.plan_day_id is not null
+    and (tg_op = 'INSERT' or new.plan_day_id is distinct from old.plan_day_id)
+    and public.post_counts_as_workout(new.id) then
+    perform public.plan_record_proof(new.user_id, new.plan_day_id, 'post', new.id, new.workout_date);
+  end if;
+  return null;
+end;
+$$;
+
+-- My active plan's round and the open question, for Home, Training and the profile. Questions
+-- older than 2 days become an 'auto_exception' here (listed once in auto_resolved, for a short
+-- notice). {plan_id: null} without an active plan.
+create or replace function public.get_my_plan_round()
+returns jsonb
+language plpgsql security definer set search_path = ''
+as $$
+declare
+  me uuid := auth.uid();
+  active_plan uuid;
+  r public.plan_rounds%rowtype;
+  auto jsonb;
+begin
+  if me is null then
+    raise exception 'not authenticated';
+  end if;
+  with resolved as (
+    update public.plan_deviations set status = 'auto_exception', resolved_at = now()
+    where user_id = me and status = 'pending' and created_at < now() - interval '2 days'
+    returning done_title, expected_title
+  )
+  select coalesce(jsonb_agg(jsonb_build_object('done_title', done_title, 'expected_title', expected_title)), '[]'::jsonb)
+  into auto from resolved;
+  select tp.id into active_plan from public.training_plans tp where tp.user_id = me and tp.is_active;
+  if active_plan is null then
+    return jsonb_build_object('plan_id', null, 'auto_resolved', auto);
+  end if;
+  if public.is_account_active() then
+    r := public.plan_round_load(me, active_plan);
+  else
+    select * into r from public.plan_rounds pr where pr.user_id = me and pr.plan_id = active_plan;
+  end if;
+  return jsonb_build_object(
+    'plan_id', active_plan,
+    'day_order', to_jsonb(coalesce(r.day_order, public.plan_template_order(active_plan))),
+    'next_index', coalesce(r.next_index, 0),
+    'last_day', r.last_day,
+    'pending', (
+      select jsonb_build_object(
+        'id', dv.id, 'done_day_id', dv.done_day_id, 'expected_day_id', dv.expected_day_id,
+        'done_title', dv.done_title, 'expected_title', dv.expected_title, 'created_at', dv.created_at
+      )
+      from public.plan_deviations dv
+      where dv.user_id = me and dv.status = 'pending' and dv.plan_id = active_plan
+    ),
+    'auto_resolved', auto
+  );
+end;
+$$;
+
+-- Answers the open question. 'exception': the unit due next stays, the round is unchanged (the
+-- trained unit was an extra and comes again later). 'reordered': the trained unit counts as done
+-- and p_new_order (jsonb array of day ids) is the order of the remaining open units, exactly
+-- those; p_scope 'round' for this round only, 'plan' also writes it into the plan. Idempotent:
+-- the same answer again changes nothing.
+create or replace function public.resolve_plan_deviation(
+  p_deviation_id uuid, p_decision text, p_new_order jsonb, p_scope text
+)
+returns void
+language plpgsql security definer set search_path = ''
+as $$
+declare
+  me uuid := auth.uid();
+  dev public.plan_deviations%rowtype;
+  r public.plan_rounds%rowtype;
+  done_part uuid[];
+  open_part uuid[];
+  remaining uuid[];
+  new_open uuid[];
+  in_open boolean;
+  full_order uuid[];
+  new_next integer;
+begin
+  if me is null then
+    raise exception 'not authenticated';
+  end if;
+  if not public.is_account_active() then
+    raise exception 'account_inactive';
+  end if;
+  if p_decision not in ('exception', 'reordered') then
+    raise exception 'invalid_decision';
+  end if;
+  select * into dev from public.plan_deviations dv where dv.id = p_deviation_id and dv.user_id = me for update;
+  if not found then
+    raise exception 'deviation_not_found';
+  end if;
+  if dev.status <> 'pending' then
+    if dev.status = p_decision then
       return;
     end if;
-  end loop;
-  return query select ids[1], types[1], last_done;
+    raise exception 'deviation_resolved';
+  end if;
+  if not exists (select 1 from public.training_plans tp where tp.id = dev.plan_id and tp.user_id = me and tp.is_active) then
+    raise exception 'plan_not_active';
+  end if;
+
+  if p_decision = 'reordered' then
+    if p_scope is null or p_scope not in ('round', 'plan') then
+      raise exception 'invalid_scope';
+    end if;
+    r := public.plan_round_load(me, dev.plan_id);
+    done_part := r.day_order[1:r.next_index];
+    open_part := r.day_order[r.next_index + 1:];
+    in_open := dev.done_day_id is not null and dev.done_day_id = any (open_part);
+    remaining := array(select x from unnest(open_part) x where x is distinct from dev.done_day_id);
+    if jsonb_typeof(p_new_order) is distinct from 'array' then
+      raise exception 'invalid_order';
+    end if;
+    new_open := array(select (v #>> '{}')::uuid from jsonb_array_elements(p_new_order) v);
+    if cardinality(new_open) <> cardinality(remaining)
+      or (select count(distinct x) from unnest(new_open) x) <> cardinality(new_open)
+      or exists (select 1 from unnest(new_open) x where not (x = any (remaining))) then
+      raise exception 'invalid_order';
+    end if;
+    full_order := done_part || (case when in_open then array[dev.done_day_id] else '{}'::uuid[] end) || new_open;
+    new_next := cardinality(done_part) + (case when in_open then 1 else 0 end);
+    if new_next >= cardinality(full_order) then
+      update public.plan_rounds
+      set day_order = public.plan_template_order(dev.plan_id), next_index = 0, updated_at = now()
+      where user_id = me and plan_id = dev.plan_id;
+    else
+      update public.plan_rounds set day_order = full_order, next_index = new_next, updated_at = now()
+      where user_id = me and plan_id = dev.plan_id;
+    end if;
+    if p_scope = 'plan' then
+      update public.plan_days d set position = o.ord - 1
+      from unnest(full_order) with ordinality as o(id, ord)
+      where d.id = o.id and d.plan_id = dev.plan_id;
+      update public.training_plans set updated_at = now() where id = dev.plan_id;
+    end if;
+  end if;
+
+  update public.plan_deviations set status = p_decision, resolved_at = now() where id = dev.id;
 end;
 $$;
 
 -- Confirms the planned rest day of the active plan for `d` (today or yesterday). Allowed when the
--- day due next in the round is a rest day and the last completed entry (training day or planned
--- rest day) was on the day before `d`. Not on a day with training, not twice. Keeps the streak
--- alive, doesn't count as a training day.
+-- unit due next in the stored round is a rest day and the last completed entry (training day or
+-- planned rest day) was on the day before `d`. Not on a day with training, not twice. Keeps the
+-- streak alive, doesn't count as a training day; the round moves on.
 create or replace function public.use_planned_rest_day(d date)
 returns void
 language plpgsql security definer set search_path = ''
@@ -3129,7 +3496,8 @@ as $$
 declare
   me uuid := auth.uid();
   plan public.training_plans%rowtype;
-  next_entry record;
+  r public.plan_rounds%rowtype;
+  next_day uuid;
 begin
   if me is null then
     raise exception 'not authenticated';
@@ -3151,18 +3519,20 @@ begin
     or exists (select 1 from public.rest_day_uses r where r.user_id = me and r.day = d) then
     raise exception 'planned_rest_already_used';
   end if;
-  select * into next_entry from public.plan_round_next(me);
-  if next_entry.last_day is null then
+  r := public.plan_round_load(me, plan.id);
+  next_day := r.day_order[r.next_index + 1];
+  if r.last_day is null then
     raise exception 'planned_rest_not_due' using hint = 'no completed plan day before';
   end if;
-  if next_entry.last_day <> d - 1 then
+  if r.last_day <> d - 1 then
     raise exception 'planned_rest_not_due' using hint = 'the previous plan day was not done the day before';
   end if;
-  if next_entry.next_type <> 'rest' then
+  if not exists (select 1 from public.plan_days pd where pd.id = next_day and pd.day_type = 'rest') then
     raise exception 'planned_rest_not_due' using hint = 'the next plan day is a training day';
   end if;
   insert into public.planned_rest_uses (user_id, day, plan_id, plan_day_id)
-  values (me, d, plan.id, next_entry.next_day_id);
+  values (me, d, plan.id, next_day);
+  perform public.plan_round_advance(me, plan.id, 1, d);
 end;
 $$;
 
@@ -5034,6 +5404,11 @@ create trigger posts_plan_day
   before insert or update on public.posts
   for each row execute function public.on_post_plan_day();
 
+drop trigger if exists posts_plan_proof on public.posts;
+create trigger posts_plan_proof
+  after insert or update of plan_day_id on public.posts
+  for each row execute function public.on_post_plan_proof();
+
 drop trigger if exists posts_training_added on public.posts;
 create trigger posts_training_added
   after insert or update of workout_date on public.posts
@@ -5156,7 +5531,24 @@ revoke all on function public.reorder_plan_days(uuid, uuid[]) from public, anon;
 grant execute on function public.reorder_plan_days(uuid, uuid[]) to authenticated;
 revoke all on function public.reorder_plan_exercises(uuid, uuid[]) from public, anon;
 grant execute on function public.reorder_plan_exercises(uuid, uuid[]) to authenticated;
-revoke all on function public.plan_round_next(uuid) from public, anon, authenticated;
+do $$
+declare
+  f text;
+begin
+  foreach f in array array[
+    'public.plan_template_order(uuid)', 'public.plan_round_from_proofs(uuid, uuid)',
+    'public.plan_round_load(uuid, uuid)', 'public.plan_round_template_changed(uuid)',
+    'public.plan_round_advance(uuid, uuid, integer, date)',
+    'public.plan_record_proof(uuid, uuid, text, uuid, date)', 'public.on_post_plan_proof()'
+  ] loop
+    execute format('revoke all on function %s from public, anon, authenticated', f);
+  end loop;
+end;
+$$;
+revoke all on function public.get_my_plan_round() from public, anon;
+grant execute on function public.get_my_plan_round() to authenticated;
+revoke all on function public.resolve_plan_deviation(uuid, text, jsonb, text) from public, anon;
+grant execute on function public.resolve_plan_deviation(uuid, text, jsonb, text) to authenticated;
 revoke all on function public.duplicate_plan(uuid) from public, anon;
 grant execute on function public.duplicate_plan(uuid) to authenticated;
 revoke all on function public.delete_plan(uuid) from public, anon;
@@ -5324,6 +5716,9 @@ revoke all on public.training_plans, public.plan_days, public.plan_exercises fro
 grant select on public.training_plans, public.plan_days, public.plan_exercises to authenticated;
 revoke all on public.planned_rest_uses from anon, authenticated;
 grant select on public.planned_rest_uses to authenticated;
+-- Plan progress and open questions: read own rows; all writes go through the plan functions.
+revoke all on public.plan_rounds, public.plan_deviations from anon, authenticated;
+grant select on public.plan_rounds, public.plan_deviations to authenticated;
 -- Adoptions: no client access (the daily limit and notifications are handled in adopt_plan).
 revoke all on public.plan_adoptions from anon, authenticated;
 -- Recorded trainings: written only by save_workout / link_workout_post; owners may delete.
@@ -5382,6 +5777,8 @@ alter table public.training_plans       enable row level security;
 alter table public.plan_days            enable row level security;
 alter table public.plan_exercises       enable row level security;
 alter table public.planned_rest_uses    enable row level security;
+alter table public.plan_rounds          enable row level security;
+alter table public.plan_deviations      enable row level security;
 alter table public.plan_adoptions       enable row level security;
 alter table public.workouts             enable row level security;
 alter table public.workout_exercises    enable row level security;
@@ -5976,6 +6373,14 @@ create policy "workout_sets: read with exercise" on public.workout_sets
     select 1 from public.workout_exercises we
     where we.id = workout_exercise_id and public.can_view_workout(we.workout_id)
   ));
+
+-- plan_rounds / plan_deviations: only the owner reads; written only by the plan functions.
+drop policy if exists "plan_rounds: owner reads" on public.plan_rounds;
+create policy "plan_rounds: owner reads" on public.plan_rounds
+  for select to authenticated using (user_id = (select auth.uid()));
+drop policy if exists "plan_deviations: owner reads" on public.plan_deviations;
+create policy "plan_deviations: owner reads" on public.plan_deviations
+  for select to authenticated using (user_id = (select auth.uid()));
 
 drop policy if exists "planned_rest_uses: owner reads" on public.planned_rest_uses;
 create policy "planned_rest_uses: owner reads" on public.planned_rest_uses
@@ -7037,3 +7442,18 @@ create table if not exists public.login_attempts (
 create index if not exists login_attempts_key_idx on public.login_attempts (username_key, created_at desc);
 alter table public.login_attempts enable row level security;
 revoke all on public.login_attempts from public, anon, authenticated;
+
+
+-- Migration: a stored round for every active plan, computed once from the proofs so far.
+do $$
+declare
+  t record;
+begin
+  for t in
+    select tp.user_id, tp.id from public.training_plans tp
+    where tp.is_active and not exists (select 1 from public.plan_rounds pr where pr.user_id = tp.user_id and pr.plan_id = tp.id)
+  loop
+    perform public.plan_round_load(t.user_id, t.id);
+  end loop;
+end;
+$$;

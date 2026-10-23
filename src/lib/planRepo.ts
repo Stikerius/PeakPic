@@ -1,8 +1,9 @@
 import { originLabel, toDayPayloads, type DayDraft } from "@/lib/planDraft";
+import type { PlanDeviation, PlanRoundState } from "@/lib/planRoundState";
 import { requireUserId } from "@/lib/session";
 import type { DayKey, PlanEntry, PlanProof } from "@/lib/streak";
 import { supabase } from "@/lib/supabase";
-import type { PlanDayType, PlanVisibility } from "@/types/database";
+import type { Json, PlanDayType, PlanVisibility } from "@/types/database";
 
 export {
   PLAN_DAY_NOTES_MAX_LENGTH,
@@ -220,6 +221,14 @@ export function planErrorMessage(error: RpcError): string {
       return "An diesem Tag hast du schon trainiert.";
     case "rest_day_not_allowed":
       return "Ruhetage gehen nur für heute oder gestern.";
+    case "invalid_order":
+      return "Die Reihenfolge passt nicht mehr zum Plan. Lade neu und versuche es erneut.";
+    case "deviation_resolved":
+      return "Diese Frage ist schon beantwortet.";
+    case "deviation_not_found":
+      return "Diese Frage gibt es nicht mehr.";
+    case "plan_not_active":
+      return "Der Plan ist nicht mehr aktiv.";
     default:
       return error.message ?? "Etwas ist schiefgelaufen.";
   }
@@ -310,6 +319,71 @@ export async function confirmPlannedRestDay(day: DayKey): Promise<void> {
 export async function fetchPlanProofs(): Promise<PlanProof[]> {
   const rows = await call(supabase.rpc("plan_proofs", {}));
   return rows.map((row) => ({ day: row.day, createdAt: row.created_at, planDayId: row.plan_day_id, kind: row.kind }));
+}
+
+type JsonObject = { [key: string]: Json };
+const asObject = (v: Json | undefined): JsonObject | null => (typeof v === "object" && v !== null && !Array.isArray(v) ? v : null);
+const asText = (v: Json | undefined): string | null => (typeof v === "string" ? v : null);
+
+export type MyPlanRound = {
+  /** null without an active plan. */
+  round: PlanRoundState | null;
+  /** Questions that became an exception after 2 days, for a short notice (listed once). */
+  autoResolved: { doneTitle: string; expectedTitle: string }[];
+};
+
+/** My active plan's stored round and the open question (the server keeps both). */
+export async function fetchMyPlanRound(): Promise<MyPlanRound> {
+  const data = asObject(await call(supabase.rpc("get_my_plan_round")));
+  const autoResolved = (Array.isArray(data?.auto_resolved) ? data.auto_resolved : []).flatMap((v) => {
+    const o = asObject(v);
+    return o === null ? [] : [{ doneTitle: asText(o.done_title) ?? "", expectedTitle: asText(o.expected_title) ?? "" }];
+  });
+  const planId = asText(data?.plan_id);
+  if (data === null || planId === null) return { round: null, autoResolved };
+  const order = Array.isArray(data.day_order) ? data.day_order.flatMap((v) => (typeof v === "string" ? [v] : [])) : [];
+  const p = asObject(data.pending);
+  const pending: PlanDeviation | null =
+    p === null || asText(p.id) === null
+      ? null
+      : {
+          id: asText(p.id) ?? "",
+          doneDayId: asText(p.done_day_id),
+          expectedDayId: asText(p.expected_day_id),
+          doneTitle: asText(p.done_title) ?? "",
+          expectedTitle: asText(p.expected_title) ?? "",
+          createdAt: asText(p.created_at) ?? "",
+        };
+  return {
+    round: {
+      planId,
+      dayOrder: order,
+      nextIndex: typeof data.next_index === "number" ? data.next_index : 0,
+      lastDay: asText(data.last_day),
+      pending,
+    },
+    autoResolved,
+  };
+}
+
+/**
+ * Answers the open question: "exception" (the plan goes on as planned) or "reordered" with the
+ * new order of the remaining open units, for this round only or for the plan.
+ */
+export async function resolvePlanDeviation(
+  deviationId: string,
+  decision: "exception" | "reordered",
+  newOrder: string[] | null,
+  scope: "round" | "plan" | null,
+): Promise<void> {
+  await callVoid(
+    supabase.rpc("resolve_plan_deviation", {
+      p_deviation_id: deviationId,
+      p_decision: decision,
+      p_new_order: newOrder,
+      p_scope: scope,
+    }),
+  );
 }
 
 /** Planned rest days I confirmed (for taking one back in the calendar). */
