@@ -1,7 +1,7 @@
 import Ionicons from "@expo/vector-icons/Ionicons";
 import { router, Stack, useLocalSearchParams } from "expo-router";
 import { useEffect, useState, type ReactNode } from "react";
-import { ActivityIndicator, Alert, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
+import { ActivityIndicator, Alert, Pressable, StyleSheet, Text, View } from "react-native";
 
 import { FollowButton } from "@/components/follow-button";
 import { useReport } from "@/components/moderation/report-provider";
@@ -9,7 +9,8 @@ import { Avatar } from "@/components/ui/avatar";
 import { STORY_RING_INSET, StoryRing } from "@/components/stories/story-ring";
 import { HighlightsRow } from "@/components/profile/highlights-row";
 import { PlanSummary } from "@/components/profile/plan-summary";
-import { PostGrid } from "@/components/profile/post-grid";
+import { isProfileTab, type ProfileTab } from "@/components/profile/profile-tab-bar";
+import { ProfileTabsList } from "@/components/profile/profile-tabs-list";
 import { FlameIcon } from "@/components/streak/flame-icon";
 import { MonthCalendar } from "@/components/streak/month-calendar";
 import { Button } from "@/components/ui/button";
@@ -31,16 +32,8 @@ import {
 } from "@/lib/streak";
 import { adoptPlan, fetchPlansOf, type TrainingPlan } from "@/lib/planRepo";
 import { useSession } from "@/lib/session";
-import { fetchWorkoutsOf } from "@/lib/trainingRepo";
-import { canViewTrainingStats } from "@/lib/trainingStatsRepo";
 import { makeStyles, useTheme } from "@/lib/theme";
-import {
-  fetchProfileGrid,
-  fetchUserProfile,
-  fetchUserWorkoutDays,
-  type PostThumbnail,
-  type UserProfileSummary,
-} from "@/lib/userProfileRepo";
+import { fetchUserProfile, fetchUserWorkoutDays, type UserProfileSummary } from "@/lib/userProfileRepo";
 import { track, useTrackScreen } from "@/lib/usage";
 
 const AVATAR_SIZE = 88;
@@ -49,7 +42,6 @@ type Content = {
   days: DayKey[];
   sharedDays: ReadonlySet<DayKey>;
   restDays: DayKey[];
-  posts: PostThumbnail[];
   highlights: Highlight[];
   /** Active stories I may see (followed, or public with "everyone"). */
   hasStories: boolean;
@@ -82,7 +74,9 @@ export default function UserProfileScreen() {
   useTrackScreen("screen_user_profile");
   const { colors } = useTheme();
   const styles = useStyles();
-  const { userId } = useLocalSearchParams<{ userId: string }>();
+  const { userId, tab: tabParam } = useLocalSearchParams<{ userId: string; tab?: string }>();
+  // "?tab=stats" (old routes /activities and /stats lead here) opens that tab.
+  const [tab, setTab] = useState<ProfileTab>(isProfileTab(tabParam) ? tabParam : "posts");
   const { openReport } = useReport();
   const blockUser = useBlockUser();
 
@@ -93,9 +87,6 @@ export default function UserProfileScreen() {
   // Plans have their own visibility (followers / everyone), independent of posts and stories.
   const [plans, setPlans] = useState<TrainingPlan[]>([]);
   const [adoptingId, setAdoptingId] = useState<string | null>(null);
-  // Whether I may see at least one activity (the database decides).
-  const [hasActivities, setHasActivities] = useState(false);
-  const [canSeeStats, setCanSeeStats] = useState(false);
   const myId = useSession().session?.user.id ?? null;
 
   const today = toDayKey(new Date());
@@ -106,20 +97,13 @@ export default function UserProfileScreen() {
     fetchPlansOf(userId)
       .then(setPlans)
       .catch(() => setPlans([]));
-    fetchWorkoutsOf(userId, 1)
-      .then((items) => setHasActivities(items.length > 0))
-      .catch(() => setHasActivities(false));
-    canViewTrainingStats(userId)
-      .then(setCanSeeStats)
-      .catch(() => setCanSeeStats(false));
     try {
       const result = await fetchUserProfile(userId);
       setSummary(result);
       if (result !== null && (result.canSeePosts || result.canSeeStories)) {
         // Only ask for what the settings allow; RLS enforces the same rules anyway.
-        const [days, posts, highlights, stories] = await Promise.all([
+        const [days, highlights, stories] = await Promise.all([
           result.canSeePosts ? fetchUserWorkoutDays(userId) : Promise.resolve({ days: [], shared: [], restDays: [] }),
-          result.canSeePosts ? fetchProfileGrid(userId) : Promise.resolve([]),
           result.canSeeStories ? listHighlights(userId) : Promise.resolve([]),
           result.canSeeStories ? fetchUserStoryGroup(userId) : Promise.resolve(null),
         ]);
@@ -127,7 +111,6 @@ export default function UserProfileScreen() {
           days: days.days,
           sharedDays: new Set(days.shared.map((s) => s.day)),
           restDays: days.restDays,
-          posts,
           highlights,
           hasStories: stories !== null,
           storiesUnseen: stories?.hasUnseen ?? false,
@@ -203,34 +186,38 @@ export default function UserProfileScreen() {
   const runLengths = runLengthByDay(stats.trainingDays, new Set(content?.restDays ?? []));
   const canGoNext = visibleMonth.year * 12 + visibleMonth.month < currentYear * 12 + currentMonth;
 
-  return (
-    <ScrollView style={styles.screen} contentContainerStyle={styles.content}>
-      <Stack.Screen
-        options={{
-          title: profile.username,
-          headerRight: () => (
-            <Pressable
-              onPress={() =>
-                showActionSheet(profile.displayName, [
-                  {
-                    label: "Profil melden",
-                    destructive: true,
-                    onPress: () => openReport({ targetType: "profile", targetId: profile.id }),
-                  },
-                  { label: "Blockieren", destructive: true, onPress: () => blockUser(profile, () => router.back()) },
-                ])
-              }
-              accessibilityRole="button"
-              accessibilityLabel="Weitere Optionen"
-              hitSlop={spacing.sm}
-              style={styles.headerButton}
-            >
-              <Ionicons name="ellipsis-horizontal" size={22} color={colors.text} />
-            </Pressable>
-          ),
-        }}
-      />
+  const stackScreen = (
+    <Stack.Screen
+      options={{
+        title: profile.username,
+        headerRight: () => (
+          <Pressable
+            onPress={() =>
+              showActionSheet(profile.displayName, [
+                {
+                  label: "Profil melden",
+                  destructive: true,
+                  onPress: () => openReport({ targetType: "profile", targetId: profile.id }),
+                },
+                { label: "Blockieren", destructive: true, onPress: () => blockUser(profile, () => router.back()) },
+              ])
+            }
+            accessibilityRole="button"
+            accessibilityLabel="Weitere Optionen"
+            hitSlop={spacing.sm}
+            style={styles.headerButton}
+          >
+            <Ionicons name="ellipsis-horizontal" size={22} color={colors.text} />
+          </Pressable>
+        ),
+      }}
+    />
+  );
 
+  const isLocked = !summary.canSeePosts && !summary.canSeeStories;
+
+  const header = (
+    <View style={styles.content}>
       <View style={styles.header}>
         {content?.hasStories ? (
           <Pressable
@@ -314,26 +301,6 @@ export default function UserProfileScreen() {
 
       {error !== null && <Text style={styles.error}>{error}</Text>}
 
-      {(hasActivities || canSeeStats) && (
-        <View style={styles.plans}>
-          {hasActivities && (
-            <Button
-              label="Aktivitäten"
-              icon="barbell-outline"
-              variant="secondary"
-              onPress={() => router.push({ pathname: "/activities/[userId]", params: { userId } })}
-            />
-          )}
-          {canSeeStats && (
-            <Button
-              label="Statistik"
-              icon="bar-chart-outline"
-              variant="secondary"
-              onPress={() => router.push({ pathname: "/stats/[userId]", params: { userId } })}
-            />
-          )}
-        </View>
-      )}
       {plans.length > 0 && (
         <View style={styles.plans}>
           {plans.map((plan) => (
@@ -348,29 +315,13 @@ export default function UserProfileScreen() {
         </View>
       )}
 
-      {!summary.canSeePosts && !summary.canSeeStories ? (
-        <View style={styles.locked}>
-          <Ionicons name="lock-closed-outline" size={36} color={colors.textSecondary} />
-          <Text style={styles.lockedTitle}>Dieses Profil ist privat</Text>
-          <Text style={styles.muted}>
-            {summary.followStatus === "pending"
-              ? `Deine Anfrage ist gesendet. Sobald @${profile.username} sie bestätigt, siehst du Storys, Kalender und Beiträge.`
-              : `Folge @${profile.username}, um Storys, Kalender und Beiträge zu sehen.`}
-          </Text>
-        </View>
-      ) : content === null ? (
-        <ActivityIndicator color={colors.accent} />
-      ) : (
-        <>
-          <HighlightsRow highlights={content.highlights} editable={false} />
-
-          {!summary.canSeePosts ? (
-            <View style={styles.locked}>
-              <Ionicons name="images-outline" size={32} color={colors.textSecondary} />
-              <Text style={styles.muted}>Kalender und Beiträge von @{profile.username} sehen nur Follower.</Text>
-            </View>
-          ) : (
-            <>
+      {!isLocked &&
+        (content === null ? (
+          <ActivityIndicator color={colors.accent} />
+        ) : (
+          <>
+            <HighlightsRow highlights={content.highlights} editable={false} />
+            {summary.canSeePosts && (
               <View style={styles.calendar}>
                 <MonthCalendar
                   year={visibleMonth.year}
@@ -382,28 +333,47 @@ export default function UserProfileScreen() {
                   canGoNext={canGoNext}
                   onPrev={() => setVisibleMonth((m) => addMonths(m.year, m.month, -1))}
                   onNext={() => setVisibleMonth((m) => addMonths(m.year, m.month, 1))}
-                  onSelectDay={(day) =>
-                    router.push({ pathname: "/day/[date]", params: { date: day, userId } })
-                  }
+                  onSelectDay={(day) => router.push({ pathname: "/day/[date]", params: { date: day, userId } })}
                 />
               </View>
+            )}
+          </>
+        ))}
+    </View>
+  );
 
-              <Text style={styles.sectionTitle}>Beiträge</Text>
-              <PostGrid posts={content.posts} emptyText="Noch keine Beiträge sichtbar." />
-            </>
-          )}
-        </>
-      )}
-    </ScrollView>
+  // Private and I'm not an accepted follower: no tabs and no content.
+  const locked = isLocked ? (
+    <View style={styles.locked}>
+      <Ionicons name="lock-closed-outline" size={36} color={colors.textSecondary} />
+      <Text style={styles.lockedTitle}>Dieses Profil ist privat</Text>
+      <Text style={styles.muted}>
+        {summary.followStatus === "pending"
+          ? `Deine Anfrage ist gesendet. Sobald @${profile.username} sie bestätigt, siehst du Storys, Kalender und Beiträge.`
+          : `Folge @${profile.username}, um Storys, Kalender und Beiträge zu sehen.`}
+      </Text>
+    </View>
+  ) : null;
+
+  return (
+    <>
+      {stackScreen}
+      <ProfileTabsList
+        userId={userId}
+        isMe={userId === myId}
+        header={header}
+        locked={locked}
+        postsHiddenText={summary.canSeePosts ? null : `Kalender und Beiträge von @${profile.username} sehen nur Follower.`}
+        tab={tab}
+        onTabChange={setTab}
+        onRefreshHeader={() => void load()}
+      />
+    </>
   );
 }
 
 const useStyles = makeStyles(({ colors }) =>
   StyleSheet.create({
-    screen: {
-      flex: 1,
-      backgroundColor: colors.background,
-    },
     content: {
       paddingBottom: spacing.xl,
       gap: spacing.md,
@@ -513,12 +483,6 @@ const useStyles = makeStyles(({ colors }) =>
       fontWeight: "700",
     },
     calendar: {
-      paddingHorizontal: spacing.md,
-    },
-    sectionTitle: {
-      color: colors.text,
-      fontSize: fontSize.lg,
-      fontWeight: "700",
       paddingHorizontal: spacing.md,
     },
     muted: {

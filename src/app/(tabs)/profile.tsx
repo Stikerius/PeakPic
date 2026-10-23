@@ -1,23 +1,16 @@
 import Ionicons from "@expo/vector-icons/Ionicons";
 import * as ImagePicker from "expo-image-picker";
-import { router, useFocusEffect } from "expo-router";
+import { router, useFocusEffect, useLocalSearchParams } from "expo-router";
 import { useCallback, useEffect, useState } from "react";
-import {
-  ActivityIndicator,
-  Pressable,
-  ScrollView,
-  StyleSheet,
-  Text,
-  View,
-} from "react-native";
+import { ActivityIndicator, Pressable, StyleSheet, Text, View } from "react-native";
 
 import { HighlightsRow } from "@/components/profile/highlights-row";
 import { PlanSummary } from "@/components/profile/plan-summary";
-import { PostGrid } from "@/components/profile/post-grid";
+import { isProfileTab, type ProfileTab } from "@/components/profile/profile-tab-bar";
+import { ProfileTabsList } from "@/components/profile/profile-tabs-list";
 import { FlameIcon } from "@/components/streak/flame-icon";
 import { Avatar } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
-import { Divider } from "@/components/ui/divider";
 import { fontSize, radius, spacing, typography } from "@/constants/theme";
 import { useFollowRequestCount } from "@/hooks/use-follow-requests";
 import { useWorkoutDays } from "@/hooks/use-workout-days";
@@ -36,7 +29,6 @@ import {
   type PlanProof,
 } from "@/lib/streak";
 import { makeStyles, useTheme } from "@/lib/theme";
-import { fetchProfileGrid, type PostThumbnail } from "@/lib/userProfileRepo";
 import { useTrackScreen } from "@/lib/usage";
 
 const AVATAR_SIZE = 112;
@@ -47,7 +39,15 @@ export default function ProfileScreen() {
   const styles = useStyles();
   // Session can briefly be null while signing out, before the route guard unmounts us.
   const email = useSession().session?.user.email;
-  const myId = useSession().session?.user.id ?? null;
+  // "?tab=activities" (old routes /activities and /stats lead here) opens that tab.
+  const params = useLocalSearchParams<{ tab?: string }>();
+  const requestedTab: ProfileTab | null = isProfileTab(params.tab) ? params.tab : null;
+  const [tab, setTab] = useState<ProfileTab>(requestedTab ?? "posts");
+  const [seenRequest, setSeenRequest] = useState(requestedTab);
+  if (requestedTab !== seenRequest) {
+    setSeenRequest(requestedTab);
+    if (requestedTab !== null) setTab(requestedTab);
+  }
   const { days, restDays } = useWorkoutDays();
   const [planProofs, setPlanProofs] = useState<PlanProof[]>([]);
   const [profile, setProfile] = useState<Profile | null>(null);
@@ -55,11 +55,12 @@ export default function ProfileScreen() {
   const [uploading, setUploading] = useState(false);
   const [highlights, setHighlights] = useState<Highlight[]>([]);
   const [plan, setPlan] = useState<TrainingPlan | null>(null);
-  const [posts, setPosts] = useState<PostThumbnail[] | null>(null);
   const [counts, setCounts] = useState<{ followers: number; following: number } | null>(null);
   const requestCount = useFollowRequestCount();
   // Bumped when posts or highlights change elsewhere, to reload them.
   const [version, setVersion] = useState(0);
+  // Pull to refresh of the header (the tab refreshes itself).
+  const [headerVersion, setHeaderVersion] = useState(0);
 
   useEffect(() => {
     const bump = () => setVersion((v) => v + 1);
@@ -80,9 +81,8 @@ export default function ProfileScreen() {
           if (!active) return;
           setProfile(result);
           setError(null);
-          const [mine, grid, followCounts, myPlan] = await Promise.all([
+          const [mine, followCounts, myPlan] = await Promise.all([
             listMyHighlights(),
-            fetchProfileGrid(result.id),
             fetchFollowCounts(result.id),
             fetchMyPlan().catch(() => null),
           ]);
@@ -90,7 +90,6 @@ export default function ProfileScreen() {
           setPlan(myPlan);
           setPlanProofs(await fetchPlanProofs().catch(() => []));
           setHighlights(mine);
-          setPosts(grid);
           setCounts(followCounts);
         })
         .catch(() => {
@@ -99,7 +98,7 @@ export default function ProfileScreen() {
       return () => {
         active = false;
       };
-    }, [version]),
+    }, [version, headerVersion]),
   );
 
   const stats = computeStreakStatsFromDays(days, toDayKey(new Date()), restDays);
@@ -143,8 +142,8 @@ export default function ProfileScreen() {
     );
   }
 
-  return (
-    <ScrollView style={styles.screen} contentContainerStyle={styles.content}>
+  const header = (
+    <View style={styles.content}>
       <View style={[styles.padded, styles.section]}>
         <View style={styles.header}>
           <Pressable
@@ -248,86 +247,34 @@ export default function ProfileScreen() {
         </View>
       </View>
 
-      {myId !== null && (
-        <View style={styles.activitiesCard}>
-          <Pressable
-            onPress={() => router.push({ pathname: "/activities/[userId]", params: { userId: myId } })}
-            accessibilityRole="button"
-            accessibilityLabel="Aktivitäten: aufgezeichnete Trainings"
-            style={({ pressed }) => [styles.activitiesRow, pressed && styles.activitiesPressed]}
-          >
-            <Ionicons name="barbell-outline" size={20} color={colors.textSecondary} />
-            <Text style={styles.activitiesText}>Aktivitäten</Text>
-            <Ionicons name="chevron-forward" size={18} color={colors.textTertiary} />
-          </Pressable>
-          <Divider />
-          <Pressable
-            onPress={() => router.push({ pathname: "/stats/[userId]", params: { userId: myId } })}
-            accessibilityRole="button"
-            accessibilityLabel="Statistik: Trainings, Zeit, Streak und Übungen"
-            style={({ pressed }) => [styles.activitiesRow, pressed && styles.activitiesPressed]}
-          >
-            <Ionicons name="bar-chart-outline" size={20} color={colors.textSecondary} />
-            <Text style={styles.activitiesText}>Statistik</Text>
-            <Ionicons name="chevron-forward" size={18} color={colors.textTertiary} />
-          </Pressable>
-        </View>
-      )}
+    </View>
+  );
 
-      <Text style={[styles.sectionTitle, styles.padded]}>Beiträge</Text>
-      {posts === null ? (
-        <ActivityIndicator color={colors.accent} />
-      ) : (
-        <PostGrid posts={posts} emptyText="Noch keine Beiträge im Profil. Teile ein Workout im Feed." />
-      )}
-    </ScrollView>
+  return (
+    <ProfileTabsList
+      userId={profile.id}
+      isMe
+      header={header}
+      tab={tab}
+      onTabChange={setTab}
+      postsVersion={version}
+      onRefreshHeader={() => setHeaderVersion((v) => v + 1)}
+    />
   );
 }
 
 const useStyles = makeStyles(({ colors }) =>
   StyleSheet.create({
-    screen: {
-      flex: 1,
-      backgroundColor: colors.background,
-    },
     content: {
-      paddingVertical: spacing.md,
+      paddingTop: spacing.md,
+      paddingBottom: spacing.lg,
       gap: spacing.lg,
-    },
-    activitiesCard: {
-      marginHorizontal: spacing.md,
-      borderRadius: radius.md,
-      borderWidth: StyleSheet.hairlineWidth,
-      borderColor: colors.border,
-      backgroundColor: colors.surface,
-      overflow: "hidden",
-    },
-    activitiesRow: {
-      minHeight: 48,
-      flexDirection: "row",
-      alignItems: "center",
-      gap: spacing.ms,
-      paddingHorizontal: spacing.md,
-    },
-    activitiesPressed: {
-      backgroundColor: colors.surfaceRaised,
-    },
-    activitiesText: {
-      ...typography.body,
-      flex: 1,
-      color: colors.text,
     },
     padded: {
       paddingHorizontal: spacing.md,
     },
     section: {
       gap: spacing.lg,
-    },
-    sectionTitle: {
-      color: colors.text,
-      fontSize: fontSize.lg,
-      fontWeight: "700",
-      marginBottom: -spacing.sm,
     },
     centered: {
       flex: 1,

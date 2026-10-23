@@ -154,6 +154,25 @@ export async function fetchWorkoutsOf(userId: string, limit = 50): Promise<Worko
   return (data as unknown as ListRow[]).map(toListItem);
 }
 
+/** One page of `userId`'s trainings I may see, newest first, started before `cursor`. */
+export async function fetchWorkoutsPage(
+  userId: string,
+  cursor: string | null,
+  limit = 30,
+): Promise<{ items: WorkoutListItem[]; nextCursor: string | null }> {
+  let query = supabase
+    .from("workouts")
+    .select(LIST_SELECT)
+    .eq("user_id", userId)
+    .order("started_at", { ascending: false })
+    .limit(limit);
+  if (cursor !== null) query = query.lt("started_at", cursor);
+  const { data, error } = await query;
+  if (error) throw error;
+  const items = (data as unknown as ListRow[]).map(toListItem);
+  return { items, nextCursor: items.length === limit ? (items[items.length - 1]?.startedAt ?? null) : null };
+}
+
 /** My recorded trainings, newest first. */
 export async function fetchMyWorkouts(limit = 30): Promise<WorkoutListItem[]> {
   return fetchWorkoutsOf(await requireUserId(), limit);
