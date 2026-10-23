@@ -69,6 +69,8 @@ export type UsageEvent =
   | "plan_deviation_exception"
   | "plan_deviation_reordered"
   | "plan_round_adjusted"
+  | "plan_round_unit_skipped"
+  | "screen_plan_round"
   | "screen_search"
   | "screen_hashtag"
   | "screen_settings"

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "@jest/globals";
 
-import { deviationProposal, plannedRestDueFromRound, roundNext, roundSteps, type PlanRoundState } from "@/lib/planRoundState";
+import { deviationProposal, openIds, plannedRestDueFromRound, roundNext, roundSteps, type PlanRoundState } from "@/lib/planRoundState";
 import type { PlanEntry } from "@/lib/streak";
 
 const ENTRIES: PlanEntry[] = [
@@ -11,10 +11,14 @@ const ENTRIES: PlanEntry[] = [
 ];
 
 function state(dayOrder: string[], nextIndex: number, lastDay: string | null = null): PlanRoundState {
-  return { planId: "p", dayOrder, nextIndex, lastDay, pending: null };
+  return { planId: "p", dayOrder, nextIndex, skipped: [], lastDay, pending: null };
 }
 
 describe("round state", () => {
+  it("lists the open units, the next one first", () => {
+    expect(openIds(state(["push", "pull", "rest", "legs"], 2))).toEqual(["rest", "legs"]);
+  });
+
   it("shows done, next and open", () => {
     expect(roundSteps(state(["push", "pull", "rest", "legs"], 1)).map((s) => s.status)).toEqual(["done", "next", "open", "open"]);
   });

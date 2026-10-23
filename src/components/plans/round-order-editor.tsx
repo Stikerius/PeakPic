@@ -14,10 +14,21 @@ type RoundOrderEditorProps = {
   onChange: (ids: string[]) => void;
   onDragChange?: (dragging: boolean) => void;
   disabled?: boolean;
+  /** The first unit is the one due next ("Als Nächstes"). */
+  firstIsNext?: boolean;
+  /** "…" per unit (e.g. skip it). */
+  onMore?: (unit: RoundUnit) => void;
 };
 
 /** Open units of the current round, reorderable by dragging or with the arrows (VoiceOver). */
-export function RoundOrderEditor({ units, onChange, onDragChange, disabled = false }: RoundOrderEditorProps) {
+export function RoundOrderEditor({
+  units,
+  onChange,
+  onDragChange,
+  disabled = false,
+  firstIsNext = false,
+  onMore,
+}: RoundOrderEditorProps) {
   const styles = useStyles();
   const ids = units.map((u) => u.id);
   const move = (from: number, to: number) => onChange(moveTo(ids, from, to));
@@ -35,7 +46,13 @@ export function RoundOrderEditor({ units, onChange, onDragChange, disabled = fal
               <Text style={styles.title} numberOfLines={1}>
                 {index + 1}. {unit.title}
               </Text>
-              {unit.type === "rest" && <Text style={styles.meta}>Ruhetag</Text>}
+              {(unit.type === "rest" || (firstIsNext && index === 0)) && (
+                <Text style={styles.meta}>
+                  {[firstIsNext && index === 0 ? "Als Nächstes" : null, unit.type === "rest" ? "Ruhetag" : null]
+                    .filter((part) => part !== null)
+                    .join(" · ")}
+                </Text>
+              )}
             </View>
             <IconButton
               icon="chevron-up"
@@ -49,6 +66,14 @@ export function RoundOrderEditor({ units, onChange, onDragChange, disabled = fal
               onPress={() => move(index, index + 1)}
               disabled={disabled || index === units.length - 1}
             />
+            {onMore !== undefined && (
+              <IconButton
+                icon="ellipsis-horizontal"
+                label={`${unit.title}: überspringen`}
+                onPress={() => onMore(unit)}
+                disabled={disabled}
+              />
+            )}
           </View>
         )}
       />

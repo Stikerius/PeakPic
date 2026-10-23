@@ -205,6 +205,7 @@ export default function ProfileScreen() {
             plan={plan}
             nextIndex={roundNext(planRoundState, planEntries(plan)).nextIndex}
             onDeactivate={() => confirmDeactivatePlan(() => setVersion((v) => v + 1))}
+            onOpenRound={() => router.push("/plan-round")}
           />
         </View>
       )}

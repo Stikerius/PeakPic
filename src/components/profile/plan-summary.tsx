@@ -19,10 +19,20 @@ type PlanSummaryProps = {
   busy?: boolean;
   /** My active plan: "Plan deaktivieren". */
   onDeactivate?: () => void;
+  /** My active plan: "Aktueller Durchlauf". */
+  onOpenRound?: () => void;
 };
 
 /** The training plan in the profile: one line, expands to the units in cycle order. */
-export function PlanSummary({ plan, nextIndex = null, onAdopt, onReport, busy = false, onDeactivate }: PlanSummaryProps) {
+export function PlanSummary({
+  plan,
+  nextIndex = null,
+  onAdopt,
+  onReport,
+  busy = false,
+  onDeactivate,
+  onOpenRound,
+}: PlanSummaryProps) {
   const { colors } = useTheme();
   const styles = useStyles();
   const [open, setOpen] = useState(false);
@@ -83,8 +93,11 @@ export function PlanSummary({ plan, nextIndex = null, onAdopt, onReport, busy = 
               </View>
             );
           })}
-          {(onAdopt !== undefined || onReport !== undefined || onDeactivate !== undefined) && (
+          {(onAdopt !== undefined || onReport !== undefined || onDeactivate !== undefined || onOpenRound !== undefined) && (
             <View style={styles.actions}>
+              {onOpenRound !== undefined && (
+                <Button label="Aktueller Durchlauf" icon="list-outline" variant="secondary" size="sm" onPress={onOpenRound} />
+              )}
               {onDeactivate !== undefined && (
                 <Button label="Plan deaktivieren" icon="pause-outline" variant="ghost" size="sm" onPress={onDeactivate} />
               )}

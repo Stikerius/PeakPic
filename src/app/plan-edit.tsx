@@ -82,6 +82,7 @@ export default function PlansScreen() {
   function openMenu(plan: TrainingPlan) {
     showActionSheet(plan.name, [
       { label: "Bearbeiten", onPress: () => router.push({ pathname: "/plan-editor/[planId]", params: { planId: plan.id } }) },
+      ...(plan.isActive ? [{ label: "Aktueller Durchlauf", onPress: () => router.push("/plan-round") }] : []),
       plan.isActive
         ? { label: "Plan deaktivieren", onPress: () => confirmDeactivatePlan(() => void load()) }
         : {

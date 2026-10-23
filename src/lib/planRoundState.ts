@@ -20,9 +20,16 @@ export type PlanRoundState = {
   dayOrder: string[];
   /** Everything before this index is done; dayOrder[nextIndex] is due next. */
   nextIndex: number;
+  /** Units left out of this round ("entfällt"); not done, back with the next round. */
+  skipped: string[];
   lastDay: DayKey | null;
   pending: PlanDeviation | null;
 };
+
+/** The open units of the round (the next one first), the part that can be reordered. */
+export function openIds(state: PlanRoundState): string[] {
+  return state.dayOrder.slice(state.nextIndex);
+}
 
 export type RoundStep = { id: string; status: "done" | "next" | "open" };
 

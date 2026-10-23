@@ -229,6 +229,8 @@ export function planErrorMessage(error: RpcError): string {
       return "Diese Frage gibt es nicht mehr.";
     case "plan_not_active":
       return "Der Plan ist nicht mehr aktiv.";
+    case "unit_not_open":
+      return "Diese Einheit ist in diesem Durchlauf schon erledigt.";
     default:
       return error.message ?? "Etwas ist schiefgelaufen.";
   }
@@ -359,6 +361,7 @@ export async function fetchMyPlanRound(): Promise<MyPlanRound> {
       planId,
       dayOrder: order,
       nextIndex: typeof data.next_index === "number" ? data.next_index : 0,
+      skipped: Array.isArray(data.skipped) ? data.skipped.flatMap((v) => (typeof v === "string" ? [v] : [])) : [],
       lastDay: asText(data.last_day),
       pending,
     },
@@ -384,6 +387,16 @@ export async function resolvePlanDeviation(
       p_scope: scope,
     }),
   );
+}
+
+/** "Aktueller Durchlauf": new order of the open units (exactly those ids). */
+export async function adjustPlanRound(orderedOpenIds: string[]): Promise<void> {
+  await callVoid(supabase.rpc("adjust_plan_round", { p_ordered_open_ids: orderedOpenIds }));
+}
+
+/** Skips an open unit: to the end of the round, or left out of this round. */
+export async function skipPlanRoundUnit(dayId: string, mode: "end" | "drop"): Promise<void> {
+  await callVoid(supabase.rpc("skip_plan_round_unit", { p_day_id: dayId, p_mode: mode }));
 }
 
 /** Planned rest days I confirmed (for taking one back in the calendar). */

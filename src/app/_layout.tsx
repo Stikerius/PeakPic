@@ -137,6 +137,7 @@ function RootNavigator() {
         <Stack.Screen name="stats/[userId]" options={{ title: "Statistik" }} />
         <Stack.Screen name="profile-edit" options={{ title: "Profil bearbeiten", presentation: "modal" }} />
         <Stack.Screen name="plan-edit" options={{ title: "Trainingspläne" }} />
+        <Stack.Screen name="plan-round" options={{ title: "Aktueller Durchlauf" }} />
         <Stack.Screen name="plan-editor/[planId]" options={{ title: "Plan bearbeiten", presentation: "modal" }} />
         <Stack.Screen name="privacy/[scope]" options={{ title: "" }} />
         <Stack.Screen name="app-icon" options={{ title: "App-Icon" }} />

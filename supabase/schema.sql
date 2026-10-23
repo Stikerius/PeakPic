@@ -60,7 +60,9 @@
 --                   written only by functions. Training another unit than the next one is always
 --                   accepted; it opens one question (plan_deviations) that the person answers with
 --                   resolve_plan_deviation() ('exception' or 'reordered'), or that becomes an
---                   'auto_exception' after 2 days. Reordering, adding or removing days never resets
+--                   'auto_exception' after 2 days. The open units of the round can be reordered or
+--                   skipped any time (adjust_plan_round(), skip_plan_round_unit()). Reordering,
+--                   adding or removing days never resets
 --                   progress; sequence_changed_at only moves when a plan is (re)started at day 1.
 --   * training stats get_my_training_stats() / get_training_stats(): aggregated numbers only
 --                   (per day and exercise, never single trainings), visible per
@@ -645,6 +647,8 @@ $$;
 -- the unit due next; everything before it is done. After the last unit a new round starts in the
 -- plan's order. One row per person and plan, written only by the plan functions (no client
 -- writes). last_day: day of the last completed plan entry (for planned rest days).
+-- skipped: units left out of this round ("Überspringen, entfällt"); they don't count as done and
+-- come back with the next round.
 create table if not exists public.plan_rounds (
   user_id    uuid not null references public.profiles (id) on delete cascade,
   plan_id    uuid not null references public.training_plans (id) on delete cascade,
@@ -654,6 +658,8 @@ create table if not exists public.plan_rounds (
   updated_at timestamptz not null default now(),
   primary key (user_id, plan_id)
 );
+
+alter table public.plan_rounds add column if not exists skipped uuid[] not null default '{}';
 
 -- A proof (recorded training or post) of another unit than the one due next: always accepted,
 -- the person decides how the plan goes on. At most one open ('pending') question per person;
@@ -3207,15 +3213,16 @@ begin
   open_part := array(select x from unnest(r.day_order[r.next_index + 1:]) x where x = any (template));
   open_part := open_part || array(
     select x from unnest(template) with ordinality t(x, n)
-    where not (x = any (done_part)) and not (x = any (open_part)) order by n
+    where not (x = any (done_part)) and not (x = any (open_part)) and not (x = any (r.skipped)) order by n
   );
   if cardinality(open_part) = 0 then
     done_part := '{}';
     open_part := template;
+    r.skipped := '{}';
   end if;
   if done_part || open_part is distinct from r.day_order or cardinality(done_part) <> r.next_index then
     update public.plan_rounds
-    set day_order = done_part || open_part, next_index = cardinality(done_part), updated_at = now()
+    set day_order = done_part || open_part, next_index = cardinality(done_part), skipped = r.skipped, updated_at = now()
     where user_id = p_user and plan_id = p_plan
     returning * into r;
   end if;
@@ -3237,14 +3244,16 @@ declare
 begin
   for r in select * from public.plan_rounds pr where pr.plan_id = p_plan for update loop
     done_part := array(select x from unnest(r.day_order[1:r.next_index]) x where x = any (template));
-    open_part := array(select x from unnest(template) x where not (x = any (done_part)));
+    open_part := array(select x from unnest(template) x where not (x = any (done_part)) and not (x = any (r.skipped)));
     if cardinality(open_part) = 0 then
-      done_part := '{}';
-      open_part := template;
+      update public.plan_rounds
+      set day_order = template, next_index = 0, skipped = '{}', updated_at = now()
+      where user_id = r.user_id and plan_id = p_plan;
+    else
+      update public.plan_rounds
+      set day_order = done_part || open_part, next_index = cardinality(done_part), updated_at = now()
+      where user_id = r.user_id and plan_id = p_plan;
     end if;
-    update public.plan_rounds
-    set day_order = done_part || open_part, next_index = cardinality(done_part), updated_at = now()
-    where user_id = r.user_id and plan_id = p_plan;
   end loop;
 end;
 $$;
@@ -3259,7 +3268,8 @@ declare
 begin
   if r.next_index + p_steps >= cardinality(r.day_order) then
     update public.plan_rounds
-    set day_order = public.plan_template_order(p_plan), next_index = 0, last_day = greatest(r.last_day, p_day), updated_at = now()
+    set day_order = public.plan_template_order(p_plan), next_index = 0, skipped = '{}',
+        last_day = greatest(r.last_day, p_day), updated_at = now()
     where user_id = p_user and plan_id = p_plan;
   else
     update public.plan_rounds
@@ -3385,6 +3395,7 @@ begin
     'plan_id', active_plan,
     'day_order', to_jsonb(coalesce(r.day_order, public.plan_template_order(active_plan))),
     'next_index', coalesce(r.next_index, 0),
+    'skipped', to_jsonb(coalesce(r.skipped, '{}'::uuid[])),
     'last_day', r.last_day,
     'pending', (
       select jsonb_build_object(
@@ -3467,7 +3478,7 @@ begin
     new_next := cardinality(done_part) + (case when in_open then 1 else 0 end);
     if new_next >= cardinality(full_order) then
       update public.plan_rounds
-      set day_order = public.plan_template_order(dev.plan_id), next_index = 0, updated_at = now()
+      set day_order = public.plan_template_order(dev.plan_id), next_index = 0, skipped = '{}', updated_at = now()
       where user_id = me and plan_id = dev.plan_id;
     else
       update public.plan_rounds set day_order = full_order, next_index = new_next, updated_at = now()
@@ -3482,6 +3493,92 @@ begin
   end if;
 
   update public.plan_deviations set status = p_decision, resolved_at = now() where id = dev.id;
+end;
+$$;
+
+-- "Aktueller Durchlauf": new order of the open units of my active plan's round (the next one and
+-- the ones after it), exactly those ids. Done units stay where they are. Resets nothing.
+create or replace function public.adjust_plan_round(p_ordered_open_ids uuid[])
+returns void
+language plpgsql security definer set search_path = ''
+as $$
+declare
+  me uuid := auth.uid();
+  active_plan uuid;
+  r public.plan_rounds%rowtype;
+  open_part uuid[];
+begin
+  if me is null then
+    raise exception 'not authenticated';
+  end if;
+  if not public.is_account_active() then
+    raise exception 'account_inactive';
+  end if;
+  select tp.id into active_plan from public.training_plans tp where tp.user_id = me and tp.is_active;
+  if active_plan is null then
+    raise exception 'plan_not_active';
+  end if;
+  perform 1 from public.profiles pr where pr.id = me for update;
+  r := public.plan_round_load(me, active_plan);
+  open_part := r.day_order[r.next_index + 1:];
+  if p_ordered_open_ids is null or cardinality(p_ordered_open_ids) <> cardinality(open_part)
+    or (select count(distinct x) from unnest(p_ordered_open_ids) x) <> cardinality(p_ordered_open_ids)
+    or exists (select 1 from unnest(p_ordered_open_ids) x where not (x = any (open_part))) then
+    raise exception 'invalid_order';
+  end if;
+  update public.plan_rounds
+  set day_order = r.day_order[1:r.next_index] || p_ordered_open_ids, updated_at = now()
+  where user_id = me and plan_id = active_plan;
+end;
+$$;
+
+-- Skips an open unit of my active plan's round: 'end' moves it to the end of the round, 'drop'
+-- leaves it out of this round (it doesn't count as done and comes back with the next round).
+-- Dropping the last open unit starts the next round.
+create or replace function public.skip_plan_round_unit(p_day_id uuid, p_mode text)
+returns void
+language plpgsql security definer set search_path = ''
+as $$
+declare
+  me uuid := auth.uid();
+  active_plan uuid;
+  r public.plan_rounds%rowtype;
+  open_part uuid[];
+  rest uuid[];
+begin
+  if me is null then
+    raise exception 'not authenticated';
+  end if;
+  if not public.is_account_active() then
+    raise exception 'account_inactive';
+  end if;
+  if p_mode is null or p_mode not in ('end', 'drop') then
+    raise exception 'invalid_mode';
+  end if;
+  select tp.id into active_plan from public.training_plans tp where tp.user_id = me and tp.is_active;
+  if active_plan is null then
+    raise exception 'plan_not_active';
+  end if;
+  perform 1 from public.profiles pr where pr.id = me for update;
+  r := public.plan_round_load(me, active_plan);
+  open_part := r.day_order[r.next_index + 1:];
+  if p_day_id is null or not (p_day_id = any (open_part)) then
+    raise exception 'unit_not_open';
+  end if;
+  rest := array(select x from unnest(open_part) x where x <> p_day_id);
+  if p_mode = 'end' then
+    update public.plan_rounds
+    set day_order = r.day_order[1:r.next_index] || rest || p_day_id, updated_at = now()
+    where user_id = me and plan_id = active_plan;
+  elsif cardinality(rest) = 0 then
+    update public.plan_rounds
+    set day_order = public.plan_template_order(active_plan), next_index = 0, skipped = '{}', updated_at = now()
+    where user_id = me and plan_id = active_plan;
+  else
+    update public.plan_rounds
+    set day_order = r.day_order[1:r.next_index] || rest, skipped = r.skipped || p_day_id, updated_at = now()
+    where user_id = me and plan_id = active_plan;
+  end if;
 end;
 $$;
 
@@ -5549,6 +5646,10 @@ revoke all on function public.get_my_plan_round() from public, anon;
 grant execute on function public.get_my_plan_round() to authenticated;
 revoke all on function public.resolve_plan_deviation(uuid, text, jsonb, text) from public, anon;
 grant execute on function public.resolve_plan_deviation(uuid, text, jsonb, text) to authenticated;
+revoke all on function public.adjust_plan_round(uuid[]) from public, anon;
+grant execute on function public.adjust_plan_round(uuid[]) to authenticated;
+revoke all on function public.skip_plan_round_unit(uuid, text) from public, anon;
+grant execute on function public.skip_plan_round_unit(uuid, text) to authenticated;
 revoke all on function public.duplicate_plan(uuid) from public, anon;
 grant execute on function public.duplicate_plan(uuid) to authenticated;
 revoke all on function public.delete_plan(uuid) from public, anon;
@@ -6817,6 +6918,8 @@ insert into public.usage_event_types (name, area, source) values
   ('plan_deviation_exception', 'plans', 'client'),
   ('plan_deviation_reordered', 'plans', 'client'),
   ('plan_round_adjusted', 'plans', 'client'),
+  ('plan_round_unit_skipped', 'plans', 'client'),
+  ('screen_plan_round', 'plans', 'client'),
   ('screen_training', 'workout', 'client'),
   ('screen_workout_session', 'workout', 'client'),
   ('screen_workout_finish', 'workout', 'client'),
