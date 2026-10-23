@@ -1,3 +1,9 @@
+# PeakPic
+
+**Rechner gewechselt?** Was du ausser `git pull` tun musst, steht in [docs/geraetewechsel.md](docs/geraetewechsel.md).
+
+---
+
 # Welcome to your Expo app 👋
 
 This is an [Expo](https://expo.dev) project created with [`create-expo-app`](https://www.npmjs.com/package/create-expo-app).
