@@ -1,5 +1,5 @@
 import Ionicons from "@expo/vector-icons/Ionicons";
-import type { ReactNode } from "react";
+import type { ReactElement } from "react";
 import { StyleSheet, View } from "react-native";
 import { Gesture, GestureDetector } from "react-native-gesture-handler";
 import Animated, { interpolate, useAnimatedStyle, useSharedValue, withSpring } from "react-native-reanimated";
@@ -21,9 +21,13 @@ type SwipeableMessageProps = {
   onReply: () => void;
   /** Swipe towards the screen edge. */
   onTogglePin: () => void;
-  /** Long press; `pageY` is where the finger is, for placing the reaction bar. */
+  /**
+   * Long press on the bubble itself (not the empty space beside it, that's the chat background);
+   * `pageY` is where the finger is, for placing the reaction bar.
+   */
   onLongPress: (pageY: number) => void;
-  children: ReactNode;
+  /** The bubble: one element whose own view is only as wide as the bubble. */
+  children: ReactElement;
 };
 
 /**
@@ -72,7 +76,7 @@ export function SwipeableMessage({ mine, pinned, onReply, onTogglePin, onLongPre
   const pinIcon = <Ionicons name={pinned ? "pin-outline" : "pin"} size={18} color={colors.text} />;
 
   return (
-    <GestureDetector gesture={Gesture.Race(pan, longPress)}>
+    <GestureDetector gesture={pan}>
       <View collapsable={false}>
         <Animated.View style={[styles.icon, styles.iconLeft, leftIconStyle]} pointerEvents="none">
           {mine ? pinIcon : replyIcon}
@@ -80,7 +84,9 @@ export function SwipeableMessage({ mine, pinned, onReply, onTogglePin, onLongPre
         <Animated.View style={[styles.icon, styles.iconRight, rightIconStyle]} pointerEvents="none">
           {mine ? replyIcon : pinIcon}
         </Animated.View>
-        <Animated.View style={contentStyle}>{children}</Animated.View>
+        <Animated.View style={contentStyle}>
+          <GestureDetector gesture={longPress}>{children}</GestureDetector>
+        </Animated.View>
       </View>
     </GestureDetector>
   );

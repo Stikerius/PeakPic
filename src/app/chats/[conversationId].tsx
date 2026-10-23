@@ -18,6 +18,7 @@ import {
   TextInput,
   View,
 } from "react-native";
+import { Gesture, GestureDetector } from "react-native-gesture-handler";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { MessageBubble } from "@/components/chat/message-bubble";
@@ -190,6 +191,15 @@ export default function ChatScreen() {
     { label: "Hintergrund ändern", onPress: () => void pickBackground() },
     ...(background !== null ? [{ label: "Standard wiederherstellen", onPress: resetBackground }] : []),
   ];
+
+  /**
+   * Long press on the background, also beside and between messages (a bubble's own long press
+   * wins there and opens the reactions).
+   */
+  const backgroundLongPress = Gesture.LongPress()
+    .minDuration(500)
+    .runOnJS(true)
+    .onStart(() => showActionSheet("Chat-Hintergrund", backgroundActions));
 
   function showChatMenu() {
     showActionSheet(partner?.displayName ?? "Chat", [
@@ -573,48 +583,52 @@ export default function ChatScreen() {
               )}
             </View>
           ) : (
-            <FlatList
-              ref={listRef}
-              inverted
-              data={messages}
-              keyExtractor={(m) => m.id}
-              contentContainerStyle={styles.list}
-              keyboardShouldPersistTaps="handled"
-              renderItem={({ item }) => (
-                <SwipeableMessage
-                  mine={item.senderId === myId}
-                  pinned={item.pinnedAt !== null}
-                  onReply={() => startReply(item)}
-                  onTogglePin={() => void togglePin(item)}
-                  onLongPress={(y) => openReactions(item, y)}
-                >
-                  <MessageBubble
-                    message={item}
-                    mine={item.senderId === myId}
-                    myId={myId}
-                    partnerName={partnerName}
-                    highlighted={item.id === highlightedId}
-                    onPressQuote={(id) => void jumpTo(id)}
-                    onPressReaction={(emoji) => void react(item, emoji)}
-                  />
-                </SwipeableMessage>
-              )}
-              onScrollToIndexFailed={({ index, averageItemLength }) => {
-                // Rows have different heights: jump close, then retry once they are measured.
-                listRef.current?.scrollToOffset({ offset: index * averageItemLength, animated: false });
-                setTimeout(() => listRef.current?.scrollToIndex({ index, viewPosition: 0.5 }), 100);
-              }}
-              onEndReached={() => void loadOlder()}
-              onEndReachedThreshold={0.3}
-              ListFooterComponent={loadingOlder ? <ActivityIndicator color={colors.accent} /> : null}
-              ListEmptyComponent={
-                <View style={styles.empty}>
-                  <Text style={styles.emptyText}>
-                    {partnerAvailable ? `Schreib @${partner.username} die erste Nachricht.` : ""}
-                  </Text>
-                </View>
-              }
-            />
+            <GestureDetector gesture={backgroundLongPress}>
+              <View style={styles.listArea} collapsable={false}>
+                <FlatList
+                  ref={listRef}
+                  inverted
+                  data={messages}
+                  keyExtractor={(m) => m.id}
+                  contentContainerStyle={styles.list}
+                  keyboardShouldPersistTaps="handled"
+                  renderItem={({ item }) => (
+                    <SwipeableMessage
+                      mine={item.senderId === myId}
+                      pinned={item.pinnedAt !== null}
+                      onReply={() => startReply(item)}
+                      onTogglePin={() => void togglePin(item)}
+                      onLongPress={(y) => openReactions(item, y)}
+                    >
+                      <MessageBubble
+                        message={item}
+                        mine={item.senderId === myId}
+                        myId={myId}
+                        partnerName={partnerName}
+                        highlighted={item.id === highlightedId}
+                        onPressQuote={(id) => void jumpTo(id)}
+                        onPressReaction={(emoji) => void react(item, emoji)}
+                      />
+                    </SwipeableMessage>
+                  )}
+                  onScrollToIndexFailed={({ index, averageItemLength }) => {
+                    // Rows have different heights: jump close, then retry once they are measured.
+                    listRef.current?.scrollToOffset({ offset: index * averageItemLength, animated: false });
+                    setTimeout(() => listRef.current?.scrollToIndex({ index, viewPosition: 0.5 }), 100);
+                  }}
+                  onEndReached={() => void loadOlder()}
+                  onEndReachedThreshold={0.3}
+                  ListFooterComponent={loadingOlder ? <ActivityIndicator color={colors.accent} /> : null}
+                  ListEmptyComponent={
+                    <View style={styles.empty}>
+                      <Text style={styles.emptyText}>
+                        {partnerAvailable ? `Schreib @${partner.username} die erste Nachricht.` : ""}
+                      </Text>
+                    </View>
+                  }
+                />
+              </View>
+            </GestureDetector>
           )}
 
           {messages !== null && error !== null && <Text style={styles.inlineError}>{error}</Text>}
@@ -868,6 +882,9 @@ const useStyles = makeStyles(({ colors }) =>
     },
     headerButtonPressed: {
       opacity: 0.5,
+    },
+    listArea: {
+      flex: 1,
     },
     blockedBar: {
       paddingHorizontal: spacing.md,
