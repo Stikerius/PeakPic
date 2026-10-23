@@ -18,6 +18,7 @@ import { TextField } from "@/components/ui/text-field";
 import { MIN_AGE_YEARS } from "@/constants/app";
 import { fontSize, radius, spacing, typography } from "@/constants/theme";
 import {
+  isEmailLogin,
   MIN_PASSWORD_LENGTH,
   USERNAME_PATTERN,
   normalizeUsername,
@@ -37,7 +38,13 @@ function openLegal(docType: LegalDocType) {
 type Mode = "login" | "register";
 
 function validate(mode: Mode, email: string, password: string, username: string): string | null {
-  if (!email.includes("@")) return "Bitte gib eine gültige E-Mail-Adresse ein.";
+  if (mode === "login") {
+    const id = email.trim();
+    if (id.length === 0) return "Bitte gib deine E-Mail-Adresse oder deinen Username ein.";
+    if (!isEmailLogin(id) && !USERNAME_PATTERN.test(normalizeUsername(id))) {
+      return "Bitte gib eine gültige E-Mail-Adresse oder deinen Username ein.";
+    }
+  } else if (!email.includes("@")) return "Bitte gib eine gültige E-Mail-Adresse ein.";
   if (password.length < MIN_PASSWORD_LENGTH) {
     return `Das Passwort braucht mindestens ${MIN_PASSWORD_LENGTH} Zeichen.`;
   }
@@ -193,15 +200,15 @@ export default function LoginScreen() {
             />
           )}
           <TextField
-            label="E-Mail"
+            label={mode === "login" ? "E-Mail oder Username" : "E-Mail"}
             value={email}
             onChangeText={setEmail}
-            placeholder="du@beispiel.ch"
+            placeholder={mode === "login" ? "du@beispiel.ch oder username" : "du@beispiel.ch"}
             autoCapitalize="none"
             autoCorrect={false}
-            autoComplete="email"
+            autoComplete={mode === "login" ? "username" : "email"}
             keyboardType="email-address"
-            textContentType="emailAddress"
+            textContentType={mode === "login" ? "username" : "emailAddress"}
           />
           <TextField
             label="Passwort"

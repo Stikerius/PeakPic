@@ -64,7 +64,7 @@ Bricht etwas ab, bleibt der Status `deleting`. Die App zeigt dann „Löschung w
 | Auf `null` gesetzt | `reports.reporter_id`, `messages.pinned_by`, `conversations.created_by`, `training_plans.adopted_from_user_id` (Kopien anderer behalten ihren Plan, Herkunft „Gelöschtes Konto“), `plan_adoptions.owner_id` |
 | Nur UUID, Texte pseudonymisiert | `moderation_actions`, `reports.target_user_id`, `report_snapshots.sender_id` |
 | Bereinigt | `stories.mentioned_user_ids` / `mention_positions` anderer |
-| Ohne Bezug zu Konten | `usage_counters`, `usage_event_types`, `usage_meta` (nur Tagessummen pro Ereignis, keine Nutzer-ID). Das Löschen eines Kontos erhöht den Zähler `account_deleted`. |
+| Ohne Bezug zu Konten | `usage_counters`, `usage_event_types`, `usage_meta` (nur Tagessummen pro Ereignis, keine Nutzer-ID). Das Löschen eines Kontos erhöht den Zähler `account_deleted`. `login_attempts` (fehlgeschlagene Anmeldungen mit Username, ohne Nutzer-ID, nach einem Tag gelöscht). |
 | Bleibt | `account_deletions` (nur Hash) |
 
 **Prüfen nach dem Löschen:** `supabase/check-deleted-user.sql` durchsucht alle Tabellen nach der alten ID.

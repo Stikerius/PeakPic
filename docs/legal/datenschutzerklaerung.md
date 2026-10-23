@@ -28,6 +28,8 @@ TODO: Anzahl der Kontextnachrichten und Aufbewahrungsdauer eintragen.
 
 **Sicherheit und Moderation:** Blockierungen, Einschränkungen (wer deine Storys oder Beiträge nicht sieht), Meldungen, die du machst oder die dich betreffen, Entscheidungen der Moderation und deren Protokoll, Kontostatus (aktiv, gesperrt).
 
+**Anmeldung:** Du meldest dich mit E-Mail-Adresse oder Username an. Beim Username sucht unser Server die zugehörige E-Mail-Adresse selbst heraus; sie wird dabei nicht an die App übertragen. Fehlgeschlagene Anmeldeversuche mit Username speichern wir zum Schutz vor dem Ausprobieren von Passwörtern mit dem eingegebenen Username und dem Zeitpunkt (ohne Konto-Kennung, ohne IP-Adresse) und löschen sie nach spätestens einem Tag.
+
 **Rechtstexte:** welche Version der Nutzungsbedingungen, der Datenschutzerklärung und der Richtlinien du wann bestätigt hast, und die App-Version dabei. Wir speichern dabei keine IP-Adresse und keine Gerätedaten.
 
 **Mitteilungen in der App:** zum Beispiel neue Follower, Likes, Kommentare und Hinweise zu geänderten Rechtstexten. Die App sendet derzeit keine Push-Mitteilungen.

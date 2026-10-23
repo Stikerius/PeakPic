@@ -32,9 +32,44 @@ export function authErrorMessage(error: AuthError): string {
   }
 }
 
-export async function signIn(email: string, password: string): Promise<string | null> {
-  const { error } = await supabase.auth.signInWithPassword({ email: email.trim(), password });
-  return error ? authErrorMessage(error) : null;
+/** An e-mail address (contains "@") or a username. */
+export function isEmailLogin(identifier: string): boolean {
+  return identifier.includes("@");
+}
+
+/**
+ * Signs in with e-mail or username. A username goes through the Edge Function
+ * login_with_username, which looks the e-mail up on the server (it never reaches the app) and
+ * returns only the session.
+ */
+export async function signIn(identifier: string, password: string): Promise<string | null> {
+  const id = identifier.trim();
+  if (isEmailLogin(id)) {
+    const { error } = await supabase.auth.signInWithPassword({ email: id, password });
+    return error ? authErrorMessage(error) : null;
+  }
+  const { data, error } = await supabase.functions.invoke<unknown>("login_with_username", {
+    body: { username: normalizeUsername(id), password },
+  });
+  const result = typeof data === "object" && data !== null ? (data as Record<string, unknown>) : null;
+  if (error || result === null) return "Etwas ist schiefgelaufen. Prüfe deine Verbindung und versuche es erneut.";
+  if (typeof result.access_token === "string" && typeof result.refresh_token === "string") {
+    const { error: sessionError } = await supabase.auth.setSession({
+      access_token: result.access_token,
+      refresh_token: result.refresh_token,
+    });
+    return sessionError ? "Etwas ist schiefgelaufen. Prüfe deine Verbindung und versuche es erneut." : null;
+  }
+  switch (result.error) {
+    case "invalid_credentials":
+      return "Username oder Passwort ist falsch.";
+    case "email_not_confirmed":
+      return "Bitte bestätige zuerst deine E-Mail-Adresse über den Link in deinem Postfach.";
+    case "too_many_attempts":
+      return "Zu viele Versuche. Warte 15 Minuten oder melde dich mit deiner E-Mail-Adresse an.";
+    default:
+      return "Etwas ist schiefgelaufen. Prüfe deine Verbindung und versuche es erneut.";
+  }
 }
 
 export type SignUpResult =

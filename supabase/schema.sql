@@ -6736,3 +6736,17 @@ revoke all on function public.get_training_stats(uuid, text) from public, anon;
 grant execute on function public.get_training_stats(uuid, text) to authenticated;
 revoke all on function public.get_my_training_stats(text) from public, anon;
 grant execute on function public.get_my_training_stats(text) to authenticated;
+
+
+-- ================================================================ sign-in with username
+-- Failed sign-ins by username (Edge Function login_with_username): at most 10 per username in 15
+-- minutes. Only the username as typed (lowercase), no user id, no IP; rows older than a day are
+-- removed by the function. No client access at all (only the function, with the service role).
+create table if not exists public.login_attempts (
+  id           bigint generated always as identity primary key,
+  username_key text not null check (char_length(username_key) between 1 and 64),
+  created_at   timestamptz not null default now()
+);
+create index if not exists login_attempts_key_idx on public.login_attempts (username_key, created_at desc);
+alter table public.login_attempts enable row level security;
+revoke all on public.login_attempts from public, anon, authenticated;
