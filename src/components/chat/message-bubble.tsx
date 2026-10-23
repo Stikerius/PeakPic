@@ -147,7 +147,8 @@ export function MessageBubble({
 const useStyles = makeStyles(({ colors }) =>
   StyleSheet.create({
     row: {
-      maxWidth: "80%",
+      // The 80 % limit sits on the swipeable slot around the bubble (its long-press area).
+      maxWidth: "100%",
       gap: 2,
       marginVertical: 3,
       borderRadius: radius.lg,

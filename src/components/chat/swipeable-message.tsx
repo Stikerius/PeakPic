@@ -85,7 +85,12 @@ export function SwipeableMessage({ mine, pinned, onReply, onTogglePin, onLongPre
           {mine ? replyIcon : pinIcon}
         </Animated.View>
         <Animated.View style={contentStyle}>
-          <GestureDetector gesture={longPress}>{children}</GestureDetector>
+          {/* Only as wide as the bubble: a long press beside it belongs to the chat background. */}
+          <GestureDetector gesture={longPress}>
+            <View collapsable={false} style={[styles.bubbleSlot, mine ? styles.slotMine : styles.slotTheirs]}>
+              {children}
+            </View>
+          </GestureDetector>
         </Animated.View>
       </View>
     </GestureDetector>
@@ -110,6 +115,15 @@ const useStyles = makeStyles(({ colors }) =>
     },
     iconRight: {
       right: 0,
+    },
+    bubbleSlot: {
+      maxWidth: "80%",
+    },
+    slotMine: {
+      alignSelf: "flex-end",
+    },
+    slotTheirs: {
+      alignSelf: "flex-start",
     },
   }),
 );
