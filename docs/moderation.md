@@ -61,7 +61,7 @@ Bricht etwas ab, bleibt der Status `deleting`. Die App zeigt dann „Löschung w
 
 | Ergebnis | Tabellen |
 |---|---|
-| Gelöscht (`on delete cascade`) | `profiles`, `username_history` (Name wird frei), `posts`, `post_media`, `post_tags`, `post_likes`, `comments`, `comment_likes`, `follows`, `stories`, `story_likes`, `story_views`, `highlights`, `highlight_items`, `audience_restrictions`, `conversation_members` (eigene Zeile), `messages` (eigene), `message_reactions`, `message_hidden` (eigene „Für mich gelöscht“-Markierungen, und die anderer an den eigenen Nachrichten), `workout_shares`, `post_reposts`, `content_hashtags`, `notifications`, `training_plans`, `plan_days`, `plan_exercises`, `planned_rest_uses`, `plan_rounds` (Fortschritt im Durchlauf), `plan_deviations` (Fragen nach Abweichungen vom Plan), `plan_adoptions` (als Übernehmer), `workouts`, `workout_exercises`, `workout_sets`, `rest_budgets`, `rest_day_uses`, `user_blocks`, `admin_roles`, `moderation_notices`, `legal_confirmations`, `confirmation_followups` |
+| Gelöscht (`on delete cascade`) | `profiles`, `username_history` (Name wird frei), `posts`, `post_media`, `post_tags`, `post_likes`, `comments`, `comment_likes`, `follows`, `stories`, `story_likes`, `story_views`, `highlights`, `highlight_items`, `audience_restrictions`, `conversation_members` (eigene Zeile), `messages` (eigene), `message_reactions`, `message_hidden` (eigene „Für mich gelöscht“-Markierungen, und die anderer an den eigenen Nachrichten), `workout_shares`, `post_reposts`, `content_hashtags`, `notifications`, `training_plans`, `plan_days`, `plan_exercises`, `planned_rest_uses`, `plan_rounds` (Fortschritt im Durchlauf), `plan_deviations` (Fragen nach Abweichungen vom Plan), `plan_adoptions` (als Übernehmer), `workouts`, `workout_exercises`, `workout_sets`, `rest_budgets`, `rest_day_uses`, `user_blocks`, `admin_roles`, `moderation_notices`, `legal_confirmations`, `confirmation_followups`, `seed_markers` (Markierungen der Testdaten) |
 | Auf `null` gesetzt | `reports.reporter_id`, `messages.pinned_by`, `conversations.created_by`, `training_plans.adopted_from_user_id` (Kopien anderer behalten ihren Plan, Herkunft „Gelöschtes Konto“), `plan_adoptions.owner_id` |
 | Nur UUID, Texte pseudonymisiert | `moderation_actions`, `reports.target_user_id`, `report_snapshots.sender_id` |
 | Bereinigt | `stories.mentioned_user_ids` / `mention_positions` anderer |
@@ -69,6 +69,13 @@ Bricht etwas ab, bleibt der Status `deleting`. Die App zeigt dann „Löschung w
 | Bleibt | `account_deletions` (nur Hash) |
 
 **Prüfen nach dem Löschen:** `supabase/check-deleted-user.sql` durchsucht alle Tabellen nach der alten ID.
+
+## Testdaten (nur Testphase)
+
+- `supabase/seed-testaccount.sql` (von Hand im SQL-Editor, nicht Teil von `schema.sql`) legt für **ein** Testkonto zwei Monate Verlauf an: Trainings, Beiträge, abgelaufene Storys mit Highlights, Pläne, Ruhetage und Abweichungen. Oben im Skript den Benutzernamen eintragen. Voraussetzung: Das Konto ist aktiv und hat 3 eigene Beiträge mit Foto; deren Dateien werden für alle Testbeiträge und Storys wiederverwendet.
+- Jede erzeugte Zeile steht in `seed_markers` (kein Client-Zugriff). Ein erneuter Lauf löscht zuerst genau diese Zeilen des Kontos und legt dann alles neu an. Mit `peakpic.seed_remove_only = 'true'` werden die Testdaten nur entfernt. Andere Konten werden nicht verändert; Likes und Kommentare anderer Konten hängen an den Testbeiträgen und verschwinden mit ihnen.
+- Die Nutzungsstatistik bleibt unverändert: Das Skript setzt für seine Transaktion `peakpic.skip_usage = 'on'`, die Zähl-Trigger (`on_usage_event`) zählen dann nichts.
+- Testbeiträge und -storys teilen sich die Dateien der 3 Originalbeiträge. In der App keine Teststory löschen und keine Fotos eines Testbeitrags ersetzen, sonst ist die gemeinsame Datei weg. Zum Aufräumen das Skript verwenden.
 
 ## Trainingspläne
 

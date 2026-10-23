@@ -67,6 +67,7 @@ Datenbank, Edge Functions und Storage liegen bei Supabase. Sie sind für alle Re
   - `supabase/backfill-usage.sql`: einmalig.
   - `supabase/maintenance.sql`: Aufräumen, nach Bedarf.
   - `supabase/test-notifications.sql`: nur mit Testkonten.
+  - `supabase/seed-testaccount.sql`: zwei Monate Verlauf für ein Testkonto.
 
   Diese musst du beim Rechnerwechsel nicht erneut ausführen.
 

@@ -6973,11 +6973,17 @@ as $$
 $$;
 
 -- Trigger: count the row (event name as trigger argument). Never fails the insert/delete.
+-- Test data scripts run by hand (supabase/seed-testaccount.sql) set peakpic.skip_usage = 'on'
+-- for their transaction, so backdated test rows don't count as today's use. Clients can't set
+-- it (PostgREST runs no SET from requests, and no function sets it).
 create or replace function public.on_usage_event()
 returns trigger
 language plpgsql security definer set search_path = ''
 as $$
 begin
+  if current_setting('peakpic.skip_usage', true) = 'on' then
+    return null;
+  end if;
   -- Only messages written by people (not server-made tag cards).
   if tg_table_name = 'messages' then
     if new.kind is not null then
@@ -7545,6 +7551,22 @@ create table if not exists public.login_attempts (
 create index if not exists login_attempts_key_idx on public.login_attempts (username_key, created_at desc);
 alter table public.login_attempts enable row level security;
 revoke all on public.login_attempts from public, anon, authenticated;
+
+
+-- ================================================================ test data markers
+-- Rows created by supabase/seed-testaccount.sql (run by hand in the test phase): kind = what it
+-- is, ref = its id (or the day, for planned rest days). A second run removes exactly these rows
+-- of that account before it creates new ones; other data is never touched. No client access at
+-- all (RLS on, no policies, no grants). Goes with the account.
+create table if not exists public.seed_markers (
+  user_id    uuid not null references public.profiles (id) on delete cascade,
+  kind       text not null check (kind in ('training_plan', 'workout', 'post', 'story', 'highlight', 'planned_rest')),
+  ref        text not null check (char_length(ref) between 1 and 64),
+  created_at timestamptz not null default now(),
+  primary key (user_id, kind, ref)
+);
+alter table public.seed_markers enable row level security;
+revoke all on public.seed_markers from public, anon, authenticated;
 
 
 -- Migration: a stored round for every active plan, computed once from the proofs so far.
