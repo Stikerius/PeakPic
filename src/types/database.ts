@@ -644,6 +644,31 @@ export type Database = {
       };
       confirm_legal_documents: { Args: { p_document_ids: Uuid[]; p_app_version: string }; Returns: number };
       track_events: { Args: { events: Json }; Returns: number };
+      get_chat_messages: {
+        Args: { p_conversation_id: Uuid; p_before: Timestamp | null; p_limit: number };
+        Returns: {
+          id: Uuid;
+          conversation_id: Uuid;
+          sender_id: Uuid;
+          body: string | null;
+          post_id: Uuid | null;
+          comment_id: Uuid | null;
+          reply_to_id: Uuid | null;
+          pinned_at: Timestamp | null;
+          kind: "tag" | "notice" | null;
+          story_id: Uuid | null;
+          created_at: Timestamp;
+          masked: boolean;
+        }[];
+      };
+      clear_chat_for_me: {
+        Args: { p_conversation_id: Uuid };
+        Returns: undefined;
+      };
+      get_my_cleared_conversations: {
+        Args: Record<string, never>;
+        Returns: { conversation_id: Uuid; cleared_at: Timestamp }[];
+      };
       get_chat_partner_states: {
         Args: { p_conversation_ids: Uuid[] };
         Returns: { conversation_id: Uuid; state: "left" | "deleted" }[];

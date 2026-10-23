@@ -64,6 +64,7 @@ export type UsageEvent =
   | "message_deleted_for_all"
   | "chat_background_changed"
   | "chat_background_reset"
+  | "chat_cleared_for_me"
   | "plan_deactivated"
   | "plan_days_reordered"
   | "plan_deviation_exception"

@@ -48,6 +48,8 @@ export type ChatMessage = {
   tag: TagCard | null;
   /** Server-made neutral line ("Eine Person ist nicht mehr in diesem Chat."), shown centred. */
   notice?: boolean;
+  /** A block exists between the members: shown only as "Nachricht gelöscht", no content. */
+  masked?: boolean;
   createdAt: string;
   /** Optimistic message that the server hasn't confirmed yet. */
   pending?: boolean;

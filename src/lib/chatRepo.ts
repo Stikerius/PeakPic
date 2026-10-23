@@ -4,6 +4,7 @@ import type {
 } from "@supabase/supabase-js";
 
 import { getSignedPhotoUrls } from "@/lib/photoUpload";
+import { showInChatList } from "@/lib/chatList";
 import { absentPartner } from "@/lib/chatPartner";
 import { PROFILE_COLUMNS, toPublicProfiles, unavailableProfile } from "@/lib/profiles";
 import { requireUserId } from "@/lib/session";
@@ -22,7 +23,7 @@ import type { PublicProfile } from "@/types/social";
 export const MESSAGE_PAGE_SIZE = 30;
 export const MESSAGE_MAX_LENGTH = 2000;
 
-type MessageRow = Pick<
+type MessageRow = { masked?: boolean } & Pick<
   Tables<"messages">,
   | "id"
   | "conversation_id"
@@ -83,8 +84,12 @@ export async function shareCommentWithUser(
   if (error) throw error;
 }
 
+/** Messages of a chat with a block between the members (no content). */
+export const MASKED_TEXT = "Nachricht gelöscht";
+
 /** Short text for quotes, banners and previews of an already loaded message. */
 export function messagePreview(message: ChatMessage): string {
+  if (message.masked === true) return MASKED_TEXT;
   if (message.notice === true) return message.body ?? "";
   if (message.tag !== null) return "Markierung";
   if (message.body !== null) return message.body;
@@ -93,6 +98,7 @@ export function messagePreview(message: ChatMessage): string {
 }
 
 function previewText(row: MessageRow): string {
+  if (row.masked === true) return MASKED_TEXT;
   if (row.kind === "notice") return row.body ?? "";
   if (row.kind === "tag") return "Markierung";
   if (row.body !== null) return row.body;
@@ -123,17 +129,19 @@ export async function listConversations(): Promise<ConversationSummary[]> {
     partners.map((p) => [p.conversation_id, profiles.get(p.user_id) ?? unavailableProfile(p.user_id)]),
   );
 
+  // Chats I deleted for me stay out of the list until someone writes again.
+  const { data: cleared, error: clearedError } = await supabase.rpc("get_my_cleared_conversations", {});
+  if (clearedError) throw clearedError;
+  const clearedIds = new Set(cleared.map((row) => row.conversation_id));
+
   // One small query per chat; fine for the number of chats a person has.
   const details = await Promise.all(
     memberships.map(async (membership) => {
       const [last, unread] = await Promise.all([
+        // Through the function: with a block the last message comes back as "deleted".
         supabase
-          .from("messages")
-          .select(MESSAGE_COLUMNS)
-          .eq("conversation_id", membership.conversation_id)
-          .order("created_at", { ascending: false })
-          .limit(1)
-          .maybeSingle(),
+          .rpc("get_chat_messages", { p_conversation_id: membership.conversation_id, p_before: null, p_limit: 1 })
+          .then(({ data, error: lastError }) => ({ data: data?.[0] ?? null, error: lastError })),
         supabase
           .from("messages")
           .select("id", { count: "exact", head: true })
@@ -152,6 +160,7 @@ export async function listConversations(): Promise<ConversationSummary[]> {
 
   return details
     .flatMap(({ membership, last, unreadCount }): ConversationSummary[] => {
+      if (!showInChatList(clearedIds.has(membership.conversation_id), last !== null)) return [];
       const partner = partnerByConversation.get(membership.conversation_id) ?? absentPartner(absent.get(membership.conversation_id));
       return [
         {
@@ -259,7 +268,7 @@ async function hydrateMessages(rows: MessageRow[]): Promise<ChatMessage[]> {
     }
   }
   const tagCard = (r: MessageRow): ChatMessage["tag"] => {
-    if (r.kind !== "tag") return null;
+    if (r.kind !== "tag" || r.masked === true) return null;
     if (r.story_id !== null) return { on: "story", storyId: r.story_id, photoUrl: storyPhotos.get(r.story_id) ?? null };
     return r.comment_id !== null ? { on: "comment" } : { on: "post" };
   };
@@ -270,17 +279,20 @@ async function hydrateMessages(rows: MessageRow[]): Promise<ChatMessage[]> {
     senderId: r.sender_id,
     body: r.body,
     post:
-      r.post_id !== null
-        ? (posts.get(r.post_id) ?? "deleted")
-        : r.body === null && r.kind !== "tag"
-          ? "deleted"
-          : null,
+      r.masked === true
+        ? null
+        : r.post_id !== null
+          ? (posts.get(r.post_id) ?? "deleted")
+          : r.body === null && r.kind !== "tag"
+            ? "deleted"
+            : null,
     comment: r.comment_id !== null ? (comments.get(r.comment_id) ?? null) : null,
     replyTo: r.reply_to_id !== null ? (quotes.get(r.reply_to_id) ?? "deleted") : null,
     pinnedAt: r.pinned_at,
     reactions: reactions.get(r.id) ?? [],
     tag: tagCard(r),
-    notice: r.kind === "notice",
+    notice: r.kind === "notice" && r.masked !== true,
+    masked: r.masked === true,
     createdAt: r.created_at,
   }));
 }
@@ -302,18 +314,28 @@ async function fetchReactions(messageIds: string[]): Promise<Map<string, Message
   return byMessage;
 }
 
-/** Newest first. Pass the createdAt of the oldest loaded message to page backwards. */
+/**
+ * Newest first. Pass the createdAt of the oldest loaded message to page backwards. Through the
+ * server function: it leaves out what I deleted for me and, while a block exists between us,
+ * returns the messages only as deleted (no content).
+ */
 export async function fetchMessages(conversationId: string, before: string | null): Promise<ChatMessage[]> {
-  let query = supabase
-    .from("messages")
-    .select(MESSAGE_COLUMNS)
-    .eq("conversation_id", conversationId)
-    .order("created_at", { ascending: false })
-    .limit(MESSAGE_PAGE_SIZE);
-  if (before !== null) query = query.lt("created_at", before);
-  const { data, error } = await query;
+  const { data, error } = await supabase.rpc("get_chat_messages", {
+    p_conversation_id: conversationId,
+    p_before: before,
+    p_limit: MESSAGE_PAGE_SIZE,
+  });
   if (error) throw error;
   return hydrateMessages(data);
+}
+
+/**
+ * "Chat löschen": the whole history goes for me only; the other person notices nothing. The chat
+ * leaves my list and comes back, without the old messages, when someone writes again.
+ */
+export async function clearChatForMe(conversationId: string): Promise<void> {
+  const { error } = await supabase.rpc("clear_chat_for_me", { p_conversation_id: conversationId });
+  if (error) throw new Error("Chat konnte nicht gelöscht werden. Prüfe deine Verbindung.");
 }
 
 /** Pinned messages of a chat, most recently pinned first. */

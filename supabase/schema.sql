@@ -47,7 +47,11 @@
 --   * chats         only members can read conversations, members and messages. "Für mich löschen"
 --                   hides a message for me only (message_hidden, hide_message_for_me()); "Für alle
 --                   löschen" removes the row for good, only by its sender and never when moderated
---                   (delete_message_for_everyone()); report_snapshots keep their copies
+--                   (delete_message_for_everyone()); report_snapshots keep their copies.
+--                   "Chat für mich löschen" (clear_chat_for_me()) hides the whole history for me
+--                   only; the chat comes back without it when someone writes again. While a block
+--                   exists between the members, messages are shown to both only as deleted
+--                   (get_chat_messages()) and the table doesn't return them.
 --   * training plans up to 10 per user, exactly one active: an ordered cycle of days
 --                   (plan_days: training or rest) with exercises (plan_exercises), not tied
 --                   to weekdays.
@@ -408,6 +412,10 @@ create table if not exists public.conversation_members (
   primary key (conversation_id, user_id)
 );
 create index if not exists conversation_members_user_idx on public.conversation_members (user_id);
+-- "Chat für mich löschen": everything older is gone for me (not for the others); the chat is out
+-- of my list until someone writes again. Set only by clear_chat_for_me(); nobody else can read it
+-- (column privileges below), so the other person doesn't find out.
+alter table public.conversation_members add column if not exists cleared_at timestamptz;
 
 create table if not exists public.messages (
   id              uuid primary key default gen_random_uuid(),
@@ -1422,6 +1430,31 @@ as $$
   );
 $$;
 
+-- Since when I see the messages of a chat ("Chat für mich löschen"); -infinity if never cleared.
+create or replace function public.my_chat_cleared_at(conversation uuid)
+returns timestamptz
+language sql stable security definer set search_path = ''
+as $$
+  select coalesce((
+    select m.cleared_at from public.conversation_members m
+    where m.conversation_id = conversation and m.user_id = (select auth.uid())
+  ), '-infinity'::timestamptz);
+$$;
+
+-- Is there a block between me and another member of the chat (in either direction)? Then the
+-- messages of the chat are shown to both only as "Nachricht gelöscht" (get_chat_messages) and
+-- can't be read through the table at all.
+create or replace function public.conversation_blocked_pair(conversation uuid)
+returns boolean
+language sql stable security definer set search_path = ''
+as $$
+  select exists (
+    select 1 from public.conversation_members m
+    where m.conversation_id = conversation and m.user_id <> (select auth.uid())
+      and public.is_blocked_between((select auth.uid()), m.user_id)
+  );
+$$;
+
 -- "Für mich löschen": hides a message of one of my chats for me only. Any message of the chat,
 -- also someone else's or a tag card. Repeating it is fine.
 create or replace function public.hide_message_for_me(p_message_id uuid)
@@ -1475,6 +1508,93 @@ begin
     raise exception 'message_moderated';
   end if;
   delete from public.messages where id = p_message_id;
+end;
+$$;
+
+-- "Chat für mich löschen": the whole history of one of my chats goes for me only. The others
+-- notice nothing. The chat leaves my list and comes back, without the old messages, as soon as
+-- someone writes again.
+create or replace function public.clear_chat_for_me(p_conversation_id uuid)
+returns void
+language plpgsql security definer set search_path = ''
+as $$
+begin
+  if auth.uid() is null then
+    raise exception 'not authenticated';
+  end if;
+  if not public.is_conversation_member(p_conversation_id) then
+    raise exception 'chat_not_found';
+  end if;
+  update public.conversation_members
+  set cleared_at = now(), last_read_at = now()
+  where conversation_id = p_conversation_id and user_id = auth.uid();
+  -- "Für mich gelöscht" marks of the old messages aren't needed any more.
+  delete from public.message_hidden h
+  using public.messages m
+  where h.user_id = auth.uid() and m.id = h.message_id and m.conversation_id = p_conversation_id;
+end;
+$$;
+
+-- My chats I cleared ("Chat für mich löschen"), for the chat list: only my own rows.
+create or replace function public.get_my_cleared_conversations()
+returns table (conversation_id uuid, cleared_at timestamptz)
+language sql stable security definer set search_path = ''
+as $$
+  select m.conversation_id, m.cleared_at from public.conversation_members m
+  where m.user_id = (select auth.uid()) and m.cleared_at is not null;
+$$;
+
+-- Messages of one of my chats, newest first (p_before for older pages, at most 100). The same
+-- rows the table shows me, plus, while a block exists between us, every message as "masked":
+-- without text, post, comment, story or quote, so neither side can read them any more.
+create or replace function public.get_chat_messages(p_conversation_id uuid, p_before timestamptz, p_limit integer)
+returns table (
+  id uuid, conversation_id uuid, sender_id uuid, body text, post_id uuid, comment_id uuid, reply_to_id uuid,
+  pinned_at timestamptz, kind text, story_id uuid, created_at timestamptz, masked boolean
+)
+language plpgsql stable security definer set search_path = ''
+as $$
+#variable_conflict use_column
+declare
+  blocked boolean;
+begin
+  if auth.uid() is null or not public.is_account_active() or not public.is_conversation_member(p_conversation_id) then
+    return;
+  end if;
+  blocked := public.conversation_blocked_pair(p_conversation_id);
+  return query
+  select m.id, m.conversation_id, m.sender_id,
+         case when blocked then null else m.body end,
+         case when blocked then null else m.post_id end,
+         case when blocked then null else m.comment_id end,
+         case when blocked then null else m.reply_to_id end,
+         case when blocked then null else m.pinned_at end,
+         m.kind,
+         case when blocked then null else m.story_id end,
+         m.created_at, blocked
+  from public.messages m
+  where m.conversation_id = p_conversation_id
+    and m.moderation_state is null
+    and not public.is_message_hidden_for_me(m.id)
+    and m.created_at > public.my_chat_cleared_at(p_conversation_id)
+    and (p_before is null or m.created_at < p_before)
+  order by m.created_at desc
+  limit least(greatest(coalesce(p_limit, 30), 1), 100);
+end;
+$$;
+
+-- Clients may only move their own read marker: when they cleared a chat and when they joined it
+-- stays as the server set it (same idea as guard_content_moderation).
+create or replace function public.guard_conversation_member()
+returns trigger
+language plpgsql set search_path = ''
+as $$
+begin
+  if current_user in ('authenticated', 'anon') then
+    new.cleared_at := old.cleared_at;
+    new.joined_at := old.joined_at;
+  end if;
+  return new;
 end;
 $$;
 
@@ -5584,6 +5704,21 @@ revoke all on function public.hide_message_for_me(uuid) from public, anon;
 grant execute on function public.hide_message_for_me(uuid) to authenticated;
 revoke all on function public.delete_message_for_everyone(uuid) from public, anon;
 grant execute on function public.delete_message_for_everyone(uuid) to authenticated;
+revoke all on function public.my_chat_cleared_at(uuid) from public, anon;
+grant execute on function public.my_chat_cleared_at(uuid) to authenticated;
+revoke all on function public.conversation_blocked_pair(uuid) from public, anon;
+grant execute on function public.conversation_blocked_pair(uuid) to authenticated;
+revoke all on function public.clear_chat_for_me(uuid) from public, anon;
+grant execute on function public.clear_chat_for_me(uuid) to authenticated;
+revoke all on function public.get_my_cleared_conversations() from public, anon;
+grant execute on function public.get_my_cleared_conversations() to authenticated;
+revoke all on function public.get_chat_messages(uuid, timestamptz, integer) from public, anon;
+grant execute on function public.get_chat_messages(uuid, timestamptz, integer) to authenticated;
+revoke all on function public.guard_conversation_member() from public, anon, authenticated;
+drop trigger if exists conversation_members_guard on public.conversation_members;
+create trigger conversation_members_guard
+  before update on public.conversation_members
+  for each row execute function public.guard_conversation_member();
 -- New in the privacy model: nothing of it for anonymous users.
 revoke all on function public.follow_counts(uuid) from public, anon;
 grant execute on function public.follow_counts(uuid) to authenticated;
@@ -5806,6 +5941,9 @@ grant select, insert, update, delete on
   public.conversations, public.conversation_members, public.messages, public.message_reactions,
   public.workout_shares, public.post_reposts
 to authenticated;
+-- Chat members: every column except cleared_at (nobody learns that someone cleared a chat).
+revoke select on public.conversation_members from authenticated;
+grant select (conversation_id, user_id, joined_at, last_read_at) on public.conversation_members to authenticated;
 -- Messages hidden for me: read and remove my own rows; set only through hide_message_for_me().
 revoke all on public.message_hidden from anon, authenticated;
 grant select, delete on public.message_hidden to authenticated;
@@ -6262,6 +6400,10 @@ create policy "messages: members read" on public.messages
     and public.is_account_active()
     and public.is_conversation_member(conversation_id)
     and not public.is_message_hidden_for_me(id)
+    -- "Chat für mich löschen": older messages are gone for me.
+    and created_at > public.my_chat_cleared_at(conversation_id)
+    -- Blocked in either direction: not readable (get_chat_messages shows them as deleted).
+    and not public.conversation_blocked_pair(conversation_id)
   );
 
 drop policy if exists "messages: members send" on public.messages;

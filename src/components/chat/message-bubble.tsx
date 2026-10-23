@@ -46,6 +46,20 @@ export function MessageBubble({
   const reactions = groupReactions(message, myId);
   const quote = message.replyTo;
 
+  // Block between the members: no content, only that a message was here.
+  if (message.masked === true) {
+    return (
+      <View style={[styles.row, mine ? styles.rowMine : styles.rowTheirs]}>
+        <View style={[styles.bubble, styles.bubbleMasked]}>
+          <Text style={styles.maskedText}>Nachricht gelöscht</Text>
+        </View>
+        <View style={styles.meta}>
+          <Text style={styles.time}>{formatTime(message.createdAt)}</Text>
+        </View>
+      </View>
+    );
+  }
+
   return (
     <View
       style={[
@@ -235,6 +249,15 @@ const useStyles = makeStyles(({ colors }) =>
     bubbleTheirs: {
       backgroundColor: colors.surfaceRaised,
       borderBottomLeftRadius: radius.sm,
+    },
+    bubbleMasked: {
+      borderWidth: 1,
+      borderColor: colors.border,
+    },
+    maskedText: {
+      color: colors.textSecondary,
+      fontSize: fontSize.md,
+      fontStyle: "italic",
     },
     bodyLink: {
       textDecorationLine: "underline",

@@ -1,26 +1,32 @@
 import Ionicons from "@expo/vector-icons/Ionicons";
 import { router, useFocusEffect } from "expo-router";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { ActivityIndicator, FlatList, Pressable, RefreshControl, StyleSheet, Text, View } from "react-native";
+import { ActivityIndicator, Alert, FlatList, Pressable, RefreshControl, StyleSheet, Text, View } from "react-native";
 
 import { Avatar } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
 import { fontSize, radius, spacing, typography } from "@/constants/theme";
+import { showActionSheet } from "@/lib/actionSheet";
+import { resetChatBackground } from "@/lib/chatBackground";
 import {
+  clearChatForMe,
   listConversations,
   subscribeToConversationDeletes,
   subscribeToMessageDeletes,
   subscribeToMessages,
 } from "@/lib/chatRepo";
+import { emitAppEvent } from "@/lib/events";
 import { formatRelativeTime } from "@/lib/format";
+import { useSession } from "@/lib/session";
 import { makeStyles, useTheme } from "@/lib/theme";
 import type { ConversationSummary } from "@/types/chat";
-import { useTrackScreen } from "@/lib/usage";
+import { track, useTrackScreen } from "@/lib/usage";
 
 export default function ChatListScreen() {
   useTrackScreen("screen_chats");
   const { colors } = useTheme();
   const styles = useStyles();
+  const myId = useSession().session?.user.id;
   const [conversations, setConversations] = useState<ConversationSummary[] | null>(null);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -64,6 +70,38 @@ export default function ChatListScreen() {
     [],
   );
 
+  /** Long press on a chat: "Chat löschen" only for me; the other person notices nothing. */
+  function showChatActions(conversation: ConversationSummary) {
+    showActionSheet(conversation.partner.displayName, [
+      {
+        label: "Chat löschen",
+        destructive: true,
+        onPress: () =>
+          Alert.alert(
+            "Chat löschen?",
+            "Der Verlauf wird nur bei dir gelöscht. Schreibt jemand wieder, erscheint der Chat ohne die alten Nachrichten.",
+            [
+              { text: "Abbrechen", style: "cancel" },
+              { text: "Löschen", style: "destructive", onPress: () => void clearChat(conversation.id) },
+            ],
+          ),
+      },
+    ]);
+  }
+
+  async function clearChat(conversationId: string) {
+    try {
+      await clearChatForMe(conversationId);
+    } catch (clearError) {
+      Alert.alert("Chat nicht gelöscht", clearError instanceof Error ? clearError.message : "Bitte versuche es erneut.");
+      return;
+    }
+    track("chat_cleared_for_me");
+    setConversations((current) => current?.filter((c) => c.id !== conversationId) ?? current);
+    if (myId !== undefined) resetChatBackground(myId, conversationId);
+    emitAppEvent("chatRead", undefined);
+  }
+
   async function refresh() {
     setRefreshing(true);
     await load();
@@ -96,7 +134,9 @@ export default function ChatListScreen() {
                 onPress={() =>
                   router.push({ pathname: "/chats/[conversationId]", params: { conversationId: item.id } })
                 }
+                onLongPress={() => showChatActions(item)}
                 accessibilityRole="button"
+                accessibilityHint="Lange drücken für weitere Aktionen"
                 accessibilityLabel={`Chat mit ${item.partner.username || item.partner.displayName}${unread ? `, ${item.unreadCount} ungelesen` : ""}`}
                 style={({ pressed }) => [styles.row, pressed && styles.pressed]}
               >

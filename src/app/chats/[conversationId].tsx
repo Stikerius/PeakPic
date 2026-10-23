@@ -41,6 +41,7 @@ import { messageDeleteOptions, restoreMessage, withoutMessage } from "@/lib/chat
 import {
   MESSAGE_MAX_LENGTH,
   MESSAGE_PAGE_SIZE,
+  clearChatForMe,
   deleteMessageForEveryone,
   fetchMessages,
   fetchPinnedMessages,
@@ -101,7 +102,7 @@ export default function ChatScreen() {
   const { openReport } = useReport();
   const blockUser = useBlockUser();
   const [partner, setPartner] = useState<PublicProfile | null>(null);
-  // A block between us: the chat stays readable, but nobody can write in it.
+  // A block between us: nobody can write, and both see the messages only as deleted.
   const [blocked, setBlocked] = useState(false);
   const [blockCheck, setBlockCheck] = useState(0);
   const [myUsername, setMyUsername] = useState<string | null>(null);
@@ -137,8 +138,18 @@ export default function ChatScreen() {
   useEffect(() => {
     let active = true;
     isChatBlocked(conversationId)
-      .then((result) => {
-        if (active) setBlocked(result);
+      .then(async (result) => {
+        if (!active) return;
+        setBlocked(result);
+        // Just blocked from here: what is loaded may no longer be readable, load it again masked.
+        if (result && blockCheck > 0) {
+          const page = await fetchMessages(conversationId, null);
+          if (!active) return;
+          setMessages(page);
+          setHasMore(page.length === MESSAGE_PAGE_SIZE);
+          setPinned([]);
+          setReplyTo(null);
+        }
       })
       .catch(() => undefined);
     return () => {
@@ -213,7 +224,38 @@ export default function ChatScreen() {
             { label: "Blockieren", destructive: true, onPress: () => blockUser(partner, () => setBlockCheck((v) => v + 1)) },
           ]
         : []),
+      { label: "Chat löschen", destructive: true, onPress: confirmClearChat },
     ]);
+  }
+
+  /** "Chat löschen": the history goes for me only; the other person notices nothing. */
+  function confirmClearChat() {
+    Alert.alert(
+      "Chat löschen?",
+      "Der Verlauf wird nur bei dir gelöscht. Schreibt jemand wieder, erscheint der Chat ohne die alten Nachrichten.",
+      [
+        { text: "Abbrechen", style: "cancel" },
+        { text: "Löschen", style: "destructive", onPress: () => void clearChat() },
+      ],
+    );
+  }
+
+  async function clearChat() {
+    try {
+      await clearChatForMe(conversationId);
+      track("chat_cleared_for_me");
+    } catch (clearError) {
+      setError(clearError instanceof Error ? clearError.message : "Chat konnte nicht gelöscht werden.");
+      return;
+    }
+    closedRef.current = true;
+    setDraft("");
+    setReplyTo(null);
+    setMessages([]);
+    setPinned([]);
+    if (myId !== undefined) resetChatBackground(myId, conversationId);
+    emitAppEvent("chatRead", undefined);
+    router.dismissTo("/chats");
   }
 
   function updateMessage(id: string, change: (message: ChatMessage) => ChatMessage) {
@@ -618,6 +660,9 @@ export default function ChatScreen() {
                       <View style={styles.noticeRow} accessibilityRole="text">
                         <Text style={styles.noticeText}>{item.body}</Text>
                       </View>
+                    ) : item.masked === true ? (
+                      // Block between us: no content, so no reply, pin or reactions either.
+                      <MessageBubble message={item} mine={item.senderId === myId} myId={myId} partnerName={partnerName} />
                     ) : (
                     <SwipeableMessage
                       mine={item.senderId === myId}
