@@ -21,43 +21,13 @@
 // Deploy: npx supabase functions deploy delete_account
 // Secret (optional): ADMIN_ORIGIN=http://127.0.0.1:5174 (where the dashboard runs)
 
-import { createClient, type SupabaseClient } from "npm:@supabase/supabase-js@2";
+import { createClient } from "npm:@supabase/supabase-js@2";
+
+import { corsHeaders, json, jwtPayload } from "../_shared/http.ts";
+import { deleteUserFiles } from "../_shared/storage.ts";
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const FRESH_SECONDS = 5 * 60;
-const LIST_PAGE = 1000;
-const REMOVE_BATCH = 100;
-// Upper bound per call; with more files the call answers "partial" and is simply repeated.
-const MAX_FILES_PER_CALL = 20000;
-
-function corsHeaders(): Record<string, string> {
-  return {
-    "Access-Control-Allow-Origin": Deno.env.get("ADMIN_ORIGIN") ?? "http://127.0.0.1:5174",
-    "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
-    "Access-Control-Allow-Methods": "POST, OPTIONS",
-    Vary: "Origin",
-  };
-}
-
-function json(status: number, body: Record<string, unknown>): Response {
-  return new Response(JSON.stringify(body), {
-    status,
-    headers: { ...corsHeaders(), "Content-Type": "application/json" },
-  });
-}
-
-/** Payload of a JWT that auth.getUser() has already verified. */
-function jwtPayload(token: string): Record<string, unknown> | null {
-  const part = token.split(".")[1];
-  if (part === undefined) return null;
-  try {
-    const base64 = part.replace(/-/g, "+").replace(/_/g, "/").padEnd(Math.ceil(part.length / 4) * 4, "=");
-    const value: unknown = JSON.parse(atob(base64));
-    return typeof value === "object" && value !== null ? (value as Record<string, unknown>) : null;
-  } catch {
-    return null;
-  }
-}
 
 /** Token issued and last sign-in (amr) both at most FRESH_SECONDS ago. */
 function isFreshSignIn(payload: Record<string, unknown>): boolean {
@@ -71,43 +41,6 @@ function isFreshSignIn(payload: Record<string, unknown>): boolean {
       : [],
   );
   return times.length > 0 && fresh(Math.max(...times));
-}
-
-/** All file paths below `${userId}/` in one bucket (folders are listed with id null). */
-async function listUserFiles(service: SupabaseClient, bucket: string, userId: string, limit: number): Promise<string[]> {
-  const files: string[] = [];
-  const folders = [userId];
-  while (folders.length > 0 && files.length < limit) {
-    const folder = folders.pop() as string;
-    for (let offset = 0; ; offset += LIST_PAGE) {
-      const { data, error } = await service.storage.from(bucket).list(folder, { limit: LIST_PAGE, offset });
-      if (error) throw new Error("storage_list_failed");
-      for (const entry of data) {
-        const path = `${folder}/${entry.name}`;
-        if (entry.id === null) folders.push(path);
-        else files.push(path);
-      }
-      if (data.length < LIST_PAGE || files.length >= limit) break;
-    }
-  }
-  return files.slice(0, limit);
-}
-
-/** Deletes the user's files in every bucket. Returns false if more files are left. */
-async function deleteUserFiles(service: SupabaseClient, userId: string): Promise<boolean> {
-  const { data: buckets, error } = await service.storage.listBuckets();
-  if (error) throw new Error("storage_list_failed");
-  let budget = MAX_FILES_PER_CALL;
-  for (const bucket of buckets) {
-    const files = await listUserFiles(service, bucket.id, userId, budget);
-    for (let i = 0; i < files.length; i += REMOVE_BATCH) {
-      const { error: removeError } = await service.storage.from(bucket.id).remove(files.slice(i, i + REMOVE_BATCH));
-      if (removeError) throw new Error("storage_remove_failed");
-    }
-    budget -= files.length;
-    if (budget <= 0) return false;
-  }
-  return true;
 }
 
 Deno.serve(async (request) => {

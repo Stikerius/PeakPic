@@ -61,14 +61,54 @@ Bricht etwas ab, bleibt der Status `deleting`. Die App zeigt dann „Löschung w
 
 | Ergebnis | Tabellen |
 |---|---|
-| Gelöscht (`on delete cascade`) | `profiles`, `username_history` (Name wird frei), `posts`, `post_media`, `post_tags`, `post_likes`, `comments`, `comment_likes`, `follows`, `stories`, `story_likes`, `story_views`, `highlights`, `highlight_items`, `audience_restrictions`, `conversation_members` (eigene Zeile), `messages` (eigene), `message_reactions`, `message_hidden` (eigene „Für mich gelöscht“-Markierungen, und die anderer an den eigenen Nachrichten), `workout_shares`, `post_reposts`, `content_hashtags`, `notifications`, `training_plans`, `plan_days`, `plan_exercises`, `planned_rest_uses`, `plan_rounds` (Fortschritt im Durchlauf), `plan_deviations` (Fragen nach Abweichungen vom Plan), `plan_adoptions` (als Übernehmer), `workouts`, `workout_exercises`, `workout_sets`, `rest_budgets`, `rest_day_uses`, `user_blocks`, `admin_roles`, `moderation_notices`, `legal_confirmations`, `confirmation_followups`, `seed_markers` (Markierungen der Testdaten) |
-| Auf `null` gesetzt | `reports.reporter_id`, `messages.pinned_by`, `conversations.created_by`, `training_plans.adopted_from_user_id` (Kopien anderer behalten ihren Plan, Herkunft „Gelöschtes Konto“), `plan_adoptions.owner_id` |
+| Gelöscht (`on delete cascade`) | `profiles`, `username_history` (Name wird frei), `posts`, `post_media`, `post_tags`, `post_likes`, `comments`, `comment_likes`, `follows`, `stories`, `story_likes`, `story_views`, `highlights`, `highlight_items`, `audience_restrictions`, `conversation_members` (eigene Zeile), `messages` (eigene), `message_reactions`, `message_hidden` (eigene „Für mich gelöscht“-Markierungen, und die anderer an den eigenen Nachrichten), `workout_shares`, `post_reposts`, `content_hashtags`, `notifications`, `training_plans`, `plan_days`, `plan_exercises`, `planned_rest_uses`, `plan_rounds` (Fortschritt im Durchlauf), `plan_deviations` (Fragen nach Abweichungen vom Plan), `plan_adoptions` (als Übernehmer), `workouts`, `workout_exercises`, `workout_sets`, `rest_budgets`, `rest_day_uses`, `user_blocks`, `admin_roles`, `moderation_notices`, `legal_confirmations`, `confirmation_followups`, `seed_markers` (Markierungen der Testdaten), `protected_accounts` |
+| Auf `null` gesetzt | `reports.reporter_id`, `messages.pinned_by`, `conversations.created_by`, `training_plans.adopted_from_user_id` (Kopien anderer behalten ihren Plan, Herkunft „Gelöschtes Konto“), `plan_adoptions.owner_id`, `reset_jobs.created_by`, `reset_job_targets.user_id` (der Hash `user_hash` bleibt) |
 | Nur UUID, Texte pseudonymisiert | `moderation_actions`, `reports.target_user_id`, `report_snapshots.sender_id` |
 | Bereinigt | `stories.mentioned_user_ids` / `mention_positions` anderer |
 | Ohne Bezug zu Konten | `usage_counters`, `usage_event_types`, `usage_meta` (nur Tagessummen pro Ereignis, keine Nutzer-ID). Das Löschen eines Kontos erhöht den Zähler `account_deleted`. `login_attempts` (fehlgeschlagene Anmeldungen mit Username, ohne Nutzer-ID, nach einem Tag gelöscht). |
-| Bleibt | `account_deletions` (nur Hash) |
+| Bleibt | `account_deletions` (nur Hash), `app_settings` (ohne Bezug zu Konten) |
 
 **Prüfen nach dem Löschen:** `supabase/check-deleted-user.sql` durchsucht alle Tabellen nach der alten ID.
+
+## Datenbereinigung („App-Neustart“)
+
+Admins (nur Rolle `admin` mit Zwei-Faktor, nie Moderatoren) löschen entweder **Konten komplett** oder nur **ausgewählte Datenkategorien** ausgewählter Nutzer. Alles läuft als Auftrag über die Funktionen `admin_reset_*` und die Edge Function `run_data_reset`. Clients haben keine Rechte auf die Tabellen `app_settings`, `protected_accounts`, `reset_jobs` und `reset_job_targets`.
+
+**Ablauf:** Entwurf → Trockenlauf (`admin_reset_preview`, löscht nichts) → Bestätigen (`admin_reset_confirm`) → Ausführung in Batches von höchstens 25 Personen (`run_data_reset`) → `done` oder `failed`. Höchstens 500 Personen pro Auftrag, höchstens ein bestätigter oder laufender Auftrag gleichzeitig. Ändern, bestätigen, starten und abbrechen darf nur, wer den Auftrag erstellt hat.
+
+**Bestätigen verlangt:** Zustand `draft`, einen Trockenlauf nach der letzten Änderung, eine Begründung mit mindestens 10 Zeichen, das Wort `NEUSTART` und einen frischen TOTP-Schritt (der letzte TOTP-Eintrag im `amr`-Claim des JWT höchstens 5 Minuten alt). Danach sind Umfang und Auswahl eingefroren.
+
+**Schutz:** Nie auswählbar, auch nicht per manipuliertem Aufruf: Konten in `protected_accounts` (eintragen mit `supabase/reset-config.sql`), alle Konten mit einer Rolle in `admin_roles` und der Aufrufer selbst. Die Prüfung läuft beim Auswählen, beim Bestätigen und noch einmal vor jedem einzelnen Löschschritt (dann wird die Person übersprungen).
+
+**Markierte Konten** (gesperrt, gebannt, im Löschen, offene Meldungen, Inhalte in Quarantäne) sind nur mit `include_flagged` wählbar. Das Dashboard fragt das gesondert ab, damit Beweise nicht versehentlich verschwinden. Konten im Status `deleting` sind nur beim kompletten Löschen wählbar; dort wird die Löschung zu Ende gebracht.
+
+**`app_settings.allow_full_reset`** (Standard `true` für die Testphase): Bei `false` lehnen die Funktionen und die Edge Function das komplette Löschen von Konten ab, auch für schon bestätigte Aufträge. Kategorien bleiben möglich. **Vor dem echten Start ausschalten:**
+
+```sql
+update public.app_settings set value = 'false', updated_at = now() where key = 'allow_full_reset';
+```
+
+**Kategorien** (Schlüssel, betroffene Tabellen, Dateien im Bucket `photos`):
+
+| Schlüssel | Bezeichnung | Gelöscht | Dateien |
+|---|---|---|---|
+| `chats` | Chats | Unterhaltungen, in denen alle verbleibenden Mitglieder ausgewählt sind, komplett (`conversations` samt `conversation_members`, `messages`, `message_reactions`, `message_hidden`). Sonst nur die eigenen Nachrichten, Reaktionen, „Für mich gelöscht“-Markierungen und die eigene Mitgliedschaft. | keine (Chats haben keine eigenen Dateien) |
+| `activities` | Aktivitäten | `workouts` samt `workout_exercises`, `workout_sets`; `workout_shares`, in denen die Person verlinkt ist; `rest_day_uses` | – |
+| `plans` | Pläne | `training_plans` samt `plan_days`, `plan_exercises`; `plan_rounds`, `plan_deviations`, `planned_rest_uses`, `plan_adoptions` (als Übernehmer) | – |
+| `posts` | Beiträge | `posts` samt `post_media` und den Kommentaren, Likes, Markierungen, Verlinkungen und Reposts daran; eigene `comments`, `post_likes`, `comment_likes`, `post_reposts` und `post_tags` (wo die Person markiert ist) | `{user_id}/posts/...` der gelöschten Beiträge (Foto und Original) |
+| `stories` | Storys | `stories` samt Likes und Aufrufen daran, alle `highlights` samt `highlight_items`; eigene `story_likes`, `story_views` | `{user_id}/stories/...` der gelöschten Storys |
+| `social` | Follower und Gefolgte | `follows` in beide Richtungen (auch offene Anfragen), eigene `user_blocks` (als Blockierende), `audience_restrictions` (eigene „Verbergen vor“) | – |
+| `notifications` | Benachrichtigungen | `notifications` der Person | – |
+| `other` | Sonstiges | `reports.reporter_id` auf `null` (die Meldung bleibt), Einstellungen in `profiles` zurück auf Standard (Privatsphäre, Markieren, Mitteilungen, Sichtbarkeit von Aktivitäten und Statistik), `rest_budgets` | – |
+
+- **Nie betroffen:** `moderation_actions`, `report_snapshots`, `legal_confirmations`, `usage_counters`, `account_deletions`, `admin_roles`, `moderation_notices`, die Reset-Tabellen selbst, Profilbild, Benutzername und Anzeigename.
+- **Moderierte Inhalte bleiben** (entfernt oder in Quarantäne), samt dem, woran sie hängen: ein Beitrag mit moderiertem Kommentar, eine Unterhaltung mit moderierter Nachricht, ein Kommentar mit moderierter Antwort.
+- **Dateien** werden mitgelöscht, nie nur die Datenbankzeile. Gelöscht wird nur im eigenen Ordner der Person und nur, was keine andere Zeile mehr nutzt (eine Story kann ihre Datei mit einem Beitrag teilen). Beim kompletten Löschen: alle Dateien unter `{user_id}/` in allen Buckets, wie bei `delete_account`.
+- **Komplett löschen** nutzt die vorhandene Konto-Löschlogik: Status `deleting`, Dateien, `finish_account_deletion()` (pseudonymisiert die Logs, schreibt `account_deletions`), Auth-Nutzer löschen. Danach ist in `reset_job_targets` nur noch der Hash `user_hash` übrig.
+- **Zählung:** Was ohnehin mit dem Inhalt einer anderen ausgewählten Person verschwindet (mein Like auf ihren Beitrag), zählt nur einmal, bei der Besitzerin. Vollständige Unterhaltungen und Follows zwischen zwei Ausgewählten zählen bei der Person mit der kleineren ID. So stimmen Trockenlauf und Ergebnis überein, solange sich dazwischen nichts ändert.
+- **Fortsetzen:** Jede Person hat einen eigenen Zustand (`pending` → `claimed` → `files_pending` → `done` / `failed` / `skipped`). Jeder Schritt lässt sich wiederholen. Nach einem Abbruch denselben Auftrag erneut starten: Fehlgeschlagene werden bis zu 5-mal neu versucht, angefangene Schritte nach 10 Minuten wieder aufgenommen.
+- **Protokoll** in `moderation_actions` (`target_type = 'reset_job'`): `reset_confirmed`, `reset_started`, `reset_resumed`, `reset_finished` (mit Summen je Kategorie und Fortschritt) und `reset_cancelled`, jeweils mit der Begründung, ohne Namen oder Nutzer-IDs.
+- **Prüfen:** `supabase/reset-checks.sql` (nur lesend) prüft Rechte, RLS, Funktionen, Schutz und Protokoll.
 
 ## Testdaten (nur Testphase)
 
@@ -116,6 +156,7 @@ Bricht etwas ab, bleibt der Status `deleting`. Die App zeigt dann „Löschung w
 - Aufbewahrungsfristen für Meldungen, Kopien von Nachrichten und das Protokoll
 - Platzhalter `{{…}}` und TODOs in `docs/legal/*.md` (und danach in den Entwürfen im Dashboard)
 - `MIN_AGE_YEARS` in `src/constants/app.ts` (derzeit 16)
+- `app_settings.allow_full_reset` auf `false` setzen (siehe „Datenbereinigung“)
 
 ## Rechtstexte
 

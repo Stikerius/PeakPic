@@ -58,6 +58,7 @@ Datenbank, Edge Functions und Storage liegen bei Supabase. Sie sind für alle Re
   npx supabase functions deploy delete_account
   npx supabase functions deploy send_legal_notice_email
   npx supabase functions deploy login_with_username
+  npx supabase functions deploy run_data_reset
   ```
 
   Prüfen kannst du das mit `git log --oneline -- supabase/functions`.
@@ -68,6 +69,8 @@ Datenbank, Edge Functions und Storage liegen bei Supabase. Sie sind für alle Re
   - `supabase/maintenance.sql`: Aufräumen, nach Bedarf.
   - `supabase/test-notifications.sql`: nur mit Testkonten.
   - `supabase/seed-testaccount.sql`: zwei Monate Verlauf für ein Testkonto.
+  - `supabase/reset-config.sql`: geschützte Konten für die Datenbereinigung.
+  - `supabase/reset-checks.sql`: Prüfliste zur Datenbereinigung, nur lesend.
 
   Diese musst du beim Rechnerwechsel nicht erneut ausführen.
 

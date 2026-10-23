@@ -7582,3 +7582,1093 @@ begin
   end loop;
 end;
 $$;
+
+
+-- ================================================================ data reset ("App-Neustart")
+-- Admins remove either whole accounts ('full') or chosen categories of data ('categories') of
+-- chosen people, as a job: draft -> preview (dry run, deletes nothing) -> confirm (reason, the
+-- word NEUSTART and a fresh TOTP step) -> run by the Edge Function run_data_reset in batches
+-- (resumable) -> done / failed. Everything goes through the functions below (admin role and
+-- aal2 only, never moderators); clients have no rights on the tables.
+--   * never touched: moderation_actions, report_snapshots, legal_confirmations, usage_counters,
+--     account_deletions, admin_roles and the reset tables themselves.
+--   * content removed or quarantined by the moderation stays (evidence), also everything it
+--     hangs on (a post with a moderated comment, a chat with a moderated message).
+--   * protected: protected_accounts (supabase/reset-config.sql), every account with a role in
+--     admin_roles and the caller. They can't be chosen, also not through a hand-made call.
+--   * flagged (suspended, banned, deleting, open reports, quarantined content): only with
+--     include_flagged, which the dashboard asks for separately.
+--   * app_settings.allow_full_reset = false: no 'full' jobs (categories still work). Switch it
+--     off before the real start (docs/moderation.md).
+
+-- Settings that only admins change by hand (SQL editor). No client access.
+create table if not exists public.app_settings (
+  key        text primary key check (key in ('allow_full_reset')),
+  value      jsonb not null,
+  updated_at timestamptz not null default now()
+);
+alter table public.app_settings enable row level security;
+revoke all on public.app_settings from public, anon, authenticated;
+-- Test phase: deleting whole accounts allowed. Never overwritten by running this file again.
+insert into public.app_settings (key, value) values ('allow_full_reset', 'true') on conflict (key) do nothing;
+
+-- Accounts no reset job may ever touch (main account, test account). Filled by hand with
+-- supabase/reset-config.sql. No client access.
+create table if not exists public.protected_accounts (
+  user_id    uuid primary key references public.profiles (id) on delete cascade,
+  note       text check (char_length(note) <= 200),
+  created_at timestamptz not null default now()
+);
+alter table public.protected_accounts enable row level security;
+revoke all on public.protected_accounts from public, anon, authenticated;
+
+create table if not exists public.reset_jobs (
+  id              uuid primary key default gen_random_uuid(),
+  created_by      uuid references public.profiles (id) on delete set null,
+  status          text not null default 'draft'
+                  check (status in ('draft', 'confirmed', 'running', 'done', 'failed', 'cancelled')),
+  mode            text not null check (mode in ('categories', 'full')),
+  categories      text[] not null default '{}',
+  reason          text check (reason is null or char_length(reason) between 10 and 500),
+  subject         text check (char_length(subject) <= 150),
+  user_message    text check (char_length(user_message) <= 5000),
+  include_flagged boolean not null default false,
+  -- Totals of the last dry run; previewed_at must be newer than the last change to confirm.
+  preview         jsonb,
+  previewed_at    timestamptz,
+  result          jsonb,
+  created_at      timestamptz not null default now(),
+  updated_at      timestamptz not null default now(),
+  confirmed_at    timestamptz,
+  started_at      timestamptz,
+  finished_at     timestamptz
+);
+create index if not exists reset_jobs_created_idx on public.reset_jobs (created_at desc);
+alter table public.reset_jobs enable row level security;
+revoke all on public.reset_jobs from public, anon, authenticated;
+
+-- One row per person of a job. user_id becomes null when the account is deleted (the mapping
+-- goes, user_hash = sha256 of the old id stays, like account_deletions). files: storage paths
+-- still to remove after the rows are gone (cleared when done). email_*: Phase 4.
+create table if not exists public.reset_job_targets (
+  id            uuid primary key default gen_random_uuid(),
+  job_id        uuid not null references public.reset_jobs (id) on delete cascade,
+  user_id       uuid references public.profiles (id) on delete set null,
+  user_hash     text not null check (user_hash ~ '^[0-9a-f]{64}$'),
+  selected      boolean not null default true,
+  flagged       boolean not null default false,
+  status        text not null default 'pending'
+                check (status in ('pending', 'claimed', 'files_pending', 'done', 'failed', 'skipped')),
+  counts        jsonb,
+  result        jsonb,
+  files         jsonb,
+  error         text check (char_length(error) <= 60),
+  email_status  text not null default 'none'
+                check (email_status in ('none', 'pending', 'sent', 'failed', 'not_configured', 'in_app')),
+  email_address text,
+  attempts      integer not null default 0,
+  claimed_at    timestamptz,
+  updated_at    timestamptz not null default now(),
+  unique (job_id, user_id)
+);
+create index if not exists reset_job_targets_job_idx on public.reset_job_targets (job_id, status);
+create index if not exists reset_job_targets_user_idx on public.reset_job_targets (user_id);
+alter table public.reset_job_targets enable row level security;
+revoke all on public.reset_job_targets from public, anon, authenticated;
+
+-- Fixed numbers (the dashboard reads them through admin_reset_settings()).
+create or replace function public.reset_limits()
+returns jsonb
+language sql immutable set search_path = ''
+as $$
+  select jsonb_build_object(
+    'max_targets', 500, 'batch_size', 25, 'phrase', 'NEUSTART', 'totp_max_age_seconds', 300, 'max_attempts', 5,
+    'categories', jsonb_build_array('chats', 'activities', 'plans', 'posts', 'stories', 'social', 'notifications', 'other')
+  );
+$$;
+
+create or replace function public.reset_category_keys()
+returns text[]
+language sql immutable set search_path = ''
+as $$
+  select array['chats', 'activities', 'plans', 'posts', 'stories', 'social', 'notifications', 'other'];
+$$;
+
+create or replace function public.reset_full_allowed()
+returns boolean
+language sql stable security definer set search_path = ''
+as $$
+  select coalesce((select s.value = 'true'::jsonb from public.app_settings s where s.key = 'allow_full_reset'), false);
+$$;
+
+-- Why an account can't be part of a reset job for the caller, or null. Internal.
+create or replace function public.reset_protection(p_user uuid)
+returns text
+language sql stable security definer set search_path = ''
+as $$
+  select case
+    when p_user = (select auth.uid()) then 'self'
+    when exists (select 1 from public.admin_roles r where r.user_id = p_user) then 'staff'
+    when exists (select 1 from public.protected_accounts pa where pa.user_id = p_user) then 'protected'
+  end;
+$$;
+
+-- Why an account counts as flagged (evidence could get lost), empty if not. Internal.
+create or replace function public.reset_flags(p_user uuid)
+returns text[]
+language sql stable security definer set search_path = ''
+as $$
+  select array_remove(array[
+    case when p.account_status = 'suspended' and (p.suspended_until is null or p.suspended_until > now()) then 'suspended' end,
+    case when p.account_status = 'banned' then 'banned' end,
+    case when p.account_status = 'deleting' then 'deleting' end,
+    case when exists (select 1 from public.reports r where r.target_user_id = p_user and r.status in ('open', 'in_review'))
+      then 'open_reports' end,
+    case when exists (select 1 from public.posts x where x.user_id = p_user and x.moderation_state = 'quarantined')
+      or exists (select 1 from public.stories x where x.user_id = p_user and x.moderation_state = 'quarantined')
+      or exists (select 1 from public.comments x where x.user_id = p_user and x.moderation_state = 'quarantined')
+      or exists (select 1 from public.messages x where x.sender_id = p_user and x.moderation_state = 'quarantined')
+      or exists (select 1 from public.training_plans x where x.user_id = p_user and x.moderation_state = 'quarantined')
+      or exists (select 1 from public.workouts x where x.user_id = p_user and x.moderation_state = 'quarantined')
+      then 'quarantine' end
+  ], null)
+  from public.profiles p where p.id = p_user;
+$$;
+
+-- A chat that is deleted completely: every remaining member is selected and no message in it
+-- was moderated. Internal.
+create or replace function public.reset_conversation_full(p_conversation uuid, p_selected uuid[])
+returns boolean
+language sql stable security definer set search_path = ''
+as $$
+  select not exists (
+      select 1 from public.conversation_members m
+      where m.conversation_id = p_conversation and not (m.user_id = any (p_selected))
+    )
+    and not exists (
+      select 1 from public.messages x where x.conversation_id = p_conversation and x.moderation_state is not null
+    );
+$$;
+
+-- THE place that decides what a category reset removes for one person. p_apply = false only
+-- counts (dry run); p_apply = true counts the same way first, then deletes. p_selected:
+-- everybody selected in the job. Returns {counts: {category: {what: n}}, files: [paths]}.
+--   * Moderated content and what hangs on it stays (evidence).
+--   * What goes anyway with the content of another selected person (my like on their post, my
+--     follow of them, a complete chat) is counted once only, for its owner (for follows and
+--     complete chats: the one with the smaller id). So the dry run and the run give the same
+--     numbers, in whatever order the people are processed.
+--   * files: photos of removed posts and stories in the person's own folder that nothing else
+--     still uses (a story can share its file with a post).
+-- Internal (dry run and run functions).
+create or replace function public.reset_user_categories(p_user uuid, p_categories text[], p_selected uuid[], p_apply boolean)
+returns jsonb
+language plpgsql security definer set search_path = ''
+as $$
+declare
+  others uuid[] := array(select x from unnest(coalesce(p_selected, '{}')) x where x <> p_user);
+  lower_others uuid[] := array(select x from unnest(coalesce(p_selected, '{}')) x where x::text < p_user::text);
+  with_chats boolean := 'chats' = any (p_categories);
+  with_posts boolean := 'posts' = any (p_categories);
+  with_stories boolean := 'stories' = any (p_categories);
+  with_activities boolean := 'activities' = any (p_categories);
+  with_plans boolean := 'plans' = any (p_categories);
+  with_social boolean := 'social' = any (p_categories);
+  with_notifications boolean := 'notifications' = any (p_categories);
+  with_other boolean := 'other' = any (p_categories);
+  full_convs uuid[] := '{}';
+  part_convs uuid[] := '{}';
+  my_posts uuid[] := '{}';
+  my_stories uuid[] := '{}';
+  my_workouts uuid[] := '{}';
+  my_plans uuid[] := '{}';
+  candidates text[] := '{}';
+  files text[];
+  counts jsonb := '{}';
+begin
+  -- ------------------------------------------------------------ what goes
+  if with_chats then
+    -- Complete chats are deleted by their member with the smallest id.
+    full_convs := array(
+      select m.conversation_id from public.conversation_members m
+      where m.user_id = p_user
+        and public.reset_conversation_full(m.conversation_id, p_selected)
+        and (select min(o.user_id::text) from public.conversation_members o where o.conversation_id = m.conversation_id) = p_user::text
+    );
+    part_convs := array(
+      select m.conversation_id from public.conversation_members m
+      where m.user_id = p_user and not public.reset_conversation_full(m.conversation_id, p_selected)
+    );
+  end if;
+  if with_posts then
+    my_posts := array(
+      select p.id from public.posts p
+      where p.user_id = p_user and p.moderation_state is null
+        and not exists (select 1 from public.comments x where x.post_id = p.id and x.moderation_state is not null)
+    );
+    candidates := candidates
+      || array(select p.photo_path from public.posts p where p.id = any (my_posts))
+      || array(select m.photo_path from public.post_media m where m.post_id = any (my_posts))
+      || array(select m.original_path from public.post_media m where m.post_id = any (my_posts) and m.original_path is not null);
+  end if;
+  if with_stories then
+    my_stories := array(select s.id from public.stories s where s.user_id = p_user and s.moderation_state is null);
+    candidates := candidates || array(select s.photo_path from public.stories s where s.id = any (my_stories));
+  end if;
+  if with_activities then
+    my_workouts := array(select w.id from public.workouts w where w.user_id = p_user and w.moderation_state is null);
+  end if;
+  if with_plans then
+    my_plans := array(select tp.id from public.training_plans tp where tp.user_id = p_user and tp.moderation_state is null);
+  end if;
+  files := array(
+    select distinct f from unnest(candidates) f
+    where f like p_user::text || '/%'
+      and not exists (select 1 from public.posts p where p.photo_path = f and not (p.id = any (my_posts)))
+      and not exists (select 1 from public.post_media m
+                      where (m.photo_path = f or m.original_path = f) and not (m.post_id = any (my_posts)))
+      and not exists (select 1 from public.stories s where s.photo_path = f and not (s.id = any (my_stories)))
+      and not exists (select 1 from public.profiles pr where pr.avatar_path = f)
+  );
+
+  -- ------------------------------------------------------------ counts
+  if with_notifications then
+    counts := counts || jsonb_build_object('notifications', jsonb_build_object('notifications', (
+      select count(*) from public.notifications x
+      where x.user_id = p_user
+        and not (with_posts and exists (select 1 from public.posts po where po.id = x.post_id and po.user_id = any (others)))
+        and not (with_posts and exists (
+          select 1 from public.comments cm join public.posts po on po.id = cm.post_id
+          where cm.id = x.comment_id and (po.user_id = any (others) or cm.user_id = any (others))))
+        and not (with_stories and exists (select 1 from public.stories s where s.id = x.story_id and s.user_id = any (others)))
+        and not (exists (
+          select 1 from public.workout_shares ws join public.posts po on po.id = ws.post_id
+          where ws.id = x.workout_share_id
+            and ((with_posts and po.user_id = any (others)) or (with_activities and ws.tagged_user_id = any (others)))))
+        and not (with_social and x.type = 'follow_request' and x.actor_id = any (others))
+    )));
+  end if;
+
+  if with_chats then
+    counts := counts || jsonb_build_object('chats', jsonb_build_object(
+      'conversations', cardinality(full_convs),
+      'messages', (select count(*) from public.messages x
+                   where x.conversation_id = any (full_convs)
+                      or (x.conversation_id = any (part_convs) and x.sender_id = p_user and x.moderation_state is null)),
+      'memberships', cardinality(part_convs)
+    ));
+  end if;
+
+  if with_posts then
+    counts := counts || jsonb_build_object('posts', jsonb_build_object(
+      'posts', cardinality(my_posts),
+      'photos', (select count(*) from public.post_media m where m.post_id = any (my_posts)),
+      'comments', (select count(*) from public.comments x
+                   join public.posts po on po.id = x.post_id
+                   left join public.comments parent on parent.id = x.parent_comment_id
+                   where x.user_id = p_user and x.moderation_state is null
+                     and not (x.post_id = any (my_posts)) and not (po.user_id = any (others))
+                     and not coalesce(parent.user_id = any (others), false)
+                     and not exists (select 1 from public.comments r where r.parent_comment_id = x.id and r.moderation_state is not null)),
+      'likes', (select count(*) from public.post_likes x join public.posts po on po.id = x.post_id
+                where x.user_id = p_user and not (x.post_id = any (my_posts)) and not (po.user_id = any (others)))
+               + (select count(*) from public.comment_likes x
+                  join public.comments cm on cm.id = x.comment_id join public.posts po on po.id = cm.post_id
+                  where x.user_id = p_user and not (cm.post_id = any (my_posts))
+                    and not (po.user_id = any (others)) and not (cm.user_id = any (others))),
+      'reposts', (select count(*) from public.post_reposts x join public.posts po on po.id = x.original_post_id
+                  where x.reposter_id = p_user and not (po.user_id = any (others))),
+      'tags', (select count(*) from public.post_tags x join public.posts po on po.id = x.post_id
+               where x.user_id = p_user and not (x.post_id = any (my_posts)) and not (po.user_id = any (others)))
+    ));
+  end if;
+
+  if with_stories then
+    counts := counts || jsonb_build_object('stories', jsonb_build_object(
+      'stories', cardinality(my_stories),
+      'highlights', (select count(*) from public.highlights h where h.user_id = p_user),
+      'likes', (select count(*) from public.story_likes x join public.stories s on s.id = x.story_id
+                where x.user_id = p_user and s.user_id <> p_user and not (s.user_id = any (others))),
+      'views', (select count(*) from public.story_views x join public.stories s on s.id = x.story_id
+                where x.user_id = p_user and s.user_id <> p_user and not (s.user_id = any (others)))
+    ));
+  end if;
+
+  if with_activities then
+    counts := counts || jsonb_build_object('activities', jsonb_build_object(
+      'workouts', cardinality(my_workouts),
+      'sets', (select count(*) from public.workout_sets s join public.workout_exercises e on e.id = s.workout_exercise_id
+               where e.workout_id = any (my_workouts)),
+      'links', (select count(*) from public.workout_shares x join public.posts po on po.id = x.post_id
+                where x.tagged_user_id = p_user and not (with_posts and po.user_id = any (others))),
+      'rest_days', (select count(*) from public.rest_day_uses x where x.user_id = p_user)
+    ));
+  end if;
+
+  if with_plans then
+    counts := counts || jsonb_build_object('plans', jsonb_build_object(
+      'plans', cardinality(my_plans),
+      'rounds', (select count(*) from public.plan_rounds x where x.user_id = p_user),
+      'deviations', (select count(*) from public.plan_deviations x where x.user_id = p_user),
+      'planned_rest_days', (select count(*) from public.planned_rest_uses x where x.user_id = p_user),
+      'adoptions', (select count(*) from public.plan_adoptions x where x.adopter_id = p_user)
+    ));
+  end if;
+
+  if with_social then
+    counts := counts || jsonb_build_object('social', jsonb_build_object(
+      'following', (select count(*) from public.follows x
+                    where x.follower_id = p_user and x.status = 'accepted' and not (x.following_id = any (lower_others))),
+      'followers', (select count(*) from public.follows x
+                    where x.following_id = p_user and x.status = 'accepted' and not (x.follower_id = any (lower_others))),
+      'requests', (select count(*) from public.follows x
+                   where x.status = 'pending'
+                     and ((x.follower_id = p_user and not (x.following_id = any (lower_others)))
+                       or (x.following_id = p_user and not (x.follower_id = any (lower_others))))),
+      'blocks', (select count(*) from public.user_blocks x where x.blocker_id = p_user),
+      'hidden_from', (select count(*) from public.audience_restrictions x where x.owner_id = p_user)
+    ));
+  end if;
+
+  if with_other then
+    counts := counts || jsonb_build_object('other', jsonb_build_object(
+      'reports_as_reporter', (select count(*) from public.reports x where x.reporter_id = p_user),
+      'settings', (select count(*) from public.profiles p
+                   where p.id = p_user and (
+                     not p.is_private or p.story_visibility <> 'followers' or p.post_visibility <> 'followers'
+                     or p.tag_permission <> 'everyone' or not p.tag_notifications or not p.tag_chat_messages
+                     or not p.notify_plan_adopted or p.default_activity_visibility <> 'private'
+                     or p.training_stats_visibility <> 'private'))
+                  + (select count(*) from public.rest_budgets x where x.user_id = p_user)
+    ));
+  end if;
+
+  if not p_apply then
+    return jsonb_build_object('counts', counts, 'files', to_jsonb(files));
+  end if;
+
+  -- ------------------------------------------------------------ delete (notifications first)
+  if with_notifications then
+    delete from public.notifications x where x.user_id = p_user;
+  end if;
+  if with_chats then
+    delete from public.message_reactions x where x.user_id = p_user and x.conversation_id = any (part_convs);
+    delete from public.message_hidden x using public.messages mm
+    where x.user_id = p_user and mm.id = x.message_id and mm.conversation_id = any (part_convs);
+    delete from public.messages x
+    where x.conversation_id = any (part_convs) and x.sender_id = p_user and x.moderation_state is null;
+    delete from public.conversation_members x where x.user_id = p_user and x.conversation_id = any (part_convs);
+    delete from public.conversations x where x.id = any (full_convs);
+  end if;
+  if with_posts then
+    delete from public.post_tags x where x.user_id = p_user;
+    delete from public.post_reposts x where x.reposter_id = p_user;
+    delete from public.post_likes x where x.user_id = p_user;
+    delete from public.comment_likes x where x.user_id = p_user;
+    delete from public.comments x
+    where x.user_id = p_user and x.moderation_state is null
+      and not exists (select 1 from public.comments r where r.parent_comment_id = x.id and r.moderation_state is not null);
+    delete from public.posts x where x.id = any (my_posts);
+  end if;
+  if with_stories then
+    delete from public.story_likes x where x.user_id = p_user;
+    delete from public.story_views x where x.user_id = p_user;
+    delete from public.highlights x where x.user_id = p_user;
+    delete from public.stories x where x.id = any (my_stories);
+  end if;
+  if with_activities then
+    delete from public.workout_shares x where x.tagged_user_id = p_user;
+    delete from public.rest_day_uses x where x.user_id = p_user;
+    delete from public.workouts x where x.id = any (my_workouts);
+  end if;
+  if with_plans then
+    delete from public.plan_deviations x where x.user_id = p_user;
+    delete from public.plan_rounds x where x.user_id = p_user;
+    delete from public.planned_rest_uses x where x.user_id = p_user;
+    delete from public.plan_adoptions x where x.adopter_id = p_user;
+    delete from public.training_plans x where x.id = any (my_plans);
+  end if;
+  if with_social then
+    delete from public.follows x where x.follower_id = p_user or x.following_id = p_user;
+    delete from public.user_blocks x where x.blocker_id = p_user;
+    delete from public.audience_restrictions x where x.owner_id = p_user;
+  end if;
+  if with_other then
+    update public.reports set reporter_id = null where reporter_id = p_user;
+    update public.profiles
+    set is_private = true, story_visibility = 'followers', post_visibility = 'followers',
+        tag_permission = 'everyone', tag_notifications = true, tag_chat_messages = true,
+        notify_plan_adopted = true, default_activity_visibility = 'private', training_stats_visibility = 'private'
+    where id = p_user;
+    delete from public.rest_budgets x where x.user_id = p_user;
+  end if;
+  return jsonb_build_object('counts', counts, 'files', to_jsonb(files));
+end;
+$$;
+
+-- Sum of all numbers in a counts object ({category: {what: n}}). Internal.
+create or replace function public.reset_counts_total(p_counts jsonb)
+returns bigint
+language sql immutable set search_path = ''
+as $$
+  select coalesce(sum(v.value::bigint), 0)
+  from jsonb_each(coalesce(p_counts, '{}')) cat,
+       jsonb_each_text(case when jsonb_typeof(cat.value) = 'object' then cat.value else '{}'::jsonb end) v;
+$$;
+
+-- Adds counts objects up per category and key. Internal.
+create or replace function public.reset_counts_sum(p_list jsonb[])
+returns jsonb
+language sql immutable set search_path = ''
+as $$
+  select coalesce(jsonb_object_agg(s.cat, s.totals), '{}')
+  from (
+    select v.cat, jsonb_object_agg(v.k, v.total) as totals
+    from (
+      select c.key as cat, e.key as k, sum(e.value::bigint) as total
+      from unnest(coalesce(p_list, '{}')) l(item),
+           jsonb_each(coalesce(l.item, '{}')) c,
+           jsonb_each_text(case when jsonb_typeof(c.value) = 'object' then c.value else '{}'::jsonb end) e
+      group by c.key, e.key
+    ) v
+    group by v.cat
+  ) s;
+$$;
+
+-- The job of the caller in a given state, locked. Internal.
+create or replace function public.reset_own_job(p_job_id uuid, p_states text[])
+returns public.reset_jobs
+language plpgsql security definer set search_path = ''
+as $$
+declare
+  job public.reset_jobs%rowtype;
+begin
+  perform public.require_admin();
+  select * into job from public.reset_jobs j where j.id = p_job_id for update;
+  if not found then
+    raise exception 'job_not_found';
+  end if;
+  if job.created_by is distinct from auth.uid() then
+    raise exception 'not_job_owner';
+  end if;
+  if not (job.status = any (p_states)) then
+    raise exception 'job_wrong_state' using hint = job.status;
+  end if;
+  return job;
+end;
+$$;
+
+-- Ids of everybody selected in a job (for chats). Internal.
+create or replace function public.reset_selected_ids(p_job_id uuid)
+returns uuid[]
+language sql stable security definer set search_path = ''
+as $$
+  select coalesce(array_agg(t.user_id), '{}') from public.reset_job_targets t
+  where t.job_id = p_job_id and t.selected and t.user_id is not null and t.status <> 'skipped';
+$$;
+
+-- Validates mode and categories of a job. Internal.
+create or replace function public.reset_checked_categories(p_mode text, p_categories text[])
+returns text[]
+language plpgsql stable security definer set search_path = ''
+as $$
+declare
+  cats text[];
+begin
+  if p_mode is null or p_mode not in ('categories', 'full') then
+    raise exception 'invalid_mode';
+  end if;
+  if p_mode = 'full' then
+    if not public.reset_full_allowed() then
+      raise exception 'full_reset_disabled';
+    end if;
+    return public.reset_category_keys();
+  end if;
+  cats := array(select distinct x from unnest(coalesce(p_categories, '{}')) x order by x);
+  if cardinality(cats) = 0 then
+    raise exception 'no_categories';
+  end if;
+  if exists (select 1 from unnest(cats) x where not (x = any (public.reset_category_keys()))) then
+    raise exception 'invalid_category';
+  end if;
+  return cats;
+end;
+$$;
+
+-- ---------------------------------------------------------------- dashboard functions
+-- Numbers and switches for the dashboard.
+create or replace function public.admin_reset_settings()
+returns jsonb
+language plpgsql stable security definer set search_path = ''
+as $$
+begin
+  perform public.require_admin();
+  return public.reset_limits() || jsonb_build_object('allow_full_reset', public.reset_full_allowed());
+end;
+$$;
+
+-- People to choose from (public profile data only), with protection and flags. Search in
+-- username and display name; at most 500 rows.
+create or replace function public.admin_reset_candidates(p_query text default null)
+returns table (
+  user_id uuid, username text, display_name text, account_status text, created_at timestamptz,
+  protection text, flags text[]
+)
+language plpgsql stable security definer set search_path = ''
+as $$
+#variable_conflict use_column
+declare
+  q text := btrim(coalesce(p_query, ''));
+  pattern text := '%' || replace(replace(replace(btrim(coalesce(p_query, '')), '\', '\\'), '%', '\%'), '_', '\_') || '%';
+begin
+  perform public.require_admin();
+  return query
+  select p.id, p.username, p.display_name, p.account_status, p.created_at,
+         public.reset_protection(p.id), public.reset_flags(p.id)
+  from public.profiles p
+  where q = '' or p.username ilike pattern or p.display_name ilike pattern
+  order by p.username
+  limit 500;
+end;
+$$;
+
+-- New job in 'draft'. 'full' only while app_settings.allow_full_reset is on; its categories are
+-- always all of them.
+create or replace function public.admin_reset_create_job(
+  p_mode text, p_categories text[], p_reason text default null, p_subject text default null, p_user_message text default null
+)
+returns uuid
+language plpgsql security definer set search_path = ''
+as $$
+declare
+  new_id uuid;
+begin
+  perform public.require_admin();
+  insert into public.reset_jobs (created_by, mode, categories, reason, subject, user_message)
+  values (
+    auth.uid(), p_mode, public.reset_checked_categories(p_mode, p_categories),
+    nullif(btrim(coalesce(p_reason, '')), ''), nullif(btrim(coalesce(p_subject, '')), ''),
+    nullif(btrim(coalesce(p_user_message, '')), '')
+  )
+  returning id into new_id;
+  return new_id;
+end;
+$$;
+
+-- Changes a draft (scope, reason, mail texts). A changed scope needs a new dry run.
+create or replace function public.admin_reset_update_job(
+  p_job_id uuid, p_mode text, p_categories text[], p_reason text, p_subject text, p_user_message text
+)
+returns void
+language plpgsql security definer set search_path = ''
+as $$
+declare
+  job public.reset_jobs%rowtype := public.reset_own_job(p_job_id, array['draft']);
+  cats text[] := public.reset_checked_categories(p_mode, p_categories);
+  scope_changed boolean := p_mode is distinct from job.mode or cats is distinct from job.categories;
+begin
+  if p_mode = 'categories' and exists (
+    select 1 from public.reset_job_targets t join public.profiles p on p.id = t.user_id
+    where t.job_id = p_job_id and p.account_status = 'deleting'
+  ) then
+    raise exception 'target_deleting';
+  end if;
+  update public.reset_jobs
+  set mode = p_mode, categories = cats,
+      reason = nullif(btrim(coalesce(p_reason, '')), ''),
+      subject = nullif(btrim(coalesce(p_subject, '')), ''),
+      user_message = nullif(btrim(coalesce(p_user_message, '')), ''),
+      preview = case when scope_changed then null else preview end,
+      previewed_at = case when scope_changed then null else previewed_at end,
+      updated_at = case when scope_changed then now() else updated_at end
+  where id = p_job_id;
+end;
+$$;
+
+-- The people of a draft (replaces the list). Protected accounts, staff and the caller are
+-- refused outright; flagged accounts only with p_include_flagged; accounts being deleted only
+-- for 'full'. At most 500. A new dry run is needed afterwards.
+create or replace function public.admin_reset_set_targets(p_job_id uuid, p_user_ids uuid[], p_include_flagged boolean)
+returns integer
+language plpgsql security definer set search_path = ''
+as $$
+declare
+  job public.reset_jobs%rowtype := public.reset_own_job(p_job_id, array['draft']);
+  ids uuid[] := array(select distinct x from unnest(coalesce(p_user_ids, '{}')) x where x is not null);
+  max_targets integer := (public.reset_limits() ->> 'max_targets')::integer;
+begin
+  if cardinality(ids) > max_targets then
+    raise exception 'too_many_targets' using hint = max_targets::text;
+  end if;
+  if exists (select 1 from unnest(ids) x where not exists (select 1 from public.profiles p where p.id = x)) then
+    raise exception 'unknown_user';
+  end if;
+  if exists (select 1 from unnest(ids) x where public.reset_protection(x) is not null) then
+    raise exception 'protected_target';
+  end if;
+  if not coalesce(p_include_flagged, false)
+    and exists (select 1 from unnest(ids) x where cardinality(public.reset_flags(x)) > 0) then
+    raise exception 'flagged_not_confirmed';
+  end if;
+  if job.mode = 'categories'
+    and exists (select 1 from public.profiles p where p.id = any (ids) and p.account_status = 'deleting') then
+    raise exception 'target_deleting';
+  end if;
+  delete from public.reset_job_targets where job_id = p_job_id;
+  insert into public.reset_job_targets (job_id, user_id, user_hash, flagged)
+  select p_job_id, x, encode(pg_catalog.sha256(convert_to(x::text, 'UTF8')), 'hex'), cardinality(public.reset_flags(x)) > 0
+  from unnest(ids) x;
+  update public.reset_jobs
+  set include_flagged = coalesce(p_include_flagged, false), preview = null, previewed_at = null, updated_at = now()
+  where id = p_job_id;
+  return cardinality(ids);
+end;
+$$;
+
+-- Dry run: what the job would remove, per person and in total. Deletes nothing. Stores the
+-- numbers (needed for confirming).
+create or replace function public.admin_reset_preview(p_job_id uuid)
+returns jsonb
+language plpgsql security definer set search_path = ''
+as $$
+declare
+  job public.reset_jobs%rowtype := public.reset_own_job(p_job_id, array['draft']);
+  selected uuid[] := public.reset_selected_ids(p_job_id);
+  t record;
+  r jsonb;
+  file_count bigint := 0;
+  totals jsonb;
+begin
+  for t in select * from public.reset_job_targets x where x.job_id = p_job_id for update loop
+    r := public.reset_user_categories(t.user_id, job.categories, selected, false);
+    file_count := file_count + jsonb_array_length(r -> 'files');
+    update public.reset_job_targets
+    set counts = r -> 'counts', flagged = cardinality(public.reset_flags(t.user_id)) > 0, updated_at = now()
+    where id = t.id;
+  end loop;
+  totals := public.reset_counts_sum(array(select x.counts from public.reset_job_targets x where x.job_id = p_job_id));
+  update public.reset_jobs
+  set preview = jsonb_build_object('totals', totals, 'targets', (select count(*) from public.reset_job_targets x where x.job_id = p_job_id),
+                                   'files', file_count),
+      previewed_at = now()
+  where id = p_job_id;
+  return jsonb_build_object(
+    'job_id', p_job_id, 'mode', job.mode, 'categories', to_jsonb(job.categories), 'totals', totals, 'files', file_count,
+    'targets', coalesce((
+      select jsonb_agg(jsonb_build_object(
+        'target_id', x.id, 'user_id', x.user_id, 'username', p.username, 'display_name', p.display_name,
+        'flagged', x.flagged, 'counts', x.counts, 'total', public.reset_counts_total(x.counts)
+      ) order by p.username)
+      from public.reset_job_targets x join public.profiles p on p.id = x.user_id
+      where x.job_id = p_job_id
+    ), '[]'::jsonb)
+  );
+end;
+$$;
+
+-- Was the last TOTP step of this session at most p_seconds ago (amr claim of the JWT)?
+create or replace function public.reset_fresh_totp(p_seconds integer)
+returns boolean
+language sql stable security definer set search_path = ''
+as $$
+  select coalesce((
+    select max((e ->> 'timestamp')::numeric) >= extract(epoch from now()) - p_seconds
+    from jsonb_array_elements(case when jsonb_typeof(auth.jwt() -> 'amr') = 'array' then auth.jwt() -> 'amr' else '[]'::jsonb end) e
+    where e ->> 'method' = 'totp' and (e ->> 'timestamp') ~ '^[0-9]{1,12}(\.[0-9]+)?$'
+  ), false);
+$$;
+
+-- Confirms a draft: only its creator, after a dry run newer than the last change, with a reason,
+-- the exact word and a TOTP step at most 5 minutes old. From now on scope and people are frozen.
+create or replace function public.admin_reset_confirm(p_job_id uuid, p_phrase text)
+returns void
+language plpgsql security definer set search_path = ''
+as $$
+declare
+  job public.reset_jobs%rowtype := public.reset_own_job(p_job_id, array['draft']);
+  limits jsonb := public.reset_limits();
+  n integer;
+begin
+  if p_phrase is distinct from limits ->> 'phrase' then
+    raise exception 'wrong_phrase';
+  end if;
+  if not public.reset_fresh_totp((limits ->> 'totp_max_age_seconds')::integer) then
+    raise exception 'totp_required';
+  end if;
+  if job.reason is null or char_length(job.reason) < 10 then
+    raise exception 'reason_too_short';
+  end if;
+  if job.previewed_at is null or job.previewed_at < job.updated_at then
+    raise exception 'preview_required';
+  end if;
+  if job.mode = 'full' and not public.reset_full_allowed() then
+    raise exception 'full_reset_disabled';
+  end if;
+  select count(*) into n from public.reset_job_targets t where t.job_id = p_job_id and t.selected;
+  if n = 0 then
+    raise exception 'no_targets';
+  end if;
+  -- Protection or flags may have changed since the people were chosen.
+  if exists (select 1 from public.reset_job_targets t where t.job_id = p_job_id and public.reset_protection(t.user_id) is not null) then
+    raise exception 'protected_target';
+  end if;
+  if not job.include_flagged and exists (
+    select 1 from public.reset_job_targets t where t.job_id = p_job_id and cardinality(public.reset_flags(t.user_id)) > 0
+  ) then
+    raise exception 'flagged_not_confirmed';
+  end if;
+  perform pg_advisory_xact_lock(hashtext('peakpic.reset_jobs'));
+  if exists (select 1 from public.reset_jobs j where j.id <> p_job_id and j.status in ('confirmed', 'running')) then
+    raise exception 'other_job_active';
+  end if;
+  update public.reset_jobs set status = 'confirmed', confirmed_at = now() where id = p_job_id;
+  perform public.log_moderation_action(
+    'reset_confirmed', 'reset_job', p_job_id, null, null, job.reason, null,
+    jsonb_build_object('mode', job.mode, 'categories', to_jsonb(job.categories), 'targets', n,
+                       'include_flagged', job.include_flagged, 'preview', job.preview -> 'totals')
+  );
+end;
+$$;
+
+-- Cancels a job that hasn't started (draft or confirmed). Only its creator.
+create or replace function public.admin_reset_cancel(p_job_id uuid)
+returns void
+language plpgsql security definer set search_path = ''
+as $$
+declare
+  job public.reset_jobs%rowtype := public.reset_own_job(p_job_id, array['draft', 'confirmed']);
+begin
+  update public.reset_jobs set status = 'cancelled', finished_at = now() where id = p_job_id;
+  if job.status = 'confirmed' then
+    perform public.log_moderation_action(
+      'reset_cancelled', 'reset_job', p_job_id, null, null, job.reason, null, jsonb_build_object('mode', job.mode)
+    );
+  end if;
+end;
+$$;
+
+-- Earlier jobs (newest first).
+create or replace function public.admin_reset_jobs()
+returns table (
+  id uuid, status text, mode text, categories text[], created_at timestamptz, confirmed_at timestamptz,
+  finished_at timestamptz, targets bigint, own boolean
+)
+language plpgsql stable security definer set search_path = ''
+as $$
+#variable_conflict use_column
+begin
+  perform public.require_admin();
+  return query
+  select j.id, j.status, j.mode, j.categories, j.created_at, j.confirmed_at, j.finished_at,
+         (select count(*) from public.reset_job_targets t where t.job_id = j.id),
+         j.created_by = auth.uid()
+  from public.reset_jobs j
+  order by j.created_at desc
+  limit 100;
+end;
+$$;
+
+-- One job with its progress and, per person, status and numbers. Never e-mail addresses. Deleted
+-- accounts appear only with the start of their hash.
+create or replace function public.admin_reset_job_status(p_job_id uuid)
+returns jsonb
+language plpgsql stable security definer set search_path = ''
+as $$
+declare
+  job public.reset_jobs%rowtype;
+begin
+  perform public.require_admin();
+  select * into job from public.reset_jobs j where j.id = p_job_id;
+  if not found then
+    raise exception 'job_not_found';
+  end if;
+  return jsonb_build_object(
+    'id', job.id, 'status', job.status, 'mode', job.mode, 'categories', to_jsonb(job.categories),
+    'reason', job.reason, 'subject', job.subject, 'user_message', job.user_message,
+    'include_flagged', job.include_flagged, 'preview', job.preview, 'previewed_at', job.previewed_at,
+    'result', job.result, 'own', job.created_by = auth.uid(),
+    'created_at', job.created_at, 'updated_at', job.updated_at, 'confirmed_at', job.confirmed_at,
+    'started_at', job.started_at, 'finished_at', job.finished_at,
+    'progress', (
+      select jsonb_build_object(
+        'total', count(*),
+        'done', count(*) filter (where t.status = 'done'),
+        'failed', count(*) filter (where t.status = 'failed'),
+        'skipped', count(*) filter (where t.status = 'skipped'),
+        'open', count(*) filter (where t.status in ('pending', 'claimed', 'files_pending'))
+      )
+      from public.reset_job_targets t where t.job_id = p_job_id
+    ),
+    'targets', coalesce((
+      select jsonb_agg(jsonb_build_object(
+        'target_id', t.id, 'user_id', t.user_id, 'username', p.username, 'display_name', p.display_name,
+        'user_hash', left(t.user_hash, 12), 'flagged', t.flagged, 'status', t.status, 'error', t.error,
+        'counts', t.counts, 'result', t.result, 'email_status', t.email_status, 'attempts', t.attempts
+      ) order by p.username nulls last, t.user_hash)
+      from public.reset_job_targets t left join public.profiles p on p.id = t.user_id
+      where t.job_id = p_job_id
+    ), '[]'::jsonb)
+  );
+end;
+$$;
+
+-- ---------------------------------------------------------------- run (Edge Function run_data_reset)
+-- Called with the admin's own session; the Edge Function only adds storage and the Auth admin
+-- API with the service role. Starting again after an interruption continues where it stopped:
+-- every person has its own state, and each step can be repeated.
+
+-- Starts or continues a confirmed job (only its creator). Failed people get another try (at
+-- most max_attempts). Only one job runs at a time.
+create or replace function public.admin_reset_run_start(p_job_id uuid)
+returns jsonb
+language plpgsql security definer set search_path = ''
+as $$
+declare
+  job public.reset_jobs%rowtype := public.reset_own_job(p_job_id, array['confirmed', 'running', 'failed']);
+begin
+  if job.mode = 'full' and not public.reset_full_allowed() then
+    raise exception 'full_reset_disabled';
+  end if;
+  perform pg_advisory_xact_lock(hashtext('peakpic.reset_jobs'));
+  if exists (select 1 from public.reset_jobs j where j.id <> p_job_id and j.status = 'running') then
+    raise exception 'other_job_active';
+  end if;
+  if job.status = 'confirmed' then
+    update public.reset_jobs set status = 'running', started_at = now() where id = p_job_id;
+    perform public.log_moderation_action(
+      'reset_started', 'reset_job', p_job_id, null, null, job.reason, null,
+      jsonb_build_object('mode', job.mode, 'categories', to_jsonb(job.categories),
+                         'targets', (select count(*) from public.reset_job_targets t where t.job_id = p_job_id))
+    );
+  elsif job.status = 'failed' then
+    update public.reset_job_targets
+    set status = 'pending', error = null, updated_at = now()
+    where job_id = p_job_id and status = 'failed'
+      and attempts < (public.reset_limits() ->> 'max_attempts')::integer;
+    update public.reset_jobs set status = 'running', finished_at = null where id = p_job_id;
+    perform public.log_moderation_action(
+      'reset_resumed', 'reset_job', p_job_id, null, null, job.reason, null, jsonb_build_object('mode', job.mode)
+    );
+  end if;
+  return jsonb_build_object('mode', job.mode, 'status', 'running');
+end;
+$$;
+
+-- The next people to work on (at most batch_size). Claims older than 10 minutes count as
+-- abandoned (interrupted run) and are handed out again.
+create or replace function public.admin_reset_claim_batch(p_job_id uuid)
+returns table (target_id uuid, user_id uuid, status text)
+language plpgsql security definer set search_path = ''
+as $$
+#variable_conflict use_column
+declare
+  job public.reset_jobs%rowtype := public.reset_own_job(p_job_id, array['running']);
+begin
+  return query
+  with picked as (
+    select t.id from public.reset_job_targets t
+    where t.job_id = p_job_id and t.selected
+      and (t.status in ('pending', 'files_pending')
+           or (t.status = 'claimed' and t.claimed_at < now() - interval '10 minutes'))
+    order by t.user_id::text nulls first
+    limit (public.reset_limits() ->> 'batch_size')::integer
+    for update skip locked
+  )
+  update public.reset_job_targets t
+  set status = case when t.status = 'files_pending' then 'files_pending' else 'claimed' end,
+      claimed_at = now(), updated_at = now()
+  from picked
+  where t.id = picked.id
+  returning t.id, t.user_id, t.status;
+end;
+$$;
+
+-- A claimed person that may not be processed any more (protected or staff in the meantime,
+-- deleting while categories are chosen) is skipped. Internal.
+create or replace function public.reset_target_for_step(p_job_id uuid, p_target_id uuid)
+returns public.reset_job_targets
+language plpgsql security definer set search_path = ''
+as $$
+declare
+  t public.reset_job_targets%rowtype;
+begin
+  select * into t from public.reset_job_targets x where x.id = p_target_id and x.job_id = p_job_id for update;
+  if not found then
+    raise exception 'target_not_found';
+  end if;
+  if t.status not in ('claimed', 'files_pending') then
+    raise exception 'target_wrong_state' using hint = t.status;
+  end if;
+  return t;
+end;
+$$;
+
+-- Categories: removes the person's rows (exactly like the dry run counted them) and returns the
+-- files the Edge Function must remove. Repeating it after the rows are gone returns the same
+-- files again.
+create or replace function public.admin_reset_apply_user(p_job_id uuid, p_target_id uuid)
+returns jsonb
+language plpgsql security definer set search_path = ''
+as $$
+declare
+  job public.reset_jobs%rowtype := public.reset_own_job(p_job_id, array['running']);
+  t public.reset_job_targets%rowtype := public.reset_target_for_step(p_job_id, p_target_id);
+  r jsonb;
+begin
+  if job.mode <> 'categories' then
+    raise exception 'wrong_mode';
+  end if;
+  if t.status = 'files_pending' then
+    return jsonb_build_object('user_id', t.user_id, 'files', coalesce(t.files, '[]'::jsonb));
+  end if;
+  if t.user_id is null or public.reset_protection(t.user_id) is not null
+    or exists (select 1 from public.profiles p where p.id = t.user_id and p.account_status = 'deleting') then
+    update public.reset_job_targets set status = 'skipped', error = 'not_allowed_anymore', updated_at = now() where id = t.id;
+    return jsonb_build_object('skipped', true);
+  end if;
+  r := public.reset_user_categories(t.user_id, job.categories, public.reset_selected_ids(p_job_id), true);
+  update public.reset_job_targets
+  set status = 'files_pending', result = r -> 'counts', files = r -> 'files', updated_at = now()
+  where id = t.id;
+  return jsonb_build_object('user_id', t.user_id, 'files', r -> 'files');
+end;
+$$;
+
+-- Whole account: counts what goes (for the report), then marks the account 'deleting' (it is
+-- hidden at once and can't write; an account already 'deleting' is simply finished). The Edge
+-- Function then deletes the files, calls finish_account_deletion() and deletes the auth user,
+-- like delete_account. {deleted: true} when the account is gone already (interrupted earlier).
+create or replace function public.admin_reset_full_prepare(p_job_id uuid, p_target_id uuid)
+returns jsonb
+language plpgsql security definer set search_path = ''
+as $$
+declare
+  job public.reset_jobs%rowtype := public.reset_own_job(p_job_id, array['running']);
+  t public.reset_job_targets%rowtype := public.reset_target_for_step(p_job_id, p_target_id);
+  r jsonb;
+begin
+  if job.mode <> 'full' then
+    raise exception 'wrong_mode';
+  end if;
+  if not public.reset_full_allowed() then
+    raise exception 'full_reset_disabled';
+  end if;
+  if t.user_id is null then
+    return jsonb_build_object('deleted', true);
+  end if;
+  if public.reset_protection(t.user_id) is not null then
+    update public.reset_job_targets set status = 'skipped', error = 'not_allowed_anymore', updated_at = now() where id = t.id;
+    return jsonb_build_object('skipped', true);
+  end if;
+  if t.result is null then
+    r := public.reset_user_categories(t.user_id, public.reset_category_keys(), public.reset_selected_ids(p_job_id), false);
+    update public.reset_job_targets
+    set result = (r -> 'counts') || jsonb_build_object('account', jsonb_build_object('account', 1))
+    where id = t.id;
+  end if;
+  update public.profiles
+  set account_status = 'deleting', suspended_until = null, suspension_reason_code = null, moderation_updated_at = now()
+  where id = t.user_id and account_status <> 'deleting';
+  update public.reset_job_targets set status = 'files_pending', updated_at = now() where id = t.id;
+  return jsonb_build_object('user_id', t.user_id);
+end;
+$$;
+
+create or replace function public.admin_reset_target_done(p_job_id uuid, p_target_id uuid)
+returns void
+language plpgsql security definer set search_path = ''
+as $$
+declare
+  job public.reset_jobs%rowtype := public.reset_own_job(p_job_id, array['running']);
+  t public.reset_job_targets%rowtype := public.reset_target_for_step(p_job_id, p_target_id);
+begin
+  update public.reset_job_targets
+  set status = 'done', files = null, error = null, claimed_at = null, updated_at = now()
+  where id = t.id;
+end;
+$$;
+
+-- A step failed (error code only, no user data). Tried again on "Fortsetzen".
+create or replace function public.admin_reset_target_failed(p_job_id uuid, p_target_id uuid, p_error text)
+returns void
+language plpgsql security definer set search_path = ''
+as $$
+declare
+  job public.reset_jobs%rowtype := public.reset_own_job(p_job_id, array['running']);
+  t public.reset_job_targets%rowtype := public.reset_target_for_step(p_job_id, p_target_id);
+begin
+  update public.reset_job_targets
+  set status = 'failed', attempts = attempts + 1, claimed_at = null, updated_at = now(),
+      error = case when p_error ~ '^[a-z_]{1,40}$' then p_error else 'step_failed' end
+  where id = t.id;
+end;
+$$;
+
+-- Ends the job once nobody is open any more: 'done', or 'failed' if someone failed. Logs the
+-- totals per category (no names). Returns the progress either way.
+create or replace function public.admin_reset_run_finish(p_job_id uuid)
+returns jsonb
+language plpgsql security definer set search_path = ''
+as $$
+declare
+  job public.reset_jobs%rowtype := public.reset_own_job(p_job_id, array['running']);
+  progress jsonb;
+  totals jsonb;
+  final_status text;
+begin
+  select jsonb_build_object(
+    'total', count(*),
+    'done', count(*) filter (where t.status = 'done'),
+    'failed', count(*) filter (where t.status = 'failed'),
+    'skipped', count(*) filter (where t.status = 'skipped'),
+    'open', count(*) filter (where t.status in ('pending', 'claimed', 'files_pending'))
+  ) into progress
+  from public.reset_job_targets t where t.job_id = p_job_id;
+  if (progress ->> 'open')::integer > 0 then
+    return progress || jsonb_build_object('status', 'running');
+  end if;
+  final_status := case when (progress ->> 'failed')::integer > 0 then 'failed' else 'done' end;
+  totals := public.reset_counts_sum(array(
+    select t.result from public.reset_job_targets t where t.job_id = p_job_id and t.status = 'done'
+  ));
+  update public.reset_jobs
+  set status = final_status, finished_at = now(), result = jsonb_build_object('totals', totals, 'progress', progress)
+  where id = p_job_id;
+  perform public.log_moderation_action(
+    'reset_finished', 'reset_job', p_job_id, null, null, job.reason, null,
+    jsonb_build_object('mode', job.mode, 'status', final_status, 'totals', totals, 'progress', progress)
+  );
+  return progress || jsonb_build_object('status', final_status);
+end;
+$$;
+
+do $$
+declare
+  f text;
+begin
+  foreach f in array array[
+    'public.reset_limits()', 'public.reset_category_keys()', 'public.reset_full_allowed()',
+    'public.reset_protection(uuid)', 'public.reset_flags(uuid)', 'public.reset_conversation_full(uuid, uuid[])',
+    'public.reset_user_categories(uuid, text[], uuid[], boolean)', 'public.reset_counts_total(jsonb)',
+    'public.reset_counts_sum(jsonb[])', 'public.reset_own_job(uuid, text[])', 'public.reset_selected_ids(uuid)',
+    'public.reset_checked_categories(text, text[])', 'public.reset_fresh_totp(integer)',
+    'public.reset_target_for_step(uuid, uuid)'
+  ] loop
+    execute format('revoke all on function %s from public, anon, authenticated', f);
+  end loop;
+  foreach f in array array[
+    'public.admin_reset_settings()', 'public.admin_reset_candidates(text)',
+    'public.admin_reset_create_job(text, text[], text, text, text)',
+    'public.admin_reset_update_job(uuid, text, text[], text, text, text)',
+    'public.admin_reset_set_targets(uuid, uuid[], boolean)', 'public.admin_reset_preview(uuid)',
+    'public.admin_reset_confirm(uuid, text)', 'public.admin_reset_cancel(uuid)', 'public.admin_reset_jobs()',
+    'public.admin_reset_job_status(uuid)', 'public.admin_reset_run_start(uuid)', 'public.admin_reset_claim_batch(uuid)',
+    'public.admin_reset_apply_user(uuid, uuid)', 'public.admin_reset_full_prepare(uuid, uuid)',
+    'public.admin_reset_target_done(uuid, uuid)', 'public.admin_reset_target_failed(uuid, uuid, text)',
+    'public.admin_reset_run_finish(uuid)'
+  ] loop
+    execute format('revoke all on function %s from public, anon', f);
+    execute format('grant execute on function %s to authenticated', f);
+  end loop;
+end;
+$$;
