@@ -140,7 +140,8 @@ export function ReportDetailPage({ id }: { id: string }) {
               <dt>Eingang</dt>
               <dd>{formatDateTime(strOrNull(report.created_at))}</dd>
               <dt>Gemeldet von</dt>
-              <dd>{detail.reporter !== null ? `@${str(detail.reporter.username)}` : "Gelöschtes Konto"}</dd>
+              {/* Without a reporter the account was deleted or the report anonymised (data reset). */}
+              <dd>{detail.reporter !== null ? `@${str(detail.reporter.username)}` : "Nicht mehr zugeordnet"}</dd>
               <dt>Betroffen</dt>
               <dd>
                 {detail.targetUser !== null && targetUserId !== null ? (
