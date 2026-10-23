@@ -39,9 +39,17 @@ function planTitleOf(payload: unknown): string | null {
   return typeof payload.plan_title === "string" ? payload.plan_title : null;
 }
 
-/** My stored notifications, newest first, with previews. */
+/**
+ * My stored notifications, newest first, with previews. Expired ones are invisible (RLS) and are
+ * deleted first (purge_my_expired_notifications); the actions behind them (follow requests,
+ * workout links, legal texts) stay reachable elsewhere.
+ */
 export async function fetchInbox(): Promise<InboxItem[]> {
   const userId = await requireUserId();
+  await supabase.rpc("purge_my_expired_notifications").then(
+    () => undefined,
+    () => undefined,
+  );
   const { data, error } = await supabase
     .from("notifications")
     .select(
@@ -132,12 +140,18 @@ export async function countUnreadInbox(): Promise<number> {
   return count ?? 0;
 }
 
-export async function markInboxRead(): Promise<void> {
+/**
+ * Marks the given notifications as seen (only what the list really showed: from then on they
+ * expire 7 days later). Already seen ones keep their time.
+ */
+export async function markInboxRead(ids: readonly string[]): Promise<void> {
+  if (ids.length === 0) return;
   const userId = await requireUserId();
   const { error } = await supabase
     .from("notifications")
     .update({ read_at: new Date().toISOString() })
     .eq("user_id", userId)
+    .in("id", [...ids])
     .is("read_at", null);
   if (error) throw error;
 }

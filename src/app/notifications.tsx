@@ -54,7 +54,7 @@ export default function NotificationsScreen() {
       setFeed(activity);
       setInbox(stored);
       setError(null);
-      await Promise.all([markNotificationsSeen(), markInboxRead()]);
+      await Promise.all([markNotificationsSeen(), markInboxRead(stored.map((item) => item.id))]);
     } catch {
       setError("Mitteilungen konnten nicht geladen werden.");
     }
@@ -69,7 +69,11 @@ export default function NotificationsScreen() {
     if (myId === undefined) return;
     return subscribeToInbox(myId, () => {
       fetchInbox()
-        .then(setInbox)
+        .then((items) => {
+          setInbox(items);
+          // Shown in the open list: seen from now on.
+          return markInboxRead(items.filter((item) => !item.read).map((item) => item.id));
+        })
         .catch(() => undefined);
     });
   }, [myId]);

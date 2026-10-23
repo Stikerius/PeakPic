@@ -68,6 +68,8 @@ TODO: Auftragsverarbeitungsverträge und Übermittlung ins Ausland (zum Beispiel
 
 - Solange dein Konto besteht. Storys sind nach 24 Stunden nicht mehr sichtbar.
 - Bestätigungen von Rechtstexten: solange dein Konto besteht.
+- Mitteilungen in der App (zum Beispiel Markierungen, Workout-Verlinkungen, Follower-Anfragen, übernommene Pläne, Hinweise auf geänderte Rechtstexte): Eine Mitteilung, die du noch nicht gesehen hast, wird 14 Tage nach ihrer Erstellung gelöscht. Hast du sie in der Liste gesehen, wird sie 7 Tage danach gelöscht, spätestens aber 14 Tage nach ihrer Erstellung. Was hinter einer Mitteilung steht, bleibt davon unberührt: offene Follower-Anfragen findest du weiter unter „Follower-Anfragen“, ausstehende Rechtstexte in den Einstellungen, Workout-Verlinkungen laufen nach ihrer eigenen Frist ab. Mitteilungen des Moderationsteams sind davon nicht betroffen.
+- Hinweise auf Aktivität (zum Beispiel Likes, Kommentare, neue Beiträge von Personen, denen du folgst) werden nicht gespeichert, sondern beim Öffnen aus den Inhalten der letzten 7 Tage zusammengestellt.
 
 TODO: Werden Story-Dateien nach 24 Stunden gelöscht? Ablauf festlegen.
 

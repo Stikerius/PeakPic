@@ -34,7 +34,10 @@
 --                   follow in either direction or public content, max 10 per post / story).
 --                   Tags create notifications and chat cards server-side (triggers).
 --   * notifications only the recipient reads them and marks them read; rows are created
---                   only by triggers / security definer functions, never by clients
+--                   only by triggers / security definer functions, never by clients. They expire
+--                   (notification_expires_at): unseen 14 days after creation, seen 7 days after
+--                   read_at, at the latest 14 days after creation; expired rows are invisible and
+--                   are deleted on the next insert for that person or by purge_my_expired_notifications()
 --   * workout links workout_shares: the post owner asks, only the tagged person accepts or
 --                   declines (until the end of the next day); only accepted links count
 --   * reposts       readable only if the viewer may read the original post AND the
@@ -511,6 +514,7 @@ create table if not exists public.notifications (
   created_at       timestamptz not null default now()
 );
 create index if not exists notifications_user_created_idx on public.notifications (user_id, created_at desc);
+-- (notifications_user_expiry_idx, for the expiry checks, is created after notification_expires_at.)
 
 -- Training plans: an ordered cycle of days (e.g. Push, Pull, Beine, Ruhetag), repeated, not
 -- tied to weekdays. Up to 10 per user, exactly one of them active (the one Home, the camera
@@ -1872,6 +1876,52 @@ begin
   delete from public.notifications
   where type = 'follow_request' and user_id = old.following_id and actor_id = old.follower_id;
   return null;
+end;
+$$;
+
+-- When a notification expires: unseen 14 days after it was created; seen 7 days after it was
+-- seen (read_at), but never later than 14 days after creation. Counted in hours (336 / 168), so
+-- daylight saving time doesn't move it. Same as lib/notificationExpiry.ts.
+create or replace function public.notification_expires_at(p_created_at timestamptz, p_read_at timestamptz)
+returns timestamptz
+language sql immutable set search_path = ''
+as $$
+  select case
+    when p_read_at is null then p_created_at + interval '336 hours'
+    else least(p_created_at + interval '336 hours', p_read_at + interval '168 hours')
+  end;
+$$;
+
+-- A new notification clears the recipient's expired ones (no background job needed). Rows that
+-- are inserted already back-dated (only the test script does that) don't trigger the cleanup.
+create or replace function public.on_notification_created()
+returns trigger
+language plpgsql security definer set search_path = ''
+as $$
+begin
+  if new.created_at >= now() - interval '1 minute' then
+    delete from public.notifications n
+    where n.user_id = new.user_id and public.notification_expires_at(n.created_at, n.read_at) <= now();
+  end if;
+  return null;
+end;
+$$;
+
+-- Deletes my expired notifications (called by the app when the notifications are loaded).
+create or replace function public.purge_my_expired_notifications()
+returns integer
+language plpgsql security definer set search_path = ''
+as $$
+declare
+  removed integer;
+begin
+  if auth.uid() is null or not public.is_account_active() then
+    return 0;
+  end if;
+  delete from public.notifications n
+  where n.user_id = auth.uid() and public.notification_expires_at(n.created_at, n.read_at) <= now();
+  get diagnostics removed = row_count;
+  return removed;
 end;
 $$;
 
@@ -4720,6 +4770,11 @@ create trigger follows_request_removed
   after delete on public.follows
   for each row execute function public.on_follow_request_closed();
 
+drop trigger if exists notifications_purge_expired on public.notifications;
+create trigger notifications_purge_expired
+  after insert on public.notifications
+  for each row execute function public.on_notification_created();
+
 drop trigger if exists notifications_guard_update on public.notifications;
 create trigger notifications_guard_update
   before update on public.notifications
@@ -4978,6 +5033,9 @@ begin
   end loop;
 end;
 $$;
+revoke all on function public.on_notification_created() from public, anon, authenticated;
+revoke all on function public.purge_my_expired_notifications() from public, anon;
+grant execute on function public.purge_my_expired_notifications() to authenticated;
 revoke all on function public.get_my_reports() from public, anon;
 grant execute on function public.get_my_reports() to authenticated;
 
@@ -5683,11 +5741,17 @@ drop policy if exists "moderation_notices: owner reads" on public.moderation_not
 create policy "moderation_notices: owner reads" on public.moderation_notices
   for select to authenticated using (user_id = (select auth.uid()));
 
--- notifications: only the recipient, only reading and marking as read.
+-- notifications: only the recipient, only reading and marking as read; expired ones are gone.
+create index if not exists notifications_user_expiry_idx
+  on public.notifications (user_id, public.notification_expires_at(created_at, read_at));
 drop policy if exists "notifications: recipient reads" on public.notifications;
 create policy "notifications: recipient reads" on public.notifications
   for select to authenticated
-  using (user_id = (select auth.uid()) and (actor_id is null or public.can_see_account(actor_id)));
+  using (
+    user_id = (select auth.uid())
+    and (actor_id is null or public.can_see_account(actor_id))
+    and public.notification_expires_at(created_at, read_at) > now()
+  );
 
 drop policy if exists "notifications: recipient marks read" on public.notifications;
 create policy "notifications: recipient marks read" on public.notifications
