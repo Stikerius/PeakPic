@@ -18,7 +18,6 @@ import {
   TextInput,
   View,
 } from "react-native";
-import { Gesture, GestureDetector } from "react-native-gesture-handler";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { MessageBubble } from "@/components/chat/message-bubble";
@@ -191,12 +190,6 @@ export default function ChatScreen() {
     { label: "Hintergrund ändern", onPress: () => void pickBackground() },
     ...(background !== null ? [{ label: "Standard wiederherstellen", onPress: resetBackground }] : []),
   ];
-
-  /** Long press on the empty background (messages have their own menu). */
-  const backgroundLongPress = Gesture.LongPress()
-    .minDuration(600)
-    .runOnJS(true)
-    .onStart(() => showActionSheet("Chat-Hintergrund", backgroundActions));
 
   function showChatMenu() {
     showActionSheet(partner?.displayName ?? "Chat", [
@@ -474,21 +467,25 @@ export default function ChatScreen() {
   const myReaction =
     pickerMessage !== undefined ? (pickerMessage.reactions.find((r) => r.userId === myId)?.emoji ?? null) : null;
 
+  const menuButton = (
+    <Pressable
+      onPress={showChatMenu}
+      accessibilityRole="button"
+      accessibilityLabel="Weitere Optionen, auch Chat-Hintergrund"
+      hitSlop={spacing.sm}
+      style={({ pressed }) => [styles.headerButton, pressed && styles.headerButtonPressed]}
+    >
+      <Ionicons name="ellipsis-horizontal" size={20} color={colors.textSecondary} />
+    </Pressable>
+  );
+
   return (
     <>
       <Stack.Screen
         options={{
-          headerRight: () => (
-            <Pressable
-              onPress={showChatMenu}
-              accessibilityRole="button"
-              accessibilityLabel="Weitere Optionen, auch Chat-Hintergrund"
-              hitSlop={spacing.sm}
-              style={styles.headerButton}
-            >
-              <Ionicons name="ellipsis-horizontal" size={22} color={colors.text} />
-            </Pressable>
-          ),
+          // Only the three dots: on iOS 26 the system would put header buttons into a glass capsule.
+          headerRight: () => menuButton,
+          unstable_headerRightItems: () => [{ type: "custom", element: menuButton, hidesSharedBackground: true }],
           headerTitle: () =>
             partner !== null ? (
               <Pressable
@@ -576,52 +573,48 @@ export default function ChatScreen() {
               )}
             </View>
           ) : (
-            <GestureDetector gesture={backgroundLongPress}>
-              <View style={styles.listArea} collapsable={false}>
-                <FlatList
-                  ref={listRef}
-                  inverted
-                  data={messages}
-                  keyExtractor={(m) => m.id}
-                  contentContainerStyle={styles.list}
-                  keyboardShouldPersistTaps="handled"
-                  renderItem={({ item }) => (
-                    <SwipeableMessage
-                      mine={item.senderId === myId}
-                      pinned={item.pinnedAt !== null}
-                      onReply={() => startReply(item)}
-                      onTogglePin={() => void togglePin(item)}
-                      onLongPress={(y) => openReactions(item, y)}
-                    >
-                      <MessageBubble
-                        message={item}
-                        mine={item.senderId === myId}
-                        myId={myId}
-                        partnerName={partnerName}
-                        highlighted={item.id === highlightedId}
-                        onPressQuote={(id) => void jumpTo(id)}
-                        onPressReaction={(emoji) => void react(item, emoji)}
-                      />
-                    </SwipeableMessage>
-                  )}
-                  onScrollToIndexFailed={({ index, averageItemLength }) => {
-                    // Rows have different heights: jump close, then retry once they are measured.
-                    listRef.current?.scrollToOffset({ offset: index * averageItemLength, animated: false });
-                    setTimeout(() => listRef.current?.scrollToIndex({ index, viewPosition: 0.5 }), 100);
-                  }}
-                  onEndReached={() => void loadOlder()}
-                  onEndReachedThreshold={0.3}
-                  ListFooterComponent={loadingOlder ? <ActivityIndicator color={colors.accent} /> : null}
-                  ListEmptyComponent={
-                    <View style={styles.empty}>
-                      <Text style={styles.emptyText}>
-                        {partnerAvailable ? `Schreib @${partner.username} die erste Nachricht.` : ""}
-                      </Text>
-                    </View>
-                  }
-                />
-              </View>
-            </GestureDetector>
+            <FlatList
+              ref={listRef}
+              inverted
+              data={messages}
+              keyExtractor={(m) => m.id}
+              contentContainerStyle={styles.list}
+              keyboardShouldPersistTaps="handled"
+              renderItem={({ item }) => (
+                <SwipeableMessage
+                  mine={item.senderId === myId}
+                  pinned={item.pinnedAt !== null}
+                  onReply={() => startReply(item)}
+                  onTogglePin={() => void togglePin(item)}
+                  onLongPress={(y) => openReactions(item, y)}
+                >
+                  <MessageBubble
+                    message={item}
+                    mine={item.senderId === myId}
+                    myId={myId}
+                    partnerName={partnerName}
+                    highlighted={item.id === highlightedId}
+                    onPressQuote={(id) => void jumpTo(id)}
+                    onPressReaction={(emoji) => void react(item, emoji)}
+                  />
+                </SwipeableMessage>
+              )}
+              onScrollToIndexFailed={({ index, averageItemLength }) => {
+                // Rows have different heights: jump close, then retry once they are measured.
+                listRef.current?.scrollToOffset({ offset: index * averageItemLength, animated: false });
+                setTimeout(() => listRef.current?.scrollToIndex({ index, viewPosition: 0.5 }), 100);
+              }}
+              onEndReached={() => void loadOlder()}
+              onEndReachedThreshold={0.3}
+              ListFooterComponent={loadingOlder ? <ActivityIndicator color={colors.accent} /> : null}
+              ListEmptyComponent={
+                <View style={styles.empty}>
+                  <Text style={styles.emptyText}>
+                    {partnerAvailable ? `Schreib @${partner.username} die erste Nachricht.` : ""}
+                  </Text>
+                </View>
+              }
+            />
           )}
 
           {messages !== null && error !== null && <Text style={styles.inlineError}>{error}</Text>}
@@ -728,9 +721,6 @@ const useStyles = makeStyles(({ colors }) =>
     backgroundVeil: {
       backgroundColor: colors.background,
       opacity: 0.6,
-    },
-    listArea: {
-      flex: 1,
     },
     centered: {
       flex: 1,
@@ -875,6 +865,9 @@ const useStyles = makeStyles(({ colors }) =>
       minHeight: 44,
       alignItems: "center",
       justifyContent: "center",
+    },
+    headerButtonPressed: {
+      opacity: 0.5,
     },
     blockedBar: {
       paddingHorizontal: spacing.md,
