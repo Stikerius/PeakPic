@@ -104,6 +104,16 @@ export default function ChatScreen() {
   const [pinned, setPinned] = useState<ChatMessage[]>([]);
   const [pinnedIndex, setPinnedIndex] = useState(0);
   const [picker, setPicker] = useState<{ message: ChatMessage; y: number } | null>(null);
+  // What to open once the long-press menu is fully closed (delete menu, report sheet). On iOS a
+  // menu opened while the picker is still fading out never appears and freezes the screen.
+  const [afterPicker, setAfterPicker] = useState<(() => void) | null>(null);
+
+  /** Closes the long-press menu, then runs `next`. */
+  function closePickerThen(next: () => void) {
+    setPicker(null);
+    if (Platform.OS === "ios") setAfterPicker(() => next);
+    else next();
+  }
   const [jumpTarget, setJumpTarget] = useState<string | null>(null);
   const [highlightedId, setHighlightedId] = useState<string | null>(null);
 
@@ -288,15 +298,19 @@ export default function ChatScreen() {
 
   /** "Löschen" from the long-press menu: for me, and for everyone on my own messages. */
   function chooseDelete(message: ChatMessage) {
-    setPicker(null);
     const options = messageDeleteOptions(message, myId);
-    if (!options.forMe) return;
-    showActionSheet("Nachricht löschen", [
-      { label: "Für mich löschen", destructive: true, onPress: () => void deleteForMe(message) },
-      ...(options.forAll
-        ? [{ label: "Für alle löschen", destructive: true, onPress: () => confirmDeleteForAll(message) }]
-        : []),
-    ]);
+    if (!options.forMe) {
+      setPicker(null);
+      return;
+    }
+    closePickerThen(() =>
+      showActionSheet("Nachricht löschen", [
+        { label: "Für mich löschen", destructive: true, onPress: () => void deleteForMe(message) },
+        ...(options.forAll
+          ? [{ label: "Für alle löschen", destructive: true, onPress: () => confirmDeleteForAll(message) }]
+          : []),
+      ]),
+    );
   }
 
   /** Hidden at once; back again if the server refuses. */
@@ -580,6 +594,11 @@ export default function ChatScreen() {
           if (pickerMessage !== undefined) void react(pickerMessage, emoji);
         }}
         onClose={() => setPicker(null)}
+        onDismissed={() => {
+          const next = afterPicker;
+          setAfterPicker(null);
+          next?.();
+        }}
         onDelete={
           pickerMessage !== undefined && messageDeleteOptions(pickerMessage, myId).forMe
             ? () => chooseDelete(pickerMessage)
@@ -589,8 +608,7 @@ export default function ChatScreen() {
           pickerMessage !== undefined && pickerMessage.senderId !== myId
             ? () => {
                 const reported = pickerMessage;
-                setPicker(null);
-                openReport({ targetType: "message", targetId: reported.id });
+                closePickerThen(() => openReport({ targetType: "message", targetId: reported.id }));
               }
             : undefined
         }

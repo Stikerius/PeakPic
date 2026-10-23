@@ -21,6 +21,8 @@ type ReactionPickerProps = {
   onReport?: () => void;
   /** "Löschen" below the reactions (for me, or for everyone on my own messages). */
   onDelete?: () => void;
+  /** Called once the picker is fully gone (iOS can't open another menu while it is closing). */
+  onDismissed?: () => void;
 };
 
 function EmojiButton({ emoji, selected, onPick }: { emoji: string; selected: boolean; onPick: (emoji: string) => void }) {
@@ -42,7 +44,7 @@ function EmojiButton({ emoji, selected, onPick }: { emoji: string; selected: boo
  * Bar with quick reactions above the pressed message; "…" opens a grid with more emojis.
  * Tapping any emoji reacts right away.
  */
-export function ReactionPicker({ anchorY, current, onPick, onClose, onReport, onDelete }: ReactionPickerProps) {
+export function ReactionPicker({ anchorY, current, onPick, onClose, onReport, onDelete, onDismissed }: ReactionPickerProps) {
   const { colors } = useTheme();
   const styles = useStyles();
   const insets = useSafeAreaInsets();
@@ -62,7 +64,13 @@ export function ReactionPicker({ anchorY, current, onPick, onClose, onReport, on
         );
 
   return (
-    <Modal visible={anchorY !== null} transparent animationType="fade" onRequestClose={onClose}>
+    <Modal
+      visible={anchorY !== null}
+      transparent
+      animationType="fade"
+      onRequestClose={onClose}
+      onDismiss={onDismissed}
+    >
       <Pressable style={styles.backdrop} onPress={onClose} accessibilityLabel="Reaktion abbrechen" />
       {showAll ? (
         <View style={[styles.sheet, { height: height * 0.5, paddingBottom: insets.bottom }]}>
