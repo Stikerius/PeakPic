@@ -6220,6 +6220,8 @@ insert into public.usage_event_types (name, area, source) values
   ('screen_chat_new', 'chat', 'client'),
   ('message_deleted_for_me', 'chat', 'client'),
   ('message_deleted_for_all', 'chat', 'client'),
+  ('chat_background_changed', 'chat', 'client'),
+  ('chat_background_reset', 'chat', 'client'),
   ('screen_profile', 'profile', 'client'),
   ('screen_user_profile', 'profile', 'client'),
   ('screen_follows', 'profile', 'client'),

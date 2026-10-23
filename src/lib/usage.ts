@@ -62,6 +62,8 @@ export type UsageEvent =
   | "post_like_double_tap"
   | "message_deleted_for_me"
   | "message_deleted_for_all"
+  | "chat_background_changed"
+  | "chat_background_reset"
   | "screen_search"
   | "screen_hashtag"
   | "screen_settings"

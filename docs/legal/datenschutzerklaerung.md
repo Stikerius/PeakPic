@@ -38,6 +38,8 @@ TODO: Anzahl der Kontextnachrichten und Aufbewahrungsdauer eintragen.
 
 **E-Mails:** für die Anmeldung (Bestätigung, Passwort zurücksetzen) und gegebenenfalls eine Erinnerung, geänderte Rechtstexte zu bestätigen. Für Erinnerungen nutzen wir {{EMAIL_ANBIETER}}.
 
+**Chat-Hintergründe:** Wählst du für einen Chat ein eigenes Hintergrundbild, bleibt es auf deinem Gerät. Es wird nicht hochgeladen und ist für niemanden ausser dir sichtbar, auch nicht für die anderen im Chat. Die App verkleinert das Bild und speichert es neu, dabei werden Bild-Metadaten wie der Aufnahmeort entfernt. „Standard wiederherstellen“ löscht es; beim Löschen deines Kontos entfernt die App alle deine Hintergrundbilder vom Gerät. Beim Abmelden bleibt die Auswahl auf dem Gerät erhalten.
+
 **Kamera und Fotos:** Die App greift nur auf Kamera oder Fotomediathek zu, wenn du ein Foto aufnimmst oder auswählst, und nur mit deiner Erlaubnis. Fotos werden vor dem Hochladen neu als JPEG gespeichert.
 
 TODO: prüfen und bestätigen, dass dabei Standortdaten (EXIF) entfernt werden.

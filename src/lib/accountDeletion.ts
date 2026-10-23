@@ -5,6 +5,7 @@ import { Image } from "expo-image";
 
 import { SUPPORT_EMAIL } from "@/constants/app";
 import { authErrorMessage } from "@/lib/auth";
+import { deleteAllChatBackgrounds } from "@/lib/chatBackground";
 import { supabase } from "@/lib/supabase";
 
 export type DeletionResult =
@@ -85,6 +86,9 @@ function deleteDirectoryContents(directory: Directory): void {
  */
 export async function clearLocalData(): Promise<void> {
   await supabase.removeAllChannels().catch(() => undefined);
+  // Chat backgrounds of this person (other accounts on the device keep theirs).
+  const userId = (await supabase.auth.getSession().catch(() => null))?.data.session?.user.id;
+  if (userId !== undefined) deleteAllChatBackgrounds(userId);
   try {
     const photos = new Directory(Paths.document, "photos");
     if (photos.exists) photos.delete();

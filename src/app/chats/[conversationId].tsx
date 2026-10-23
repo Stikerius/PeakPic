@@ -1,4 +1,6 @@
 import Ionicons from "@expo/vector-icons/Ionicons";
+import { Image } from "expo-image";
+import * as ImagePicker from "expo-image-picker";
 import { router, Stack, useLocalSearchParams } from "expo-router";
 import { useHeaderHeight } from "expo-router/react-navigation";
 import { useEffect, useRef, useState } from "react";
@@ -8,6 +10,7 @@ import {
   FlatList,
   Keyboard,
   KeyboardAvoidingView,
+  Linking,
   Platform,
   Pressable,
   StyleSheet,
@@ -15,6 +18,7 @@ import {
   TextInput,
   View,
 } from "react-native";
+import { Gesture, GestureDetector } from "react-native-gesture-handler";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { MessageBubble } from "@/components/chat/message-bubble";
@@ -27,6 +31,12 @@ import { fontSize, radius, spacing, typography } from "@/constants/theme";
 import { useBlockUser } from "@/hooks/use-block-user";
 import { showActionSheet } from "@/lib/actionSheet";
 import { isChatBlocked } from "@/lib/blockRepo";
+import {
+  ChatBackgroundError,
+  getChatBackgroundUri,
+  resetChatBackground,
+  saveChatBackground,
+} from "@/lib/chatBackground";
 import { messageDeleteOptions, restoreMessage, withoutMessage } from "@/lib/chatDelete";
 import {
   MESSAGE_MAX_LENGTH,
@@ -133,11 +143,70 @@ export default function ChatScreen() {
     };
   }, [conversationId, blockCheck]);
 
+  // My own background for this chat (only on this device, only for me); null: the normal one.
+  const [background, setBackground] = useState<string | null>(() =>
+    myId !== undefined ? getChatBackgroundUri(myId, conversationId) : null,
+  );
+  // Same file path after a change: a new key makes the image load the new picture.
+  const [backgroundVersion, setBackgroundVersion] = useState(0);
+
+  async function pickBackground() {
+    if (myId === undefined) return;
+    const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
+    if (!permission.granted && permission.accessPrivileges !== "limited") {
+      Alert.alert(
+        "Kein Zugriff auf deine Fotos",
+        "Erlaube PeakPic in den Einstellungen den Zugriff auf deine Fotos, um ein Hintergrundbild zu wählen.",
+        [
+          { text: "Abbrechen", style: "cancel" },
+          { text: "Einstellungen öffnen", onPress: () => void Linking.openSettings() },
+        ],
+      );
+      return;
+    }
+    const result = await ImagePicker.launchImageLibraryAsync({ mediaTypes: ["images"], allowsEditing: false, quality: 1, exif: false });
+    const asset = result.assets?.[0];
+    if (result.canceled || asset === undefined) return;
+    try {
+      await saveChatBackground(myId, conversationId, asset.uri);
+      setBackground(getChatBackgroundUri(myId, conversationId));
+      setBackgroundVersion((v) => v + 1);
+      track("chat_background_changed");
+    } catch (saveError) {
+      Alert.alert(
+        "Hintergrund nicht geändert",
+        saveError instanceof ChatBackgroundError ? saveError.message : "Das Bild konnte nicht als Hintergrund gespeichert werden.",
+      );
+    }
+  }
+
+  function resetBackground() {
+    if (myId === undefined) return;
+    resetChatBackground(myId, conversationId);
+    setBackground(null);
+    track("chat_background_reset");
+  }
+
+  const backgroundActions = [
+    { label: "Hintergrund ändern", onPress: () => void pickBackground() },
+    ...(background !== null ? [{ label: "Standard wiederherstellen", onPress: resetBackground }] : []),
+  ];
+
+  /** Long press on the empty background (messages have their own menu). */
+  const backgroundLongPress = Gesture.LongPress()
+    .minDuration(600)
+    .runOnJS(true)
+    .onStart(() => showActionSheet("Chat-Hintergrund", backgroundActions));
+
   function showChatMenu() {
-    if (partner === null || !partnerAvailable) return;
-    showActionSheet(partner.displayName, [
-      { label: "Profil melden", destructive: true, onPress: () => openReport({ targetType: "profile", targetId: partner.id }) },
-      { label: "Blockieren", destructive: true, onPress: () => blockUser(partner, () => setBlockCheck((v) => v + 1)) },
+    showActionSheet(partner?.displayName ?? "Chat", [
+      ...backgroundActions,
+      ...(partner !== null && partnerAvailable
+        ? [
+            { label: "Profil melden", destructive: true, onPress: () => openReport({ targetType: "profile", targetId: partner.id }) },
+            { label: "Blockieren", destructive: true, onPress: () => blockUser(partner, () => setBlockCheck((v) => v + 1)) },
+          ]
+        : []),
     ]);
   }
 
@@ -409,18 +478,17 @@ export default function ChatScreen() {
     <>
       <Stack.Screen
         options={{
-          headerRight: () =>
-            partnerAvailable ? (
-              <Pressable
-                onPress={showChatMenu}
-                accessibilityRole="button"
-                accessibilityLabel="Weitere Optionen"
-                hitSlop={spacing.sm}
-                style={styles.headerButton}
-              >
-                <Ionicons name="ellipsis-horizontal" size={22} color={colors.text} />
-              </Pressable>
-            ) : null,
+          headerRight: () => (
+            <Pressable
+              onPress={showChatMenu}
+              accessibilityRole="button"
+              accessibilityLabel="Weitere Optionen, auch Chat-Hintergrund"
+              hitSlop={spacing.sm}
+              style={styles.headerButton}
+            >
+              <Ionicons name="ellipsis-horizontal" size={22} color={colors.text} />
+            </Pressable>
+          ),
           headerTitle: () =>
             partner !== null ? (
               <Pressable
@@ -445,147 +513,172 @@ export default function ChatScreen() {
             ) : null,
         }}
       />
-      <KeyboardAvoidingView
-        style={styles.screen}
-        behavior={Platform.OS === "ios" ? "padding" : undefined}
-        keyboardVerticalOffset={headerHeight}
-      >
-        {currentPinned !== undefined && (
-          <View style={styles.pinnedBanner}>
-            <Pressable
-              onPress={openPinned}
-              accessibilityRole="button"
-              accessibilityLabel="Zur angehefteten Nachricht springen"
-              style={styles.pinnedOpen}
-            >
-              <Ionicons name="pin" size={18} color={colors.accent} />
-              <View style={styles.pinnedTextBox}>
-                <Text style={styles.pinnedLabel}>
-                  Angeheftet{pinned.length > 1 ? ` · ${(pinnedIndex % pinned.length) + 1}/${pinned.length}` : ""}
-                </Text>
-                <Text style={styles.pinnedText} numberOfLines={1}>
-                  {messagePreview(currentPinned)}
-                </Text>
-              </View>
-            </Pressable>
-            <Pressable
-              onPress={() => void togglePin(currentPinned)}
-              accessibilityRole="button"
-              accessibilityLabel="Nachricht lösen"
-              hitSlop={spacing.sm}
-            >
-              <Ionicons name="close" size={20} color={colors.textSecondary} />
-            </Pressable>
-          </View>
-        )}
-
-        {messages === null ? (
-          <View style={styles.centered}>
-            {error !== null ? (
-              <Text style={styles.error}>{error}</Text>
-            ) : (
-              <ActivityIndicator color={colors.accent} />
-            )}
-          </View>
-        ) : (
-          <FlatList
-            ref={listRef}
-            inverted
-            data={messages}
-            keyExtractor={(m) => m.id}
-            contentContainerStyle={styles.list}
-            keyboardShouldPersistTaps="handled"
-            renderItem={({ item }) => (
-              <SwipeableMessage
-                mine={item.senderId === myId}
-                pinned={item.pinnedAt !== null}
-                onReply={() => startReply(item)}
-                onTogglePin={() => void togglePin(item)}
-                onLongPress={(y) => openReactions(item, y)}
-              >
-                <MessageBubble
-                  message={item}
-                  mine={item.senderId === myId}
-                  myId={myId}
-                  partnerName={partnerName}
-                  highlighted={item.id === highlightedId}
-                  onPressQuote={(id) => void jumpTo(id)}
-                  onPressReaction={(emoji) => void react(item, emoji)}
-                />
-              </SwipeableMessage>
-            )}
-            onScrollToIndexFailed={({ index, averageItemLength }) => {
-              // Rows have different heights: jump close, then retry once they are measured.
-              listRef.current?.scrollToOffset({ offset: index * averageItemLength, animated: false });
-              setTimeout(() => listRef.current?.scrollToIndex({ index, viewPosition: 0.5 }), 100);
-            }}
-            onEndReached={() => void loadOlder()}
-            onEndReachedThreshold={0.3}
-            ListFooterComponent={loadingOlder ? <ActivityIndicator color={colors.accent} /> : null}
-            ListEmptyComponent={
-              <View style={styles.empty}>
-                <Text style={styles.emptyText}>
-                  {partnerAvailable ? `Schreib @${partner.username} die erste Nachricht.` : ""}
-                </Text>
-              </View>
-            }
-          />
-        )}
-
-        {messages !== null && error !== null && <Text style={styles.inlineError}>{error}</Text>}
-
-        {replyTo !== null && (
-          <View style={styles.replyBanner}>
-            <View style={styles.replyAccent} />
-            <View style={styles.replyTextBox}>
-              <Text style={styles.replyLabel}>
-                Antwort an @{replyTo.senderId === myId ? (myUsername ?? "") : partnerName}
-              </Text>
-              <Text style={styles.replyText} numberOfLines={1}>
-                {messagePreview(replyTo)}
-              </Text>
-            </View>
-            <Pressable
-              onPress={() => setReplyTo(null)}
-              accessibilityRole="button"
-              accessibilityLabel="Antworten abbrechen"
-              hitSlop={spacing.sm}
-            >
-              <Ionicons name="close" size={20} color={colors.textSecondary} />
-            </Pressable>
-          </View>
-        )}
-
-        {blocked ? (
-          <View style={[styles.blockedBar, { paddingBottom: Math.max(insets.bottom, spacing.sm) }]}>
-            <Text style={styles.blockedText}>In diesem Chat können keine Nachrichten mehr gesendet werden.</Text>
-          </View>
-        ) : (
-          <View style={[styles.inputBar, { paddingBottom: Math.max(insets.bottom, spacing.sm) }]}>
-            <TaggedTextInput
-              ref={inputRef}
-              value={draft}
-              onChangeText={setDraft}
-              containerStyle={styles.inputBox}
-              placeholder={replyTo !== null ? "Antwort…" : "Nachricht…"}
-              placeholderTextColor={colors.textSecondary}
-              maxLength={MESSAGE_MAX_LENGTH}
-              multiline
-              style={styles.input}
-              accessibilityLabel="Nachricht"
+      <View style={styles.root}>
+        {background !== null && (
+          // Behind everything, outside the keyboard area: it doesn't move with the keyboard or the list.
+          <View style={StyleSheet.absoluteFill} pointerEvents="none">
+            <Image
+              key={backgroundVersion}
+              source={{ uri: background }}
+              style={StyleSheet.absoluteFill}
+              contentFit="cover"
+              cachePolicy="none"
+              accessible={false}
+              onError={() => {
+                // Missing or broken file: back to the normal background, no crash.
+                if (myId !== undefined) resetChatBackground(myId, conversationId);
+                setBackground(null);
+              }}
             />
-            <Pressable
-              onPress={() => void send()}
-              disabled={!canSend}
-              accessibilityRole="button"
-              accessibilityLabel="Senden"
-              style={[styles.sendButton, !canSend && styles.sendDisabled]}
-            >
-              <Ionicons name="arrow-up" size={20} color={colors.onAccent} />
-            </Pressable>
+            <View style={[StyleSheet.absoluteFill, styles.backgroundVeil]} />
           </View>
         )}
-      </KeyboardAvoidingView>
+        <KeyboardAvoidingView
+          style={[styles.screen, background !== null && styles.screenOnPicture]}
+          behavior={Platform.OS === "ios" ? "padding" : undefined}
+          keyboardVerticalOffset={headerHeight}
+        >
+          {currentPinned !== undefined && (
+            <View style={styles.pinnedBanner}>
+              <Pressable
+                onPress={openPinned}
+                accessibilityRole="button"
+                accessibilityLabel="Zur angehefteten Nachricht springen"
+                style={styles.pinnedOpen}
+              >
+                <Ionicons name="pin" size={18} color={colors.accent} />
+                <View style={styles.pinnedTextBox}>
+                  <Text style={styles.pinnedLabel}>
+                    Angeheftet{pinned.length > 1 ? ` · ${(pinnedIndex % pinned.length) + 1}/${pinned.length}` : ""}
+                  </Text>
+                  <Text style={styles.pinnedText} numberOfLines={1}>
+                    {messagePreview(currentPinned)}
+                  </Text>
+                </View>
+              </Pressable>
+              <Pressable
+                onPress={() => void togglePin(currentPinned)}
+                accessibilityRole="button"
+                accessibilityLabel="Nachricht lösen"
+                hitSlop={spacing.sm}
+              >
+                <Ionicons name="close" size={20} color={colors.textSecondary} />
+              </Pressable>
+            </View>
+          )}
+
+          {messages === null ? (
+            <View style={styles.centered}>
+              {error !== null ? (
+                <Text style={styles.error}>{error}</Text>
+              ) : (
+                <ActivityIndicator color={colors.accent} />
+              )}
+            </View>
+          ) : (
+            <GestureDetector gesture={backgroundLongPress}>
+              <View style={styles.listArea} collapsable={false}>
+                <FlatList
+                  ref={listRef}
+                  inverted
+                  data={messages}
+                  keyExtractor={(m) => m.id}
+                  contentContainerStyle={styles.list}
+                  keyboardShouldPersistTaps="handled"
+                  renderItem={({ item }) => (
+                    <SwipeableMessage
+                      mine={item.senderId === myId}
+                      pinned={item.pinnedAt !== null}
+                      onReply={() => startReply(item)}
+                      onTogglePin={() => void togglePin(item)}
+                      onLongPress={(y) => openReactions(item, y)}
+                    >
+                      <MessageBubble
+                        message={item}
+                        mine={item.senderId === myId}
+                        myId={myId}
+                        partnerName={partnerName}
+                        highlighted={item.id === highlightedId}
+                        onPressQuote={(id) => void jumpTo(id)}
+                        onPressReaction={(emoji) => void react(item, emoji)}
+                      />
+                    </SwipeableMessage>
+                  )}
+                  onScrollToIndexFailed={({ index, averageItemLength }) => {
+                    // Rows have different heights: jump close, then retry once they are measured.
+                    listRef.current?.scrollToOffset({ offset: index * averageItemLength, animated: false });
+                    setTimeout(() => listRef.current?.scrollToIndex({ index, viewPosition: 0.5 }), 100);
+                  }}
+                  onEndReached={() => void loadOlder()}
+                  onEndReachedThreshold={0.3}
+                  ListFooterComponent={loadingOlder ? <ActivityIndicator color={colors.accent} /> : null}
+                  ListEmptyComponent={
+                    <View style={styles.empty}>
+                      <Text style={styles.emptyText}>
+                        {partnerAvailable ? `Schreib @${partner.username} die erste Nachricht.` : ""}
+                      </Text>
+                    </View>
+                  }
+                />
+              </View>
+            </GestureDetector>
+          )}
+
+          {messages !== null && error !== null && <Text style={styles.inlineError}>{error}</Text>}
+
+          {replyTo !== null && (
+            <View style={styles.replyBanner}>
+              <View style={styles.replyAccent} />
+              <View style={styles.replyTextBox}>
+                <Text style={styles.replyLabel}>
+                  Antwort an @{replyTo.senderId === myId ? (myUsername ?? "") : partnerName}
+                </Text>
+                <Text style={styles.replyText} numberOfLines={1}>
+                  {messagePreview(replyTo)}
+                </Text>
+              </View>
+              <Pressable
+                onPress={() => setReplyTo(null)}
+                accessibilityRole="button"
+                accessibilityLabel="Antworten abbrechen"
+                hitSlop={spacing.sm}
+              >
+                <Ionicons name="close" size={20} color={colors.textSecondary} />
+              </Pressable>
+            </View>
+          )}
+
+          {blocked ? (
+            <View style={[styles.blockedBar, { paddingBottom: Math.max(insets.bottom, spacing.sm) }]}>
+              <Text style={styles.blockedText}>In diesem Chat können keine Nachrichten mehr gesendet werden.</Text>
+            </View>
+          ) : (
+            <View style={[styles.inputBar, { paddingBottom: Math.max(insets.bottom, spacing.sm) }]}>
+              <TaggedTextInput
+                ref={inputRef}
+                value={draft}
+                onChangeText={setDraft}
+                containerStyle={styles.inputBox}
+                placeholder={replyTo !== null ? "Antwort…" : "Nachricht…"}
+                placeholderTextColor={colors.textSecondary}
+                maxLength={MESSAGE_MAX_LENGTH}
+                multiline
+                style={styles.input}
+                accessibilityLabel="Nachricht"
+              />
+              <Pressable
+                onPress={() => void send()}
+                disabled={!canSend}
+                accessibilityRole="button"
+                accessibilityLabel="Senden"
+                style={[styles.sendButton, !canSend && styles.sendDisabled]}
+              >
+                <Ionicons name="arrow-up" size={20} color={colors.onAccent} />
+              </Pressable>
+            </View>
+          )}
+        </KeyboardAvoidingView>
+      </View>
 
       <ReactionPicker
         anchorY={picker?.y ?? null}
@@ -619,9 +712,25 @@ export default function ChatScreen() {
 
 const useStyles = makeStyles(({ colors }) =>
   StyleSheet.create({
+    root: {
+      flex: 1,
+      backgroundColor: colors.background,
+    },
     screen: {
       flex: 1,
       backgroundColor: colors.background,
+    },
+    screenOnPicture: {
+      backgroundColor: "transparent",
+    },
+    // Calms the picture in the theme's own background colour, so the date, hints and bubbles stay
+    // readable in light and dark mode.
+    backgroundVeil: {
+      backgroundColor: colors.background,
+      opacity: 0.6,
+    },
+    listArea: {
+      flex: 1,
     },
     centered: {
       flex: 1,
