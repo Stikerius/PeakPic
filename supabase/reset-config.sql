@@ -11,9 +11,8 @@
 
 with wanted (username) as (
   values
-    ('admin'),
-    ('ivankk'),
-    ('testfit')
+    ('BENUTZERNAME_HAUPTKONTO'),
+    ('BENUTZERNAME_TESTKONTO')
 ),
 added as (
   insert into public.protected_accounts (user_id, note)

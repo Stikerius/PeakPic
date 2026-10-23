@@ -30,7 +30,7 @@
 begin;
 
 -- >>> Username of the test account (without @):
-select set_config('peakpic.seed_username', 'testfit', false);
+select set_config('peakpic.seed_username', 'BENUTZERNAME_TESTKONTO', false);
 -- >>> 'true' = only delete the earlier test data of this account, create nothing:
 select set_config('peakpic.seed_remove_only', 'false', true);
 
