@@ -35,7 +35,7 @@ export default function FeedScreen() {
   useTrackScreen("screen_feed");
   const { colors } = useTheme();
   const styles = useStyles();
-  const { posts, status, error, hasMore, refresh, loadMore, toggleLike, dismissError } = useFeed();
+  const { posts, status, error, hasMore, refresh, loadMore, toggleLike, likeByDoubleTap, dismissError } = useFeed();
   const listRef = useRef<FlatList<FeedPost>>(null);
   const navigation = useNavigation<TabScreenNavigation>();
   const openProfile = useOpenProfile();
@@ -78,6 +78,7 @@ export default function FeedScreen() {
           <PostCard
             post={item}
             onToggleLike={(id) => void toggleLike(id)}
+            onDoubleTapLike={likeByDoubleTap}
             onOpenComments={(id) =>
               router.push({ pathname: "/comments/[postId]", params: { postId: id } })
             }

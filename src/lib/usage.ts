@@ -59,6 +59,7 @@ export type UsageEvent =
   | "profile_tab_stats"
   | "profile_tab_reposts"
   | "profile_tab_tagged"
+  | "post_like_double_tap"
   | "screen_search"
   | "screen_hashtag"
   | "screen_settings"

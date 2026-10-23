@@ -6039,6 +6039,7 @@ insert into public.usage_event_types (name, area, source) values
   ('screen_feed', 'feed', 'client'),
   ('screen_post', 'feed', 'client'),
   ('screen_comments', 'feed', 'client'),
+  ('post_like_double_tap', 'feed', 'client'),
   ('screen_repost', 'feed', 'client'),
   ('screen_share', 'feed', 'client'),
   ('screen_post_links', 'feed', 'client'),

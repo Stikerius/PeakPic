@@ -11,8 +11,10 @@ import {
   type NativeSyntheticEvent,
 } from "react-native";
 
+import { DoubleTapLike } from "@/components/double-tap-like";
 import { MentionSpots } from "@/components/mention-spots";
 import { onPhoto, radius, spacing } from "@/constants/theme";
+import type { DoubleTapResult } from "@/lib/doubleTapLike";
 import { makeStyles, useTheme } from "@/lib/theme";
 import type { PhotoMention } from "@/types/social";
 
@@ -30,6 +32,11 @@ type PhotoCarouselProps = {
   /** @mentions drawn on each photo; tapping one calls onPressMention with the user id. */
   mentions?: PhotoMention[][];
   onPressMention?: (userId: string) => void;
+  /**
+   * Double tap on a photo likes the post (never unlikes); `liked` is what the screen shows. Also
+   * offered to VoiceOver as the action "Gefällt mir" (without the animation).
+   */
+  like?: { liked: boolean; onDoubleTap: () => DoubleTapResult };
 };
 
 /** 4:5 photos, swipeable when there are several, with page dots. */
@@ -40,6 +47,7 @@ export function PhotoCarousel({
   onPressPhoto,
   mentions,
   onPressMention,
+  like,
 }: PhotoCarouselProps) {
   const { colors } = useTheme();
   const styles = useStyles();
@@ -62,8 +70,10 @@ export function PhotoCarousel({
     );
   }
 
-  return (
-    <View style={styles.photo} onLayout={onLayout}>
+  // With a double tap on the photo, a single tap waits for it (only when it does something).
+  const tapInGesture = like !== undefined;
+  const content = (
+    <>
       {width > 0 && (
         <FlatList
           data={photoUrls}
@@ -75,10 +85,14 @@ export function PhotoCarousel({
           onMomentumScrollEnd={onScrollEnd}
           renderItem={({ item, index }) => (
             <Pressable
-              onPress={onPressPhoto !== undefined ? () => onPressPhoto(index) : undefined}
-              disabled={onPressPhoto === undefined}
+              onPress={onPressPhoto !== undefined && !tapInGesture ? () => onPressPhoto(index) : undefined}
+              disabled={onPressPhoto === undefined || tapInGesture}
               accessibilityRole={onPressPhoto !== undefined ? "imagebutton" : "image"}
               accessibilityHint={onPressPhoto !== undefined ? "Tippen zum Vergrössern" : undefined}
+              accessibilityActions={like !== undefined ? [{ name: "like", label: "Gefällt mir" }] : undefined}
+              onAccessibilityAction={(event) => {
+                if (event.nativeEvent.actionName === "like") like?.onDoubleTap();
+              }}
             >
               <Image
                 source={{ uri: item }}
@@ -113,7 +127,26 @@ export function PhotoCarousel({
           </View>
         </>
       )}
-    </View>
+    </>
+  );
+
+  if (like === undefined) {
+    return (
+      <View style={styles.photo} onLayout={onLayout}>
+        {content}
+      </View>
+    );
+  }
+  return (
+    <DoubleTapLike
+      liked={like.liked}
+      onDoubleTap={like.onDoubleTap}
+      onSingleTap={onPressPhoto !== undefined ? () => onPressPhoto(page) : undefined}
+      style={styles.photo}
+      onLayout={onLayout}
+    >
+      {content}
+    </DoubleTapLike>
   );
 }
 

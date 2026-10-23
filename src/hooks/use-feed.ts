@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 
+import { doubleTapLike, type DoubleTapResult } from "@/lib/doubleTapLike";
 import { onAppEvent } from "@/lib/events";
 import { fetchFeedPage, setPostLiked } from "@/lib/feedRepo";
 import type { FeedPost } from "@/types/social";
@@ -77,6 +78,27 @@ export function useFeed() {
     }
   }
 
+  /** Double tap on a photo: likes, never unlikes; shares the in-flight set with the heart. */
+  function likeByDoubleTap(postId: string): DoubleTapResult {
+    const post = posts.find((p) => p.id === postId);
+    if (post === undefined) return "already";
+    return doubleTapLike({
+      postId,
+      liked: post.likedByMe,
+      pending: pendingLikes.current,
+      apply: (value) =>
+        setPosts((prev) =>
+          prev.map((p) =>
+            p.id === postId && p.likedByMe !== value
+              ? { ...p, likedByMe: value, likeCount: Math.max(0, p.likeCount + (value ? 1 : -1)) }
+              : p,
+          ),
+        ),
+      send: (id) => setPostLiked(id, true),
+      onFailed: () => setError("Like konnte nicht gespeichert werden."),
+    });
+  }
+
   useEffect(() => {
     void loadFirstPage("loading");
     const unsubscribers = [
@@ -103,6 +125,7 @@ export function useFeed() {
     refresh: () => loadFirstPage("refreshing"),
     loadMore,
     toggleLike,
+    likeByDoubleTap,
     dismissError: () => setError(null),
   };
 }

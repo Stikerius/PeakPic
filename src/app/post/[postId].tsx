@@ -1,6 +1,6 @@
 import Ionicons from "@expo/vector-icons/Ionicons";
 import { router, useLocalSearchParams } from "expo-router";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { ActivityIndicator, Alert, ScrollView, StyleSheet, Text, View } from "react-native";
 
 import { PostCard } from "@/components/feed/post-card";
@@ -12,6 +12,7 @@ import { useOtherPostActions } from "@/hooks/use-other-post-actions";
 import { usePostActions } from "@/hooks/use-post-actions";
 import { useSession } from "@/lib/session";
 import { onAppEvent } from "@/lib/events";
+import { doubleTapLike, type DoubleTapResult } from "@/lib/doubleTapLike";
 import { describeError } from "@/lib/errors";
 import { fetchPost, setPostLiked } from "@/lib/feedRepo";
 import { getMyRepost } from "@/lib/repostRepo";
@@ -34,6 +35,8 @@ function PostScreen() {
   const { postId } = useLocalSearchParams<{ postId: string }>();
   const [state, setState] = useState<LoadState>({ status: "loading" });
   const [liking, setLiking] = useState(false);
+  // A like from a double tap that is still on its way (no second request, no toggle meanwhile).
+  const pendingLike = useRef(new Set<string>());
   const openProfile = useOpenProfile();
   const myId = useSession().session?.user.id;
   const showOtherPostActions = useOtherPostActions();
@@ -107,7 +110,7 @@ function PostScreen() {
   }, [postId, version]);
 
   async function toggleLike() {
-    if (state.status !== "ready" || liking) return;
+    if (state.status !== "ready" || liking || pendingLike.current.size > 0) return;
     const post = state.post;
     const liked = !post.likedByMe;
     const apply = (value: boolean) =>
@@ -124,6 +127,28 @@ function PostScreen() {
     } finally {
       setLiking(false);
     }
+  }
+
+  /** Double tap on the photo: likes, never unlikes. */
+  function likeByDoubleTap(): DoubleTapResult {
+    if (state.status !== "ready" || liking) return "already";
+    const post = state.post;
+    return doubleTapLike({
+      postId: post.id,
+      liked: post.likedByMe,
+      pending: pendingLike.current,
+      apply: (value) =>
+        setState((current) =>
+          current.status === "ready" && current.post.likedByMe !== value
+            ? {
+                status: "ready",
+                post: { ...current.post, likedByMe: value, likeCount: Math.max(0, current.post.likeCount + (value ? 1 : -1)) },
+              }
+            : current,
+        ),
+      send: (id) => setPostLiked(id, true),
+      onFailed: () => Alert.alert("Like konnte nicht gespeichert werden.", "Bitte prüfe deine Verbindung."),
+    });
   }
 
   if (state.status !== "ready") {
@@ -176,6 +201,7 @@ function PostScreen() {
       <PostCard
         post={state.post}
         onToggleLike={() => void toggleLike()}
+        onDoubleTapLike={likeByDoubleTap}
         onOpenComments={(id) => router.push({ pathname: "/comments/[postId]", params: { postId: id } })}
         onOpenProfile={openProfile}
         onShare={(id) => router.push({ pathname: "/share/[postId]", params: { postId: id } })}

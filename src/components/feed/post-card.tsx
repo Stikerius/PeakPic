@@ -1,10 +1,13 @@
 import Ionicons from "@expo/vector-icons/Ionicons";
+import { useEffect, useRef } from "react";
 import { Pressable, StyleSheet, Text, View } from "react-native";
+import Animated, { useAnimatedStyle, useReducedMotion, useSharedValue, withSequence, withSpring, withTiming } from "react-native-reanimated";
 
 import { PhotoCarousel } from "@/components/feed/photo-carousel";
 import { TaggedText } from "@/components/tagged-text";
 import { Avatar } from "@/components/ui/avatar";
 import { fontSize, spacing, typography } from "@/constants/theme";
+import type { DoubleTapResult } from "@/lib/doubleTapLike";
 import { formatRelativeTime } from "@/lib/format";
 import { makeStyles, useTheme } from "@/lib/theme";
 import type { FeedPost } from "@/types/social";
@@ -12,6 +15,8 @@ import type { FeedPost } from "@/types/social";
 type PostCardProps = {
   post: FeedPost;
   onToggleLike: (postId: string) => void;
+  /** Double tap on the photo: likes (never unlikes). For a repost this is the original post. */
+  onDoubleTapLike?: (postId: string) => DoubleTapResult;
   onOpenComments: (postId: string) => void;
   onShare: (postId: string) => void;
   onOpenProfile: (userId: string) => void;
@@ -19,7 +24,27 @@ type PostCardProps = {
   onMore?: (post: FeedPost) => void;
 };
 
-export function PostCard({ post, onToggleLike, onOpenComments, onShare, onOpenProfile, onMore }: PostCardProps) {
+/** The heart below the post: filled when liked, with a short jump when a new like comes in. */
+function LikeHeart({ liked }: { liked: boolean }) {
+  const { colors } = useTheme();
+  const reduced = useReducedMotion();
+  const scale = useSharedValue(1);
+  const wasLiked = useRef(liked);
+  useEffect(() => {
+    if (liked && !wasLiked.current && !reduced) {
+      scale.value = withSequence(withTiming(1.3, { duration: 110 }), withSpring(1, { damping: 9, stiffness: 260 }));
+    }
+    wasLiked.current = liked;
+  }, [liked, reduced, scale]);
+  const style = useAnimatedStyle(() => ({ transform: [{ scale: scale.value }] }));
+  return (
+    <Animated.View style={style}>
+      <Ionicons name={liked ? "heart" : "heart-outline"} size={26} color={liked ? colors.danger : colors.text} />
+    </Animated.View>
+  );
+}
+
+export function PostCard({ post, onToggleLike, onDoubleTapLike, onOpenComments, onShare, onOpenProfile, onMore }: PostCardProps) {
   const { colors } = useTheme();
   const styles = useStyles();
   const repost = post.repost;
@@ -79,6 +104,7 @@ export function PostCard({ post, onToggleLike, onOpenComments, onShare, onOpenPr
         recyclingKey={post.feedKey}
         mentions={post.photoMentions}
         onPressMention={onOpenProfile}
+        like={onDoubleTapLike !== undefined ? { liked: post.likedByMe, onDoubleTap: () => onDoubleTapLike(post.id) } : undefined}
       />
 
       <View style={styles.actions}>
@@ -90,11 +116,7 @@ export function PostCard({ post, onToggleLike, onOpenComments, onShare, onOpenPr
           hitSlop={spacing.sm}
           style={styles.action}
         >
-          <Ionicons
-            name={post.likedByMe ? "heart" : "heart-outline"}
-            size={26}
-            color={post.likedByMe ? colors.danger : colors.text}
-          />
+          <LikeHeart liked={post.likedByMe} />
           {post.likeCount > 0 && <Text style={styles.count}>{post.likeCount}</Text>}
         </Pressable>
         <Pressable
