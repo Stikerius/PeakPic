@@ -60,6 +60,8 @@ export type UsageEvent =
   | "profile_tab_reposts"
   | "profile_tab_tagged"
   | "post_like_double_tap"
+  | "message_deleted_for_me"
+  | "message_deleted_for_all"
   | "screen_search"
   | "screen_hashtag"
   | "screen_settings"

@@ -1,12 +1,12 @@
 import Ionicons from "@expo/vector-icons/Ionicons";
 import { router, useFocusEffect } from "expo-router";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { ActivityIndicator, FlatList, Pressable, RefreshControl, StyleSheet, Text, View } from "react-native";
 
 import { Avatar } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
 import { fontSize, radius, spacing, typography } from "@/constants/theme";
-import { listConversations, subscribeToMessages } from "@/lib/chatRepo";
+import { listConversations, subscribeToMessageDeletes, subscribeToMessages } from "@/lib/chatRepo";
 import { formatRelativeTime } from "@/lib/format";
 import { makeStyles, useTheme } from "@/lib/theme";
 import type { ConversationSummary } from "@/types/chat";
@@ -20,9 +20,14 @@ export default function ChatListScreen() {
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  // Ids of the last message per chat: when one of them is deleted for everyone, reload.
+  const lastMessageIds = useRef(new Set<string>());
+
   async function load() {
     try {
-      setConversations(await listConversations());
+      const list = await listConversations();
+      lastMessageIds.current = new Set(list.flatMap((c) => (c.lastMessage !== null ? [c.lastMessage.id] : [])));
+      setConversations(list);
       setError(null);
     } catch {
       setError("Chats konnten nicht geladen werden.");
@@ -37,6 +42,13 @@ export default function ChatListScreen() {
 
   // New messages in any of my chats bump the list.
   useEffect(() => subscribeToMessages(() => void load()), []);
+  useEffect(
+    () =>
+      subscribeToMessageDeletes((messageId) => {
+        if (lastMessageIds.current.has(messageId)) void load();
+      }),
+    [],
+  );
 
   async function refresh() {
     setRefreshing(true);

@@ -4,6 +4,7 @@ import { useHeaderHeight } from "expo-router/react-navigation";
 import { useEffect, useRef, useState } from "react";
 import {
   ActivityIndicator,
+  Alert,
   FlatList,
   Keyboard,
   KeyboardAvoidingView,
@@ -26,12 +27,15 @@ import { fontSize, radius, spacing, typography } from "@/constants/theme";
 import { useBlockUser } from "@/hooks/use-block-user";
 import { showActionSheet } from "@/lib/actionSheet";
 import { isChatBlocked } from "@/lib/blockRepo";
+import { messageDeleteOptions, restoreMessage, withoutMessage } from "@/lib/chatDelete";
 import {
   MESSAGE_MAX_LENGTH,
   MESSAGE_PAGE_SIZE,
+  deleteMessageForEveryone,
   fetchMessages,
   fetchPinnedMessages,
   getConversationPartner,
+  hideMessageForMe,
   markConversationRead,
   messagePreview,
   sendTextMessage,
@@ -46,7 +50,7 @@ import { useSession } from "@/lib/session";
 import { makeStyles, useTheme } from "@/lib/theme";
 import type { ChatMessage } from "@/types/chat";
 import type { PublicProfile } from "@/types/social";
-import { useTrackScreen } from "@/lib/usage";
+import { track, useTrackScreen } from "@/lib/usage";
 
 /** How many older pages a jump to a quoted or pinned message may load. */
 const MAX_JUMP_PAGES = 20;
@@ -173,6 +177,10 @@ export default function ChatScreen() {
       if (change.kind === "pin") {
         updateMessage(change.messageId, (m) => ({ ...m, pinnedAt: change.pinnedAt }));
         reloadPinned();
+      } else if (change.kind === "deleted") {
+        // Deleted for everyone by its sender: gone without a trace (also the quote in replies).
+        setMessages((current) => (current === null ? current : withoutMessage(current, change.messageId, true)));
+        setPinned((current) => current.filter((m) => m.id !== change.messageId));
       } else {
         updateMessage(change.messageId, (m) => withReaction(m, change.userId, change.emoji));
       }
@@ -275,6 +283,56 @@ export default function ChatScreen() {
       updateMessage(message.id, (m) => ({ ...m, pinnedAt: previous }));
       reloadPinned();
       setError(pin ? "Nachricht konnte nicht angeheftet werden." : "Nachricht konnte nicht gelöst werden.");
+    }
+  }
+
+  /** "Löschen" from the long-press menu: for me, and for everyone on my own messages. */
+  function chooseDelete(message: ChatMessage) {
+    setPicker(null);
+    const options = messageDeleteOptions(message, myId);
+    if (!options.forMe) return;
+    showActionSheet("Nachricht löschen", [
+      { label: "Für mich löschen", destructive: true, onPress: () => void deleteForMe(message) },
+      ...(options.forAll
+        ? [{ label: "Für alle löschen", destructive: true, onPress: () => confirmDeleteForAll(message) }]
+        : []),
+    ]);
+  }
+
+  /** Hidden at once; back again if the server refuses. */
+  async function deleteForMe(message: ChatMessage) {
+    setMessages((current) => (current === null ? current : withoutMessage(current, message.id, false)));
+    setPinned((current) => current.filter((m) => m.id !== message.id));
+    try {
+      await hideMessageForMe(message.id);
+      track("message_deleted_for_me");
+    } catch (deleteError) {
+      setMessages((current) => restoreMessage(current ?? [], message));
+      reloadPinned();
+      setError(deleteError instanceof Error ? deleteError.message : "Nachricht konnte nicht gelöscht werden.");
+    }
+  }
+
+  function confirmDeleteForAll(message: ChatMessage) {
+    Alert.alert(
+      "Für alle löschen?",
+      "Die Nachricht wird für alle im Chat entfernt und kann nicht wiederhergestellt werden.",
+      [
+        { text: "Abbrechen", style: "cancel" },
+        { text: "Für alle löschen", style: "destructive", onPress: () => void deleteForAll(message) },
+      ],
+    );
+  }
+
+  /** Removed only after the server confirmed it. */
+  async function deleteForAll(message: ChatMessage) {
+    try {
+      await deleteMessageForEveryone(message.id);
+      track("message_deleted_for_all");
+      setMessages((current) => (current === null ? current : withoutMessage(current, message.id, true)));
+      setPinned((current) => current.filter((m) => m.id !== message.id));
+    } catch (deleteError) {
+      setError(deleteError instanceof Error ? deleteError.message : "Nachricht konnte nicht gelöscht werden.");
     }
   }
 
@@ -522,6 +580,11 @@ export default function ChatScreen() {
           if (pickerMessage !== undefined) void react(pickerMessage, emoji);
         }}
         onClose={() => setPicker(null)}
+        onDelete={
+          pickerMessage !== undefined && messageDeleteOptions(pickerMessage, myId).forMe
+            ? () => chooseDelete(pickerMessage)
+            : undefined
+        }
         onReport={
           pickerMessage !== undefined && pickerMessage.senderId !== myId
             ? () => {

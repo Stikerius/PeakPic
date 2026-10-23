@@ -54,7 +54,8 @@ export type ChatMessage = {
 export type ConversationSummary = {
   id: string;
   partner: PublicProfile;
-  lastMessage: { text: string; fromMe: boolean; createdAt: string } | null;
+  /** The last message I can see (messages I hid for me don't count). */
+  lastMessage: { id: string; text: string; fromMe: boolean; createdAt: string } | null;
   unreadCount: number;
   /** Last message time, or creation time for empty chats; used for sorting. */
   updatedAt: string;

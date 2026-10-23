@@ -44,7 +44,10 @@
 --                   reposter's posts; only accepted, linked people may repost feed posts
 --   * hashtags      tags and use counts readable by every signed-in user; which content uses a
 --                   tag only as far as that content is readable. Maintained by triggers only.
---   * chats         only members can read conversations, members and messages
+--   * chats         only members can read conversations, members and messages. "Für mich löschen"
+--                   hides a message for me only (message_hidden, hide_message_for_me()); "Für alle
+--                   löschen" removes the row for good, only by its sender and never when moderated
+--                   (delete_message_for_everyone()); report_snapshots keep their copies
 --   * training plans up to 10 per user, exactly one active: an ordered cycle of days
 --                   (plan_days: training or rest) with exercises (plan_exercises), not tied
 --                   to weekdays.
@@ -451,6 +454,16 @@ create table if not exists public.message_reactions (
 );
 create index if not exists message_reactions_conversation_idx
   on public.message_reactions (conversation_id);
+
+-- "Für mich löschen": messages I hid for myself; the others still see them. Written only by
+-- hide_message_for_me(); goes with the message ("Für alle löschen") and with my account.
+create table if not exists public.message_hidden (
+  user_id    uuid not null references public.profiles (id) on delete cascade,
+  message_id uuid not null references public.messages (id) on delete cascade,
+  created_at timestamptz not null default now(),
+  primary key (user_id, message_id)
+);
+create index if not exists message_hidden_message_idx on public.message_hidden (message_id);
 
 -- "Auch fürs Workout verlinken": the post owner asks a tagged person; only that person
 -- answers. An accepted link counts as their training day (workout_days()).
@@ -1324,6 +1337,72 @@ begin
   set pinned_at = case when pinned then now() end,
       pinned_by = case when pinned then auth.uid() end
   where id = message;
+end;
+$$;
+
+-- Has the caller hidden this message for themself ("Für mich löschen")?
+create or replace function public.is_message_hidden_for_me(message uuid)
+returns boolean
+language sql stable security definer set search_path = ''
+as $$
+  select exists (
+    select 1 from public.message_hidden h where h.message_id = message and h.user_id = (select auth.uid())
+  );
+$$;
+
+-- "Für mich löschen": hides a message of one of my chats for me only. Any message of the chat,
+-- also someone else's or a tag card. Repeating it is fine.
+create or replace function public.hide_message_for_me(p_message_id uuid)
+returns void
+language plpgsql security definer set search_path = ''
+as $$
+declare
+  conversation uuid;
+begin
+  if auth.uid() is null then
+    raise exception 'not authenticated';
+  end if;
+  if not public.is_account_active() then
+    raise exception 'account_inactive';
+  end if;
+  select m.conversation_id into conversation from public.messages m where m.id = p_message_id;
+  if conversation is null or not public.is_conversation_member(conversation) then
+    raise exception 'message_not_found';
+  end if;
+  insert into public.message_hidden (user_id, message_id) values (auth.uid(), p_message_id)
+  on conflict do nothing;
+end;
+$$;
+
+-- "Für alle löschen": deletes my own message for good, without any trace in the chat. Only the
+-- sender (for tag cards: whoever the sender column names), only while my account is active,
+-- I'm still a member, and the message isn't moderated (removed or quarantined messages stay as
+-- evidence). Reactions and hidden marks go with it (cascade), replies lose the quote (reply_to_id
+-- set null); a shared post or comment stays. report_snapshots keep their copies (no foreign key).
+create or replace function public.delete_message_for_everyone(p_message_id uuid)
+returns void
+language plpgsql security definer set search_path = ''
+as $$
+declare
+  target public.messages%rowtype;
+begin
+  if auth.uid() is null then
+    raise exception 'not authenticated';
+  end if;
+  if not public.is_account_active() then
+    raise exception 'account_inactive';
+  end if;
+  select * into target from public.messages m where m.id = p_message_id for update;
+  if not found or not public.is_conversation_member(target.conversation_id) then
+    raise exception 'message_not_found';
+  end if;
+  if target.sender_id is distinct from auth.uid() then
+    raise exception 'message_not_own';
+  end if;
+  if target.moderation_state is not null or target.removed_at is not null then
+    raise exception 'message_moderated';
+  end if;
+  delete from public.messages where id = p_message_id;
 end;
 $$;
 
@@ -3817,6 +3896,8 @@ begin
   elsif report.target_type = 'message' then
     select jsonb_build_object(
       'moderation_state', public.moderation_state_of('message', report.target_id),
+      -- The sender may have deleted it for everyone since; the snapshots stay.
+      'original_exists', exists (select 1 from public.messages om where om.id = report.target_id),
       'snapshots', coalesce(jsonb_agg(jsonb_build_object(
         'message_id', rs.message_id, 'sender_id', rs.sender_id, 'sender_username', sp.username,
         'body', rs.body, 'post_id', rs.post_id, 'comment_id', rs.comment_id, 'story_id', rs.story_id,
@@ -4857,6 +4938,12 @@ revoke all on function public.user_id_for_username(text) from public, anon, auth
 revoke all on function public.on_profile_write() from public, anon, authenticated;
 revoke all on function public.set_message_pinned(uuid, boolean) from public, anon;
 grant execute on function public.set_message_pinned(uuid, boolean) to authenticated;
+revoke all on function public.is_message_hidden_for_me(uuid) from public, anon;
+grant execute on function public.is_message_hidden_for_me(uuid) to authenticated;
+revoke all on function public.hide_message_for_me(uuid) from public, anon;
+grant execute on function public.hide_message_for_me(uuid) to authenticated;
+revoke all on function public.delete_message_for_everyone(uuid) from public, anon;
+grant execute on function public.delete_message_for_everyone(uuid) to authenticated;
 -- New in the privacy model: nothing of it for anonymous users.
 revoke all on function public.follow_counts(uuid) from public, anon;
 grant execute on function public.follow_counts(uuid) to authenticated;
@@ -5051,6 +5138,9 @@ grant select, insert, update, delete on
   public.conversations, public.conversation_members, public.messages, public.message_reactions,
   public.workout_shares, public.post_reposts
 to authenticated;
+-- Messages hidden for me: read and remove my own rows; set only through hide_message_for_me().
+revoke all on public.message_hidden from anon, authenticated;
+grant select, delete on public.message_hidden to authenticated;
 -- Hashtags: read only; rows and counters are maintained by triggers.
 revoke all on public.hashtags, public.content_hashtags from anon, authenticated;
 grant select on public.hashtags, public.content_hashtags to authenticated;
@@ -5108,6 +5198,7 @@ alter table public.conversations        enable row level security;
 alter table public.conversation_members enable row level security;
 alter table public.messages             enable row level security;
 alter table public.message_reactions    enable row level security;
+alter table public.message_hidden       enable row level security;
 alter table public.workout_shares       enable row level security;
 alter table public.post_reposts         enable row level security;
 alter table public.notifications        enable row level security;
@@ -5493,7 +5584,12 @@ create policy "conversation_members: leave" on public.conversation_members
 drop policy if exists "messages: members read" on public.messages;
 create policy "messages: members read" on public.messages
   for select to authenticated
-  using (moderation_state is null and public.is_account_active() and public.is_conversation_member(conversation_id));
+  using (
+    moderation_state is null
+    and public.is_account_active()
+    and public.is_conversation_member(conversation_id)
+    and not public.is_message_hidden_for_me(id)
+  );
 
 drop policy if exists "messages: members send" on public.messages;
 create policy "messages: members send" on public.messages
@@ -5515,11 +5611,18 @@ create policy "messages: members send" on public.messages
     and story_id is null
   );
 
+-- No delete policy: deleting goes only through delete_message_for_everyone() (checks and no
+-- trace); the first version let senders delete directly.
 drop policy if exists "messages: delete own" on public.messages;
-create policy "messages: delete own" on public.messages
-  for delete to authenticated
-  using (sender_id = (select auth.uid()) and public.is_account_active() and moderation_state is null);
 -- No update policy: pins change only through set_message_pinned().
+
+-- message_hidden: only my own rows; set only through hide_message_for_me().
+drop policy if exists "message_hidden: owner reads" on public.message_hidden;
+create policy "message_hidden: owner reads" on public.message_hidden
+  for select to authenticated using (user_id = (select auth.uid()));
+drop policy if exists "message_hidden: owner removes" on public.message_hidden;
+create policy "message_hidden: owner removes" on public.message_hidden
+  for delete to authenticated using (user_id = (select auth.uid()) and public.is_account_active());
 
 -- message_reactions: members of the chat read them; you only set or remove your own.
 drop policy if exists "message_reactions: members read" on public.message_reactions;
@@ -6115,6 +6218,8 @@ insert into public.usage_event_types (name, area, source) values
   ('screen_chats', 'chat', 'client'),
   ('screen_chat', 'chat', 'client'),
   ('screen_chat_new', 'chat', 'client'),
+  ('message_deleted_for_me', 'chat', 'client'),
+  ('message_deleted_for_all', 'chat', 'client'),
   ('screen_profile', 'profile', 'client'),
   ('screen_user_profile', 'profile', 'client'),
   ('screen_follows', 'profile', 'client'),

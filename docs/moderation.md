@@ -30,7 +30,8 @@
 ## Was ein Moderator oder Admin sieht
 
 - Gemeldete Beiträge, Storys, Kommentare und Profile mit Inhalt und Bildern.
-- Bei gemeldeten Nachrichten nur die gespeicherte Kopie mit Kontext, nie den übrigen Chat.
+- Bei gemeldeten Nachrichten nur die gespeicherte Kopie mit Kontext, nie den übrigen Chat. Löscht der Absender die Nachricht später „für alle“, bleibt die Kopie erhalten; das Dashboard zeigt dann einen Hinweis, und Entfernen oder Quarantäne sind nicht mehr nötig (das Original ist weg).
+- Nachrichten löschen: „Für mich löschen“ blendet eine Nachricht nur für die Person aus (`message_hidden`). „Für alle löschen“ (`delete_message_for_everyone`) entfernt die eigene Nachricht endgültig und ohne Spur. Von der Moderation entfernte oder in Quarantäne gesetzte Nachrichten kann niemand selbst löschen oder wiederherstellen. Eine schon gelöschte Nachricht lässt sich nicht mehr melden.
 - Verlauf eines Kontos: frühere Meldungen gegen das Konto, Verwarnungen und Aktionen.
 - Nutzersuche nach Username, Anzeigename oder ID (öffentliche Profildaten).
 - E-Mail-Adresse nur Admins, mit Begründung, jeder Abruf wird protokolliert.
@@ -60,7 +61,7 @@ Bricht etwas ab, bleibt der Status `deleting`. Die App zeigt dann „Löschung w
 
 | Ergebnis | Tabellen |
 |---|---|
-| Gelöscht (`on delete cascade`) | `profiles`, `username_history` (Name wird frei), `posts`, `post_media`, `post_tags`, `post_likes`, `comments`, `comment_likes`, `follows`, `stories`, `story_likes`, `story_views`, `highlights`, `highlight_items`, `audience_restrictions`, `conversation_members` (eigene Zeile), `messages` (eigene), `message_reactions`, `workout_shares`, `post_reposts`, `content_hashtags`, `notifications`, `training_plans`, `plan_days`, `plan_exercises`, `planned_rest_uses`, `plan_adoptions` (als Übernehmer), `workouts`, `workout_exercises`, `workout_sets`, `rest_budgets`, `rest_day_uses`, `user_blocks`, `admin_roles`, `moderation_notices`, `legal_confirmations`, `confirmation_followups` |
+| Gelöscht (`on delete cascade`) | `profiles`, `username_history` (Name wird frei), `posts`, `post_media`, `post_tags`, `post_likes`, `comments`, `comment_likes`, `follows`, `stories`, `story_likes`, `story_views`, `highlights`, `highlight_items`, `audience_restrictions`, `conversation_members` (eigene Zeile), `messages` (eigene), `message_reactions`, `message_hidden` (eigene „Für mich gelöscht“-Markierungen, und die anderer an den eigenen Nachrichten), `workout_shares`, `post_reposts`, `content_hashtags`, `notifications`, `training_plans`, `plan_days`, `plan_exercises`, `planned_rest_uses`, `plan_adoptions` (als Übernehmer), `workouts`, `workout_exercises`, `workout_sets`, `rest_budgets`, `rest_day_uses`, `user_blocks`, `admin_roles`, `moderation_notices`, `legal_confirmations`, `confirmation_followups` |
 | Auf `null` gesetzt | `reports.reporter_id`, `messages.pinned_by`, `conversations.created_by`, `training_plans.adopted_from_user_id` (Kopien anderer behalten ihren Plan, Herkunft „Gelöschtes Konto“), `plan_adoptions.owner_id` |
 | Nur UUID, Texte pseudonymisiert | `moderation_actions`, `reports.target_user_id`, `report_snapshots.sender_id` |
 | Bereinigt | `stories.mentioned_user_ids` / `mention_positions` anderer |

@@ -52,7 +52,9 @@ export function ReportDetailPage({ id }: { id: string }) {
   const targetId = str(report.target_id);
   const targetUserId = strOrNull(detail.targetUser?.id);
   const contentState = strOrNull(detail.content?.moderation_state);
-  const isContent = CONTENT_TYPES.includes(targetType);
+  // A message its sender deleted for everyone: only the snapshots are left, nothing to remove.
+  const originalGone = targetType === "message" && detail.content?.original_exists === false;
+  const isContent = CONTENT_TYPES.includes(targetType) && !originalGone;
   const contentType = targetType as ContentType;
 
   const actions: PanelAction[] = [];

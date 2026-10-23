@@ -155,7 +155,7 @@ export async function listConversations(): Promise<ConversationSummary[]> {
           lastMessage:
             last === null
               ? null
-              : { text: previewText(last), fromMe: last.sender_id === userId, createdAt: last.created_at },
+              : { id: last.id, text: previewText(last), fromMe: last.sender_id === userId, createdAt: last.created_at },
           unreadCount,
           updatedAt: last?.created_at ?? membership.conversation.created_at,
         },
@@ -335,6 +335,33 @@ export async function setReaction(
   if (error) throw error;
 }
 
+function deleteErrorMessage(message: string | undefined): string {
+  switch (message) {
+    case "account_inactive":
+      return "Dein Konto ist gerade gesperrt.";
+    case "message_not_own":
+      return "Für alle löschen kann nur, wer die Nachricht geschrieben hat.";
+    case "message_moderated":
+      return "Diese Nachricht wurde von der Moderation bearbeitet und lässt sich nicht löschen.";
+    case "message_not_found":
+      return "Die Nachricht gibt es nicht mehr.";
+    default:
+      return "Nachricht konnte nicht gelöscht werden. Prüfe deine Verbindung.";
+  }
+}
+
+/** "Für mich löschen": hides the message for me only (the others still see it). */
+export async function hideMessageForMe(messageId: string): Promise<void> {
+  const { error } = await supabase.rpc("hide_message_for_me", { p_message_id: messageId });
+  if (error) throw new Error(deleteErrorMessage(error.message));
+}
+
+/** "Für alle löschen": removes my own message for good, for everyone in the chat. */
+export async function deleteMessageForEveryone(messageId: string): Promise<void> {
+  const { error } = await supabase.rpc("delete_message_for_everyone", { p_message_id: messageId });
+  if (error) throw new Error(deleteErrorMessage(error.message));
+}
+
 export async function sendTextMessage(
   conversationId: string,
   body: string,
@@ -394,8 +421,24 @@ export function subscribeToMessages(
   };
 }
 
+/** Live: messages deleted for everyone (only their ids; deletes can't be filtered by chat). */
+export function subscribeToMessageDeletes(onDelete: (messageId: string) => void): () => void {
+  const channel = supabase
+    .channel(`message-deletes:${Date.now()}`)
+    .on("postgres_changes", { event: "DELETE", schema: "public", table: "messages" }, (payload) => {
+      const id: unknown = (payload.old as { id?: unknown }).id;
+      if (typeof id === "string") onDelete(id);
+    })
+    .subscribe();
+  return () => {
+    void supabase.removeChannel(channel);
+  };
+}
+
 export type ChatChange =
   | { kind: "pin"; messageId: string; pinnedAt: string | null }
+  /** Deleted for everyone. The event carries only the id (no content). */
+  | { kind: "deleted"; messageId: string }
   | { kind: "reaction"; messageId: string; userId: string; emoji: string | null };
 
 /** Live pins and reactions in one chat (RLS limits both to chats I'm a member of). */
@@ -421,6 +464,12 @@ export function subscribeToChatChanges(conversationId: string, onChange: (change
       { event: "UPDATE", schema: "public", table: "message_reactions", filter },
       (payload: RealtimePostgresUpdatePayload<Tables<"message_reactions">>) => onReaction(payload.new),
     )
+    // Deletes can't be filtered by chat and carry only the primary key: the screen drops the id
+    // if it has it.
+    .on("postgres_changes", { event: "DELETE", schema: "public", table: "messages" }, (payload) => {
+      const id: unknown = (payload.old as { id?: unknown }).id;
+      if (typeof id === "string") onChange({ kind: "deleted", messageId: id });
+    })
     .subscribe();
   return () => {
     void supabase.removeChannel(channel);

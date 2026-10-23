@@ -19,6 +19,8 @@ type ReactionPickerProps = {
   onClose: () => void;
   /** Someone else's message: offers "Nachricht melden" below the reactions. */
   onReport?: () => void;
+  /** "Löschen" below the reactions (for me, or for everyone on my own messages). */
+  onDelete?: () => void;
 };
 
 function EmojiButton({ emoji, selected, onPick }: { emoji: string; selected: boolean; onPick: (emoji: string) => void }) {
@@ -40,7 +42,7 @@ function EmojiButton({ emoji, selected, onPick }: { emoji: string; selected: boo
  * Bar with quick reactions above the pressed message; "…" opens a grid with more emojis.
  * Tapping any emoji reacts right away.
  */
-export function ReactionPicker({ anchorY, current, onPick, onClose, onReport }: ReactionPickerProps) {
+export function ReactionPicker({ anchorY, current, onPick, onClose, onReport, onDelete }: ReactionPickerProps) {
   const { colors } = useTheme();
   const styles = useStyles();
   const insets = useSafeAreaInsets();
@@ -98,6 +100,17 @@ export function ReactionPicker({ anchorY, current, onPick, onClose, onReport }: 
               <Ionicons name="ellipsis-horizontal" size={22} color={colors.text} />
             </Pressable>
           </View>
+          {onDelete !== undefined && (
+            <Pressable
+              onPress={onDelete}
+              accessibilityRole="button"
+              accessibilityLabel="Nachricht löschen"
+              style={({ pressed }) => [styles.reportButton, pressed && styles.reportPressed]}
+            >
+              <Ionicons name="trash-outline" size={18} color={colors.danger} />
+              <Text style={styles.reportText}>Löschen</Text>
+            </Pressable>
+          )}
           {onReport !== undefined && (
             <Pressable
               onPress={onReport}

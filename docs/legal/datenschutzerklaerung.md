@@ -24,6 +24,8 @@ TODO (Rechtsprüfung): Trainingsdaten können als Gesundheitsdaten (DSGVO Art. 9
 
 **Nachrichten:** Direktnachrichten und Reaktionen. Sie sind nur für die Beteiligten sichtbar. Moderatoren sehen sie nicht, ausser jemand meldet eine Nachricht: Dann wird eine Kopie der gemeldeten Nachricht mit wenigen Nachrichten davor und danach für die Prüfung gespeichert.
 
+Nachrichten löschen: „Für mich löschen“ blendet eine Nachricht nur bei dir aus; wir speichern dafür, welche Nachricht du ausgeblendet hast. Die anderen im Chat sehen sie weiter. „Für alle löschen“ (nur bei deinen eigenen Nachrichten) löscht die Nachricht endgültig, mit ihren Reaktionen und ihrem Zitat in Antworten; im Chat bleibt kein Hinweis zurück. Ein geteilter Beitrag oder Kommentar selbst wird dabei nicht gelöscht, nur die Karte im Chat. Wurde die Nachricht vorher gemeldet, bleibt die Kopie für die Prüfung erhalten (siehe oben). Nachrichten, die die Moderation entfernt hat, kannst du nicht selbst löschen.
+
 TODO: Anzahl der Kontextnachrichten und Aufbewahrungsdauer eintragen.
 
 **Sicherheit und Moderation:** Blockierungen, Einschränkungen (wer deine Storys oder Beiträge nicht sieht), Meldungen, die du machst oder die dich betreffen, Entscheidungen der Moderation und deren Protokoll, Kontostatus (aktiv, gesperrt).

@@ -699,6 +699,8 @@ export type Database = {
       set_workout_visibility: { Args: { p_workout_id: Uuid; p_visibility: PlanVisibility }; Returns: undefined };
       can_view_training_stats: { Args: { target: Uuid }; Returns: boolean };
       purge_my_expired_notifications: { Args: Record<string, never>; Returns: number };
+      hide_message_for_me: { Args: { p_message_id: Uuid }; Returns: undefined };
+      delete_message_for_everyone: { Args: { p_message_id: Uuid }; Returns: undefined };
       get_training_stats: { Args: { p_user_id: Uuid; p_range: "weeks" | "months" | "year" }; Returns: Json | null };
       get_my_training_stats: { Args: { p_range: "weeks" | "months" | "year" }; Returns: Json | null };
     };

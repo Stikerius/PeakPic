@@ -112,6 +112,11 @@ export function ContentPreview({ type, content }: { type: string; content: Json 
       )}
       {type === "message" && (
         <>
+          {content.original_exists === false && (
+            <p className="muted">
+              Der Absender hat die Nachricht inzwischen für alle gelöscht. Die Kopie unten bleibt als Nachweis erhalten.
+            </p>
+          )}
           <p className="muted">
             Kopie beim Melden gespeichert: die gemeldete Nachricht mit bis zu 5 Nachrichten davor und danach. Der übrige
             Chat ist nicht einsehbar.
