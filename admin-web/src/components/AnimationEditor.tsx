@@ -80,7 +80,7 @@ export function AnimationEditor({ spec, params, onChange }: { spec: unknown; par
       <div className="animation-preview">
         <BrandLogo
           spec={spec}
-          params={params}
+          animation={params}
           palette={palette}
           mode={mode}
           size={260}

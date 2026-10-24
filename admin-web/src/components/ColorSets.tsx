@@ -388,7 +388,7 @@ function ColorEditor({
             <div className="color-login">
               <BrandLogo
                 spec={brand.spec}
-                params={brand.params}
+                animation={brand.animation}
                 palette="color"
                 mode={previewMode}
                 size={96}

@@ -84,7 +84,7 @@ export function Layout({ route, children }: LayoutProps) {
       <aside className="sidebar">
         <div className="sidebar-head">
           <a className="brand" href={href({ page: "overview" })} aria-label="PeakPic Moderation, Übersicht">
-            <BrandLogo spec={brand.spec} params={brand.params} palette={brand.palette} mode={brand.mode} size={28} dots={false} className="brand-logo" />
+            <BrandLogo spec={brand.spec} animation={brand.animation} palette={brand.palette} mode={brand.mode} size={28} dots={false} className="brand-logo" />
             <span className="brand-name">PeakPic</span>
           </a>
           <button

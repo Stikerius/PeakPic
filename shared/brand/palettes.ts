@@ -2,7 +2,7 @@
 // in src/constants/theme.ts; nowhere else are these values written down. The accent of the palette
 // "Hauptfarbe" comes from the active colour set (colors.ts, default "Orange").
 
-import { DEFAULT_COLOR_SET, onAccentColor, type ColorSetValues } from "./colors";
+import { DEFAULT_COLOR_SET, blendHex, onAccentColor, type ColorSetValues } from "./colors";
 
 export type BrandPaletteName = "color" | "bw";
 export type BrandMode = "light" | "dark";
@@ -43,3 +43,24 @@ export const BRAND_MASK = { show: "#ffffff", hide: "#000000" } as const;
 export const BRAND_SHINE = "#ffffff";
 
 export const BRAND_PALETTE_LABELS: Record<BrandPaletteName, string> = { color: "Hauptfarbe", bw: "Schwarz-Weiss" };
+
+/** Neutral colour of a colour track (grey with 3:1 on the animation background). */
+const NEUTRAL: Record<BrandMode, string> = { dark: "#a1a1aa", light: "#71717a" };
+
+/**
+ * The four colours a colour track ("Farbwechsel") can use, in the order of COLOR_NAMES: accent,
+ * accent light, accent dark, neutral.
+ */
+export function animationPalette(colors: BrandColors, mode: BrandMode): readonly [string, string, string, string] {
+  const accent = colors.accent.toLowerCase();
+  return [accent, blendHex(accent, BRAND_MASK.show, 0.4), blendHex(accent, BRAND_MASK.hide, 0.4), NEUTRAL[mode]];
+}
+
+/** The colour of a frame: `from` mixed towards `to` by `mix` (indices into animationPalette). */
+export function frameColor(palette: readonly string[], from: number, to: number, mix: number): string {
+  "worklet";
+  const a = palette[from] ?? palette[0] ?? BRAND_MASK.hide;
+  if (mix <= 0) return a;
+  const b = palette[to] ?? a;
+  return mix >= 1 ? b : blendHex(a, b, mix);
+}

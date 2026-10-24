@@ -1,5 +1,5 @@
--- PeakPic: read-only checks for the data reset ("App-Neustart") and the e-mail notices
--- ("Mitteilungen"). NOT part of schema.sql; run by
+-- PeakPic: read-only checks for the data reset ("App-Neustart"), the e-mail notices
+-- ("Mitteilungen") and the design (logos, animation presets, colour sets). NOT part of schema.sql; run by
 -- hand in the Supabase SQL editor. Changes nothing. Every row with ok = false needs a look.
 
 select * from (
@@ -12,7 +12,8 @@ select * from (
       or has_table_privilege('anon', 'public.' || t, 'select')) as ok
   from unnest(array['app_settings', 'protected_accounts', 'reset_jobs', 'reset_job_targets', 'seed_markers',
                      'mail_campaigns', 'mail_recipients', 'mail_templates', 'mail_tests',
-                     'logo_library', 'animation_presets', 'design_assignments', 'app_design_config', 'logo_import_calls']) t
+                     'logo_library', 'animation_presets', 'design_assignments', 'app_design_config', 'logo_import_calls',
+                     'brand_colors', 'preset_versions']) t
 
   union all
   -- RLS on, and no policies at all (access only through the functions).
@@ -22,7 +23,8 @@ select * from (
   where n.nspname = 'public'
     and c.relname in ('app_settings', 'protected_accounts', 'reset_jobs', 'reset_job_targets', 'seed_markers',
                       'mail_campaigns', 'mail_recipients', 'mail_templates', 'mail_tests',
-                      'logo_library', 'animation_presets', 'design_assignments', 'app_design_config', 'logo_import_calls')
+                      'logo_library', 'animation_presets', 'design_assignments', 'app_design_config', 'logo_import_calls',
+                      'brand_colors', 'preset_versions')
 
   union all
   -- Every reset function: security definer with a fixed search_path.
@@ -61,11 +63,58 @@ select * from (
     p.prosecdef and coalesce(array_to_string(p.proconfig, ','), '') like '%search_path=%'
       and not has_function_privilege('anon', p.oid, 'execute')
   from pg_proc p join pg_namespace n on n.oid = p.pronamespace
-  where n.nspname = 'public' and (p.proname like 'admin_logo_%' or p.proname like 'admin_preset_%' or p.proname = 'set_app_design_config')
+  where n.nspname = 'public' and (p.proname like 'admin_logo_%' or p.proname like 'admin_preset_%' or p.proname like 'admin_color_%'
+    or p.proname = 'set_app_design_config')
+
+  union all
+  -- The checks behind the design tables are internal: no client may call them.
+  select 'internal, not for clients: ' || p.proname,
+    not has_function_privilege('authenticated', p.oid, 'execute') and not has_function_privilege('anon', p.oid, 'execute')
+  from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+  where n.nspname = 'public'
+    and p.proname in ('brand_animation_problem', 'brand_easing_valid', 'brand_keys_only', 'brand_int_between', 'brand_spec_summary',
+                      'brand_color_set_problem', 'brand_preset_params_valid', 'brand_logo_spec_valid')
 
   union all
   -- Every stored logo passes the structure check (also the built-in ones).
   select 'all logos valid', not exists (select 1 from public.logo_library l where not public.brand_logo_spec_valid(l.spec))
+
+  union all
+  -- Every preset is a valid v2 animation, or (older ones) valid v1 parameters.
+  select 'all presets valid (v2, or v1 not yet saved again)',
+    not exists (
+      select 1 from public.animation_presets p
+      where not ((p.spec_version = 2 and public.brand_animation_problem(p.spec) is null)
+              or (p.spec_version = 1 and public.brand_preset_params_valid(p.params)))
+    )
+
+  union all
+  select 'built-in presets are v2', not exists (select 1 from public.animation_presets p where p.kind = 'builtin' and p.spec_version <> 2)
+
+  union all
+  select 'at most 10 versions per preset',
+    not exists (select 1 from public.preset_versions v group by v.preset_id having count(*) > 10)
+
+  union all
+  -- A manipulated animation is refused by the same check the save function uses.
+  select 'manipulated animation refused: ' || x.label, public.brand_animation_problem(x.spec) is not null
+  from (values
+    ('unknown field', '{"version":2,"duration":8,"strokeWidth":2,"tracks":[{"kind":"rotate","enabled":true,"target":{"type":"all"},"keyframes":[{"t":0,"v":0,"ease":{"type":"hold"}}],"stagger":{"mode":"none","amount":0,"seed":0},"repeat":1,"script":"x"}]}'::jsonb),
+    ('duration 99', '{"version":2,"duration":99,"strokeWidth":2,"tracks":[{"kind":"rotate","enabled":true,"target":{"type":"all"},"keyframes":[{"t":0,"v":0,"ease":{"type":"hold"}}],"stagger":{"mode":"none","amount":0,"seed":0},"repeat":1}]}'::jsonb),
+    ('value out of range', '{"version":2,"duration":8,"strokeWidth":2,"tracks":[{"kind":"rotate","enabled":true,"target":{"type":"all"},"keyframes":[{"t":0,"v":999,"ease":{"type":"hold"}}],"stagger":{"mode":"none","amount":0,"seed":0},"repeat":1}]}'::jsonb),
+    ('falling times', '{"version":2,"duration":8,"strokeWidth":2,"tracks":[{"kind":"rotate","enabled":true,"target":{"type":"all"},"keyframes":[{"t":0.5,"v":0,"ease":{"type":"hold"}},{"t":0.2,"v":0,"ease":{"type":"hold"}}],"stagger":{"mode":"none","amount":0,"seed":0},"repeat":1}]}'::jsonb),
+    ('41 sparks', '{"version":2,"duration":8,"strokeWidth":2,"tracks":[{"kind":"sparks","enabled":true,"target":{"type":"all"},"keyframes":[{"t":0,"v":0,"ease":{"type":"hold"}}],"stagger":{"mode":"none","amount":0,"seed":0},"repeat":1,"count":41,"seed":1,"size":1,"distance":1}]}'::jsonb)
+  ) as x(label, spec)
+
+  union all
+  -- Every colour set meets the readability rules.
+  select 'all colour sets readable',
+    not exists (select 1 from public.brand_colors b where public.brand_color_set_problem(b.accent_dark, b.accent_light, b.chart_colors) is not null)
+
+  union all
+  select 'colour targets set: ' || t,
+    exists (select 1 from public.design_assignments a where a.target = t and a.color_id is not null)
+  from unnest(array['dashboard_colors', 'app_login_colors']) t
 
   union all
   -- Addresses and the queue: only the service role (never clients, never the admin's session).

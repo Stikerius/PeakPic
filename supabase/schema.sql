@@ -10108,6 +10108,260 @@ create table if not exists public.animation_presets (
 alter table public.animation_presets enable row level security;
 revoke all on public.animation_presets from public, anon, authenticated;
 
+-- ---------------------------------------------------------------- Animation v2 (presets)
+-- A timeline with tracks (shared/brand/animation.ts). The same rules as validateAnimationSpec()
+-- there; a test compares both on many valid and manipulated specs. v1 parameters stay readable
+-- (spec_version 1); the clients convert them frame-exactly. New saves are always v2.
+
+create or replace function public.brand_keys_only(p jsonb, p_allowed text[])
+returns boolean
+language sql immutable set search_path = ''
+as $$
+  select coalesce(jsonb_typeof(p) = 'object' and not exists (select 1 from jsonb_object_keys(p) k where k <> all (p_allowed)), false);
+$$;
+
+create or replace function public.brand_int_between(p jsonb, p_min numeric, p_max numeric)
+returns boolean
+language sql immutable set search_path = ''
+as $$
+  select coalesce(public.brand_number_between(p, p_min, p_max) and (p #>> '{}')::numeric = trunc((p #>> '{}')::numeric), false);
+$$;
+
+-- One easing of a keyframe segment: fixed kinds, numbers in fixed ranges.
+create or replace function public.brand_easing_valid(e jsonb)
+returns boolean
+language sql immutable set search_path = ''
+as $$
+  select coalesce(
+    jsonb_typeof(e) = 'object'
+    and jsonb_typeof(e -> 'type') = 'string'
+    and (not e ? 'reverse' or jsonb_typeof(e -> 'reverse') = 'boolean')
+    and case e ->> 'type'
+      when 'preset' then public.brand_keys_only(e, array['type', 'name', 'reverse'])
+        and jsonb_typeof(e -> 'name') = 'string'
+        and e ->> 'name' in ('linear', 'smooth', 'snappy', 'easeIn', 'easeOut', 'easeInOut', 'easeInStrong', 'easeOutStrong', 'easeInOutStrong')
+      when 'bezier' then public.brand_keys_only(e, array['type', 'x1', 'y1', 'x2', 'y2', 'reverse'])
+        and public.brand_number_between(e -> 'x1', 0, 1) and public.brand_number_between(e -> 'x2', 0, 1)
+        and public.brand_number_between(e -> 'y1', -1, 2) and public.brand_number_between(e -> 'y2', -1, 2)
+      when 'spring' then public.brand_keys_only(e, array['type', 'damping', 'frequency', 'reverse'])
+        and public.brand_number_between(e -> 'damping', 0.2, 1) and public.brand_number_between(e -> 'frequency', 1, 6)
+      when 'bounce' then public.brand_keys_only(e, array['type', 'bounces', 'damping', 'reverse'])
+        and public.brand_int_between(e -> 'bounces', 1, 4) and public.brand_number_between(e -> 'damping', 0.2, 0.8)
+      when 'hold' then public.brand_keys_only(e, array['type', 'reverse'])
+      else false
+    end,
+    false);
+$$;
+
+-- Why an Animation v2 is refused (a short code), or null. Structure, ranges, at most 16 tracks
+-- with 1 to 12 rising keyframes, one dot raster, 40 sparks, and the cost estimate within 160
+-- (same weights as animationCost(), with the 24 shapes that are animated one by one at most).
+create or replace function public.brand_animation_problem(p jsonb)
+returns text
+language plpgsql immutable set search_path = ''
+as $$
+declare
+  tr jsonb;
+  kf jsonb;
+  tgt jsonb;
+  stg jsonb;
+  kind text;
+  allowed text[];
+  prev numeric;
+  vmin numeric;
+  vmax numeric;
+  dots int := 0;
+  sparks numeric := 0;
+  cost numeric := 0;
+  per_shape boolean := false;
+  elements numeric;
+  weight numeric;
+  fields_ok boolean;
+  shapes constant numeric := 24;
+begin
+  if p is null or jsonb_typeof(p) is distinct from 'object' then
+    return 'not_object';
+  end if;
+  if char_length(p::text) > 80000 then
+    return 'too_large';
+  end if;
+  if not public.brand_keys_only(p, array['version', 'duration', 'strokeWidth', 'tracks']) then
+    return 'unknown_field';
+  end if;
+  if jsonb_typeof(p -> 'version') is distinct from 'number' or (p ->> 'version')::numeric <> 2 then
+    return 'version';
+  end if;
+  if not public.brand_number_between(p -> 'duration', 2, 30) then
+    return 'duration';
+  end if;
+  if not public.brand_number_between(p -> 'strokeWidth', 1, 6) then
+    return 'stroke_width';
+  end if;
+  if jsonb_typeof(p -> 'tracks') is distinct from 'array' or jsonb_array_length(p -> 'tracks') not between 1 and 16 then
+    return 'tracks';
+  end if;
+
+  for tr in select t.value from jsonb_array_elements(p -> 'tracks') t loop
+    if jsonb_typeof(tr) is distinct from 'object' or jsonb_typeof(tr -> 'kind') is distinct from 'string' then
+      return 'track';
+    end if;
+    kind := tr ->> 'kind';
+    if kind not in ('draw', 'fill', 'shine', 'wave', 'dots', 'sparks', 'breathe', 'rotate', 'float', 'exit', 'color') then
+      return 'track_kind';
+    end if;
+    allowed := array['kind', 'enabled', 'target', 'keyframes', 'stagger', 'repeat'] || case kind
+      when 'fill' then array['variant']
+      when 'shine' then array['width', 'angle', 'strength']
+      when 'wave' then array['scale', 'grow']
+      when 'dots' then array['variant', 'spacing', 'radius', 'glowRadius', 'fade']
+      when 'sparks' then array['count', 'seed', 'size', 'distance']
+      when 'float' then array['axis']
+      when 'exit' then array['variant', 'layer', 'amount']
+      when 'color' then array['from', 'to']
+      else array[]::text[]
+    end;
+    if not public.brand_keys_only(tr, allowed) then
+      return 'track_field';
+    end if;
+    if jsonb_typeof(tr -> 'enabled') is distinct from 'boolean' then
+      return 'track_enabled';
+    end if;
+
+    tgt := tr -> 'target';
+    if not coalesce(
+      (tgt ->> 'type' = 'all' and public.brand_keys_only(tgt, array['type']))
+      or (tgt ->> 'type' = 'shape' and public.brand_keys_only(tgt, array['type', 'index']) and public.brand_int_between(tgt -> 'index', 0, 99))
+      or (tgt ->> 'type' = 'role' and public.brand_keys_only(tgt, array['type', 'role'])
+          and jsonb_typeof(tgt -> 'role') = 'string' and tgt ->> 'role' in ('fill', 'cutout', 'stroke')),
+      false) or jsonb_typeof(tgt -> 'type') is distinct from 'string' then
+      return 'target';
+    end if;
+
+    stg := tr -> 'stagger';
+    if not public.brand_keys_only(stg, array['mode', 'amount', 'seed'])
+      or jsonb_typeof(stg -> 'mode') is distinct from 'string'
+      or stg ->> 'mode' not in ('none', 'order', 'center', 'random')
+      or not public.brand_number_between(stg -> 'amount', 0, 0.5)
+      or not public.brand_int_between(stg -> 'seed', 0, 999999) then
+      return 'stagger';
+    end if;
+    if not public.brand_int_between(tr -> 'repeat', 1, 4) then
+      return 'repeat';
+    end if;
+    if kind in ('shine', 'wave', 'dots', 'sparks') and (tgt ->> 'type' <> 'all' or stg ->> 'mode' <> 'none') then
+      return 'global_target';
+    end if;
+
+    if jsonb_typeof(tr -> 'keyframes') is distinct from 'array' or jsonb_array_length(tr -> 'keyframes') not between 1 and 12 then
+      return 'keyframes';
+    end if;
+    vmin := case kind when 'breathe' then -0.1 when 'rotate' then -360 when 'float' then -30 else 0 end;
+    vmax := case kind when 'breathe' then 0.1 when 'rotate' then 360 when 'float' then 30 else 1 end;
+    prev := null;
+    for kf in select k.value from jsonb_array_elements(tr -> 'keyframes') k loop
+      if not public.brand_keys_only(kf, array['t', 'v', 'ease'])
+        or not public.brand_number_between(kf -> 't', 0, 1)
+        or (prev is not null and (kf ->> 't')::numeric <= prev)
+        or not public.brand_number_between(kf -> 'v', vmin, vmax)
+        or not public.brand_easing_valid(kf -> 'ease') then
+        return 'keyframe';
+      end if;
+      prev := (kf ->> 't')::numeric;
+    end loop;
+
+    fields_ok := case kind
+      when 'fill' then jsonb_typeof(tr -> 'variant') = 'string'
+        and tr ->> 'variant' in ('fade', 'bloom', 'wipeUp', 'wipeDown', 'wipeLeft', 'wipeRight')
+      when 'shine' then public.brand_number_between(tr -> 'width', 20, 120)
+        and public.brand_number_between(tr -> 'angle', -30, 30) and public.brand_number_between(tr -> 'strength', 0.1, 0.8)
+      when 'wave' then public.brand_number_between(tr -> 'scale', 3, 8) and public.brand_easing_valid(tr -> 'grow')
+      when 'dots' then jsonb_typeof(tr -> 'variant') = 'string' and tr ->> 'variant' in ('glow', 'gradient')
+        and public.brand_number_between(tr -> 'spacing', 12, 28) and public.brand_number_between(tr -> 'radius', 0.8, 2.2)
+        and public.brand_number_between(tr -> 'glowRadius', 1.2, 2.6) and public.brand_number_between(tr -> 'fade', 0.2, 0.8)
+      when 'sparks' then public.brand_int_between(tr -> 'count', 1, 40) and public.brand_int_between(tr -> 'seed', 0, 999999)
+        and public.brand_number_between(tr -> 'size', 0.5, 3) and public.brand_number_between(tr -> 'distance', 0.2, 1.5)
+      when 'float' then jsonb_typeof(tr -> 'axis') = 'string' and tr ->> 'axis' in ('x', 'y')
+      when 'exit' then jsonb_typeof(tr -> 'variant') = 'string' and tr ->> 'variant' in ('fade', 'shrink')
+        and jsonb_typeof(tr -> 'layer') = 'string' and tr ->> 'layer' in ('all', 'outline', 'fill')
+        and public.brand_number_between(tr -> 'amount', 0.1, 1)
+      when 'color' then jsonb_typeof(tr -> 'from') = 'string' and tr ->> 'from' in ('accent', 'accentLight', 'accentDark', 'neutral')
+        and jsonb_typeof(tr -> 'to') = 'string' and tr ->> 'to' in ('accent', 'accentLight', 'accentDark', 'neutral')
+      else true
+    end;
+    if not coalesce(fields_ok, false) then
+      return 'track_value';
+    end if;
+
+    if kind = 'dots' then
+      dots := dots + 1;
+    end if;
+    if kind = 'sparks' then
+      sparks := sparks + (tr ->> 'count')::numeric;
+    end if;
+    if (tr -> 'enabled')::boolean then
+      if kind = 'draw' then
+        elements := shapes;
+      elsif kind = 'sparks' then
+        elements := (tr ->> 'count')::numeric;
+      elsif tgt ->> 'type' <> 'all' or stg ->> 'mode' <> 'none' then
+        per_shape := true;
+        elements := case when tgt ->> 'type' = 'shape' then 1 else shapes end;
+      else
+        elements := 1;
+      end if;
+      weight := case kind
+        when 'draw' then 1 when 'fill' then 2 when 'shine' then 4 when 'wave' then 6
+        when 'dots' then case when tr ->> 'variant' = 'gradient' then 5 else 3 end
+        when 'sparks' then 1 when 'color' then 2 else 1
+      end;
+      cost := cost + elements * weight;
+    end if;
+  end loop;
+
+  if dots > 1 then
+    return 'dots';
+  end if;
+  if sparks > 40 then
+    return 'sparks';
+  end if;
+  if per_shape then
+    cost := cost + shapes;
+  end if;
+  if cost > 160 then
+    return 'cost';
+  end if;
+  return null;
+end;
+$$;
+
+alter table public.animation_presets add column if not exists spec_version int not null default 1;
+alter table public.animation_presets add column if not exists spec jsonb;
+-- v2 presets keep their v1 parameters only as the source of the "Einfach" tab (or none).
+alter table public.animation_presets alter column params drop not null;
+alter table public.animation_presets drop constraint if exists animation_presets_params_check;
+alter table public.animation_presets drop constraint if exists animation_presets_spec_check;
+alter table public.animation_presets add constraint animation_presets_spec_check check (
+  (spec_version = 1 and spec is null and public.brand_preset_params_valid(params))
+  or (spec_version = 2 and public.brand_animation_problem(spec) is null
+      and (params is null or public.brand_preset_params_valid(params)))
+);
+
+-- The last 10 saves of each custom preset ("Versionsverlauf"); restored through the editor.
+create table if not exists public.preset_versions (
+  id        uuid primary key default gen_random_uuid(),
+  preset_id uuid not null references public.animation_presets (id) on delete cascade,
+  version   int not null check (version >= 1),
+  name      text not null check (char_length(btrim(name)) between 1 and 40),
+  spec      jsonb not null check (public.brand_animation_problem(spec) is null),
+  params    jsonb check (params is null or public.brand_preset_params_valid(params)),
+  saved_at  timestamptz not null default now(),
+  saved_by  uuid references public.profiles (id) on delete set null,
+  unique (preset_id, version)
+);
+alter table public.preset_versions enable row level security;
+revoke all on public.preset_versions from public, anon, authenticated;
+create index if not exists preset_versions_preset_idx on public.preset_versions (preset_id, version desc);
+
 create table if not exists public.logo_library (
   id                  uuid primary key default gen_random_uuid(),
   name                text not null check (char_length(btrim(name)) between 1 and 40),
@@ -10161,6 +10415,26 @@ insert into public.animation_presets (id, name, kind, params) values
 -- brand-seed:00000000-0000-4000-8000-00000000a004
    '{"duration":8,"drawLine":true,"drawPortion":0.5,"strokeWidth":2.4,"fill":false,"fillMode":"fade","shine":false,"shineWidth":50,"shineAngle":12,"wave":false,"waveStrength":0.95,"waveScale":6,"dots":true,"dotSpacing":18,"dotRadius":1.1,"dotGlowRadius":1.6,"dotFade":0.35,"breathe":false,"breatheStrength":2,"hold":0.2,"exit":"fade","easing":"smooth"}'::jsonb)
 on conflict (id) do update set name = excluded.name, kind = 'builtin', params = excluded.params;
+
+-- The built-in presets as Animation v2: frame for frame the same values as their v1 parameters
+-- above (test "v1 presets as v2"); the parameters stay for the "Einfach" tab. Running the file
+-- again restores them.
+update public.animation_presets set spec_version = 2, spec =
+-- brand-seed-v2:00000000-0000-4000-8000-00000000a001
+   '{"version":2,"duration":8,"strokeWidth":2.4,"tracks":[{"enabled":true,"target":{"type":"all"},"stagger":{"mode":"none","amount":0,"seed":0},"repeat":1,"kind":"dots","variant":"glow","spacing":18,"radius":1.1,"glowRadius":1.6,"fade":0.35,"keyframes":[{"t":0,"v":0,"ease":{"type":"preset","name":"linear"}}]},{"enabled":true,"target":{"type":"all"},"stagger":{"mode":"none","amount":0,"seed":0},"repeat":1,"kind":"wave","scale":6,"grow":{"type":"bezier","x1":0.2,"y1":0.6,"x2":0.3,"y2":1},"keyframes":[{"t":0.4,"v":0,"ease":{"type":"preset","name":"linear"}},{"t":0.42,"v":0.95,"ease":{"type":"preset","name":"linear","reverse":true}},{"t":0.62,"v":0,"ease":{"type":"preset","name":"linear"}}]},{"enabled":true,"target":{"type":"all"},"stagger":{"mode":"none","amount":0,"seed":0},"repeat":1,"kind":"draw","keyframes":[{"t":0,"v":0,"ease":{"type":"bezier","x1":0.45,"y1":0,"x2":0.2,"y2":1}},{"t":0.3,"v":1,"ease":{"type":"preset","name":"linear"}}]},{"enabled":true,"target":{"type":"all"},"stagger":{"mode":"none","amount":0,"seed":0},"repeat":1,"kind":"fill","variant":"fade","keyframes":[{"t":0.25,"v":0,"ease":{"type":"bezier","x1":0,"y1":0,"x2":0.58,"y2":1}},{"t":0.42,"v":1,"ease":{"type":"preset","name":"linear"}}]},{"enabled":true,"target":{"type":"all"},"stagger":{"mode":"none","amount":0,"seed":0},"repeat":1,"kind":"exit","variant":"fade","layer":"outline","amount":0.4,"keyframes":[{"t":0.36,"v":0,"ease":{"type":"preset","name":"linear"}},{"t":0.48,"v":1,"ease":{"type":"preset","name":"linear"}}]},{"enabled":true,"target":{"type":"all"},"stagger":{"mode":"none","amount":0,"seed":0},"repeat":1,"kind":"shine","width":50,"angle":12,"strength":0.55,"keyframes":[{"t":0.42,"v":0,"ease":{"type":"bezier","x1":0.42,"y1":0,"x2":0.58,"y2":1}},{"t":0.62,"v":1,"ease":{"type":"preset","name":"linear"}}]},{"enabled":true,"target":{"type":"all"},"stagger":{"mode":"none","amount":0,"seed":0},"repeat":1,"kind":"breathe","keyframes":[{"t":0.5,"v":0,"ease":{"type":"bezier","x1":0.42,"y1":0,"x2":0.58,"y2":1}},{"t":0.65,"v":0.02,"ease":{"type":"bezier","x1":0.42,"y1":0,"x2":0.58,"y2":1,"reverse":true}},{"t":0.8,"v":0,"ease":{"type":"preset","name":"linear"}}]},{"enabled":true,"target":{"type":"all"},"stagger":{"mode":"none","amount":0,"seed":0},"repeat":1,"kind":"exit","variant":"fade","layer":"all","amount":0.4,"keyframes":[{"t":0.82,"v":0,"ease":{"type":"preset","name":"linear"}},{"t":0.95,"v":1,"ease":{"type":"preset","name":"linear"}}]}]}'::jsonb
+where id = '00000000-0000-4000-8000-00000000a001';
+update public.animation_presets set spec_version = 2, spec =
+-- brand-seed-v2:00000000-0000-4000-8000-00000000a002
+   '{"version":2,"duration":10,"strokeWidth":2.4,"tracks":[{"enabled":true,"target":{"type":"all"},"stagger":{"mode":"none","amount":0,"seed":0},"repeat":1,"kind":"dots","variant":"glow","spacing":18,"radius":1.1,"glowRadius":1.6,"fade":0.35,"keyframes":[{"t":0,"v":0,"ease":{"type":"preset","name":"linear"}}]},{"enabled":true,"target":{"type":"all"},"stagger":{"mode":"none","amount":0,"seed":0},"repeat":1,"kind":"fill","variant":"fade","keyframes":[{"t":0.25,"v":0,"ease":{"type":"bezier","x1":0,"y1":0,"x2":0.58,"y2":1}},{"t":0.42,"v":1,"ease":{"type":"preset","name":"linear"}}]},{"enabled":true,"target":{"type":"all"},"stagger":{"mode":"none","amount":0,"seed":0},"repeat":1,"kind":"exit","variant":"fade","layer":"all","amount":0.4,"keyframes":[{"t":0.82,"v":0,"ease":{"type":"preset","name":"linear"}},{"t":0.95,"v":1,"ease":{"type":"preset","name":"linear"}}]}]}'::jsonb
+where id = '00000000-0000-4000-8000-00000000a002';
+update public.animation_presets set spec_version = 2, spec =
+-- brand-seed-v2:00000000-0000-4000-8000-00000000a003
+   '{"version":2,"duration":6,"strokeWidth":2.4,"tracks":[{"enabled":true,"target":{"type":"all"},"stagger":{"mode":"none","amount":0,"seed":0},"repeat":1,"kind":"dots","variant":"glow","spacing":18,"radius":1.1,"glowRadius":1.6,"fade":0.35,"keyframes":[{"t":0,"v":0,"ease":{"type":"preset","name":"linear"}}]},{"enabled":true,"target":{"type":"all"},"stagger":{"mode":"none","amount":0,"seed":0},"repeat":1,"kind":"wave","scale":8,"grow":{"type":"bezier","x1":0.1,"y1":0.9,"x2":0.2,"y2":1},"keyframes":[{"t":0.4,"v":0,"ease":{"type":"preset","name":"linear"}},{"t":0.42,"v":1,"ease":{"type":"preset","name":"linear","reverse":true}},{"t":0.62,"v":0,"ease":{"type":"preset","name":"linear"}}]},{"enabled":true,"target":{"type":"all"},"stagger":{"mode":"none","amount":0,"seed":0},"repeat":1,"kind":"draw","keyframes":[{"t":0,"v":0,"ease":{"type":"bezier","x1":0.7,"y1":0,"x2":0.1,"y2":1}},{"t":0.3,"v":1,"ease":{"type":"preset","name":"linear"}}]},{"enabled":true,"target":{"type":"all"},"stagger":{"mode":"none","amount":0,"seed":0},"repeat":1,"kind":"fill","variant":"bloom","keyframes":[{"t":0.25,"v":0,"ease":{"type":"bezier","x1":0.16,"y1":1,"x2":0.3,"y2":1}},{"t":0.42,"v":1,"ease":{"type":"preset","name":"linear"}}]},{"enabled":true,"target":{"type":"all"},"stagger":{"mode":"none","amount":0,"seed":0},"repeat":1,"kind":"exit","variant":"fade","layer":"outline","amount":0.4,"keyframes":[{"t":0.36,"v":0,"ease":{"type":"preset","name":"linear"}},{"t":0.48,"v":1,"ease":{"type":"preset","name":"linear"}}]},{"enabled":true,"target":{"type":"all"},"stagger":{"mode":"none","amount":0,"seed":0},"repeat":1,"kind":"shine","width":70,"angle":12,"strength":0.55,"keyframes":[{"t":0.42,"v":0,"ease":{"type":"bezier","x1":0.65,"y1":0,"x2":0.35,"y2":1}},{"t":0.62,"v":1,"ease":{"type":"preset","name":"linear"}}]},{"enabled":true,"target":{"type":"all"},"stagger":{"mode":"none","amount":0,"seed":0},"repeat":1,"kind":"breathe","keyframes":[{"t":0.5,"v":0,"ease":{"type":"bezier","x1":0.65,"y1":0,"x2":0.35,"y2":1}},{"t":0.65,"v":0.03,"ease":{"type":"bezier","x1":0.65,"y1":0,"x2":0.35,"y2":1,"reverse":true}},{"t":0.8,"v":0,"ease":{"type":"preset","name":"linear"}}]},{"enabled":true,"target":{"type":"all"},"stagger":{"mode":"none","amount":0,"seed":0},"repeat":1,"kind":"exit","variant":"fade","layer":"all","amount":0.4,"keyframes":[{"t":0.82,"v":0,"ease":{"type":"preset","name":"linear"}},{"t":0.95,"v":1,"ease":{"type":"preset","name":"linear"}}]}]}'::jsonb
+where id = '00000000-0000-4000-8000-00000000a003';
+update public.animation_presets set spec_version = 2, spec =
+-- brand-seed-v2:00000000-0000-4000-8000-00000000a004
+   '{"version":2,"duration":8,"strokeWidth":2.4,"tracks":[{"enabled":true,"target":{"type":"all"},"stagger":{"mode":"none","amount":0,"seed":0},"repeat":1,"kind":"dots","variant":"glow","spacing":18,"radius":1.1,"glowRadius":1.6,"fade":0.35,"keyframes":[{"t":0,"v":0,"ease":{"type":"preset","name":"linear"}}]},{"enabled":true,"target":{"type":"all"},"stagger":{"mode":"none","amount":0,"seed":0},"repeat":1,"kind":"draw","keyframes":[{"t":0,"v":0,"ease":{"type":"bezier","x1":0.45,"y1":0,"x2":0.2,"y2":1}},{"t":0.413043,"v":1,"ease":{"type":"preset","name":"linear"}}]},{"enabled":true,"target":{"type":"all"},"stagger":{"mode":"none","amount":0,"seed":0},"repeat":1,"kind":"exit","variant":"fade","layer":"all","amount":0.4,"keyframes":[{"t":0.842609,"v":0,"ease":{"type":"preset","name":"linear"}},{"t":0.95,"v":1,"ease":{"type":"preset","name":"linear"}}]}]}'::jsonb
+where id = '00000000-0000-4000-8000-00000000a004';
 
 -- App-Logo: the shapes of assets/peakpic-icons/svg-quellen/default_bw.svg (without the square
 -- background). Flamme: PLATZHALTER (the login screen used the Ionicons glyph, no vector file).
@@ -10391,7 +10665,7 @@ create or replace function public.get_dashboard_logo()
 returns jsonb
 language sql stable security definer set search_path = ''
 as $$
-  select jsonb_build_object('logo', l.spec, 'preset', p.params)
+  select jsonb_build_object('logo', l.spec, 'preset', case when p.spec_version = 2 then p.spec else p.params end)
   from public.design_assignments a
   join public.logo_library l on l.id = a.logo_id
   join public.animation_presets p on p.id = l.preset_id
@@ -10550,7 +10824,8 @@ begin
 end;
 $$;
 
--- Presets with how many logos use them. Admin.
+-- Presets with how many logos use them. Admin. v2 presets bring their spec (and, if made in the
+-- "Einfach" tab, the v1 parameters); v1 presets only their parameters.
 create or replace function public.admin_preset_list()
 returns jsonb
 language plpgsql stable security definer set search_path = ''
@@ -10559,40 +10834,66 @@ begin
   perform public.require_admin();
   return coalesce((
     select jsonb_agg(jsonb_build_object(
-      'id', p.id, 'name', p.name, 'kind', p.kind, 'params', p.params, 'updated_at', p.updated_at,
-      'used_by', (select count(*) from public.logo_library l where l.preset_id = p.id)
+      'id', p.id, 'name', p.name, 'kind', p.kind, 'spec_version', p.spec_version, 'spec', p.spec, 'params', p.params,
+      'updated_at', p.updated_at,
+      'used_by', (select count(*) from public.logo_library l where l.preset_id = p.id),
+      'versions', (select count(*) from public.preset_versions v where v.preset_id = p.id)
     ) order by p.kind, p.name)
     from public.animation_presets p
   ), '[]'::jsonb);
 end;
 $$;
 
--- Creates (p_id null: also "Duplizieren") or changes a custom preset (name and parameters, ranges
--- checked). Built-in presets never change. At most 50 custom presets.
-create or replace function public.admin_preset_save(p_id uuid, p_name text, p_params jsonb)
+-- What the log keeps of a spec: its hash, duration and number of tracks (never the whole spec).
+create or replace function public.brand_spec_summary(p_name text, p_spec jsonb)
+returns jsonb
+language sql immutable set search_path = ''
+as $$
+  select jsonb_build_object(
+    'name', p_name,
+    'spec_hash', case when p_spec is null then null else encode(sha256(convert_to(p_spec::text, 'UTF8')), 'hex') end,
+    'duration', p_spec -> 'duration',
+    'tracks', case when jsonb_typeof(p_spec -> 'tracks') = 'array' then jsonb_array_length(p_spec -> 'tracks') end
+  );
+$$;
+
+drop function if exists public.admin_preset_save(uuid, text, jsonb);
+
+-- Creates (p_id null: also "Duplizieren") or changes a custom preset: the Animation v2 is checked
+-- again here (brand_animation_problem), the optional v1 parameters (tab "Einfach") as well.
+-- Built-in presets never change; at most 50 custom presets. Every save becomes a version (the
+-- last 10 per preset stay). Logged with before and after (name, hash of the spec).
+create or replace function public.admin_preset_save(p_id uuid, p_name text, p_spec jsonb, p_params jsonb default null)
 returns uuid
 language plpgsql security definer set search_path = ''
 as $$
 declare
   existing public.animation_presets%rowtype;
   saved uuid;
+  next_version int;
+  problem text := public.brand_animation_problem(p_spec);
 begin
   perform public.require_admin();
   if p_name is null or char_length(btrim(p_name)) not between 1 and 40 then
     raise exception 'invalid_name';
   end if;
-  if not public.brand_preset_params_valid(p_params) then
+  if problem is not null then
+    raise exception 'invalid_spec' using detail = problem;
+  end if;
+  if p_params is not null and not public.brand_preset_params_valid(p_params) then
     raise exception 'invalid_params';
   end if;
   if p_id is null then
     if (select count(*) from public.animation_presets p where p.kind = 'custom') >= 50 then
       raise exception 'too_many_presets';
     end if;
-    insert into public.animation_presets (name, kind, params, created_by)
-    values (btrim(p_name), 'custom', p_params, auth.uid())
+    insert into public.animation_presets (name, kind, spec_version, spec, params, created_by)
+    values (btrim(p_name), 'custom', 2, p_spec, p_params, auth.uid())
     returning id into saved;
+    insert into public.preset_versions (preset_id, version, name, spec, params, saved_by)
+    values (saved, 1, btrim(p_name), p_spec, p_params, auth.uid());
     perform public.log_moderation_action('preset_create', 'animation_preset', saved, null, null, 'Animations-Preset angelegt', null,
-      jsonb_build_object('name', btrim(p_name), 'params', p_params));
+      jsonb_build_object('after', public.brand_spec_summary(btrim(p_name), p_spec)));
     return saved;
   end if;
   select * into existing from public.animation_presets p where p.id = p_id for update;
@@ -10602,11 +10903,36 @@ begin
   if existing.kind = 'builtin' then
     raise exception 'builtin_preset';
   end if;
-  update public.animation_presets set name = btrim(p_name), params = p_params, updated_at = now() where id = p_id;
+  update public.animation_presets
+  set name = btrim(p_name), spec_version = 2, spec = p_spec, params = p_params, updated_at = now()
+  where id = p_id;
+  select coalesce(max(v.version), 0) + 1 into next_version from public.preset_versions v where v.preset_id = p_id;
+  insert into public.preset_versions (preset_id, version, name, spec, params, saved_by)
+  values (p_id, next_version, btrim(p_name), p_spec, p_params, auth.uid());
+  delete from public.preset_versions v where v.preset_id = p_id and v.version <= next_version - 10;
   perform public.log_moderation_action('preset_update', 'animation_preset', p_id, null, null, 'Animations-Preset geändert', null,
-    jsonb_build_object('before', jsonb_build_object('name', existing.name, 'params', existing.params),
-                       'after', jsonb_build_object('name', btrim(p_name), 'params', p_params)));
+    jsonb_build_object('before', public.brand_spec_summary(existing.name, coalesce(existing.spec, existing.params)),
+                       'after', public.brand_spec_summary(btrim(p_name), p_spec), 'version', next_version));
   return p_id;
+end;
+$$;
+
+-- The saved versions of a preset, newest first (at most 10). Admin.
+create or replace function public.admin_preset_versions(p_preset_id uuid)
+returns jsonb
+language plpgsql stable security definer set search_path = ''
+as $$
+begin
+  perform public.require_admin();
+  return coalesce((
+    select jsonb_agg(jsonb_build_object(
+      'id', v.id, 'version', v.version, 'name', v.name, 'spec', v.spec, 'params', v.params,
+      'saved_at', v.saved_at, 'saved_by', u.username
+    ) order by v.version desc)
+    from public.preset_versions v
+    left join public.profiles u on u.id = v.saved_by
+    where v.preset_id = p_preset_id
+  ), '[]'::jsonb);
 end;
 $$;
 
@@ -10636,6 +10962,11 @@ end;
 $$;
 
 revoke all on function public.brand_logo_spec_valid(jsonb) from public, anon, authenticated;
+revoke all on function public.brand_keys_only(jsonb, text[]) from public, anon, authenticated;
+revoke all on function public.brand_int_between(jsonb, numeric, numeric) from public, anon, authenticated;
+revoke all on function public.brand_easing_valid(jsonb) from public, anon, authenticated;
+revoke all on function public.brand_animation_problem(jsonb) from public, anon, authenticated;
+revoke all on function public.brand_spec_summary(text, jsonb) from public, anon, authenticated;
 revoke all on function public.get_dashboard_logo() from public;
 grant execute on function public.get_dashboard_logo() to anon, authenticated;
 do $$
@@ -10646,7 +10977,8 @@ begin
     'public.admin_logo_import_slot()', 'public.admin_logo_list()',
     'public.admin_logo_save(uuid, text, jsonb, uuid, text, text, boolean)', 'public.admin_logo_delete(uuid)',
     'public.admin_logo_activate(uuid, text[])', 'public.admin_preset_list()',
-    'public.admin_preset_save(uuid, text, jsonb)', 'public.admin_preset_delete(uuid)'
+    'public.admin_preset_save(uuid, text, jsonb, jsonb)', 'public.admin_preset_delete(uuid)',
+    'public.admin_preset_versions(uuid)'
   ] loop
     execute format('revoke all on function %s from public, anon', f);
     execute format('grant execute on function %s to authenticated', f);
@@ -10796,7 +11128,7 @@ as $$
     'mode', c.login_mode,
     'animation', c.login_animation,
     'logo', l.spec,
-    'preset', p.params,
+    'preset', case when p.spec_version = 2 then p.spec else p.params end,
     'colors', public.brand_color_public('app_login_colors'),
     'dashboard_colors', public.brand_color_public('dashboard_colors')
   )

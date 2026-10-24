@@ -16,7 +16,7 @@ export function LoginPage() {
     <div className="auth-logo">
       <BrandLogo
         spec={brand.spec}
-        params={brand.params}
+        animation={brand.animation}
         palette={brand.palette}
         mode={brand.mode}
         size={220}

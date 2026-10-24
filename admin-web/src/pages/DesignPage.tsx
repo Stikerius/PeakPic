@@ -95,7 +95,7 @@ export function DesignPage() {
           <div>
             <TokenPreview style={appearance.style} mode={shownMode} palette={appearance.palette} colorSet={colorSet} className="design-preview">
               <div className="design-preview-head">
-                <BrandLogo spec={brand.spec} params={brand.params} palette={appearance.palette} mode={shownMode} size={44} dots={false} />
+                <BrandLogo spec={brand.spec} animation={brand.animation} palette={appearance.palette} mode={shownMode} size={44} dots={false} />
                 <strong>PeakPic Moderation</strong>
               </div>
               <table className="table">
@@ -178,7 +178,7 @@ export function DesignPage() {
               </div>
             </div>
             <TokenPreview style="new" mode={appMode} palette={app.palette} colorSet={app.colors} className="phone-preview">
-              <BrandLogo spec={app.logo} params={app.preset} palette={app.palette} mode={appMode} size={200} playing={app.animation} colorSet={app.colors} />
+              <BrandLogo spec={app.logo} animation={app.preset} palette={app.palette} mode={appMode} size={200} playing={app.animation} colorSet={app.colors} />
               <p className="phone-title">PeakPic</p>
               <p className="muted">Willkommen zurück!</p>
               <span className="phone-field" />

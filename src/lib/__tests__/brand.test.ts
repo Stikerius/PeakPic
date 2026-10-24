@@ -27,6 +27,7 @@ import {
   validateLogoSpec,
   validatePresetParams,
 } from "../../../shared/brand";
+import { STANDARD_ANIMATION, migrateV1 } from "../../../shared/brand/animation";
 
 const standard = brandTimeline(STANDARD_PARAMS);
 const at = (p: number) => brandFrame(p, STANDARD_PARAMS, standard);
@@ -263,7 +264,8 @@ describe("design config and fallback", () => {
       mode: "dark",
       animation: false,
       logo: FLAME_LOGO_SPEC,
-      preset: BUILTIN_PRESETS[1]?.params,
+      // v1 parameters are read as Animation v2.
+      preset: migrateV1(BUILTIN_PRESETS[1]?.params ?? STANDARD_PARAMS),
       colors: DEFAULT_DESIGN_CONFIG.colors,
     });
   });
@@ -271,7 +273,10 @@ describe("design config and fallback", () => {
   it("a broken logo or preset falls back to the app logo / standard", () => {
     const parsed = parsePublicDesignConfig({ ...remote, logo: { version: 1, shapes: "<script>" }, preset: { duration: 99 } });
     expect(parsed?.logo).toEqual(APP_LOGO_SPEC);
-    expect(parsed?.preset).toEqual(STANDARD_PARAMS);
+    expect(parsed?.preset).toEqual(STANDARD_ANIMATION);
+    expect(parsePublicDesignConfig({ ...remote, preset: { ...STANDARD_ANIMATION, duration: 99 } })?.preset).toEqual(STANDARD_ANIMATION);
+    const v2 = { ...STANDARD_ANIMATION, duration: 12 };
+    expect(parsePublicDesignConfig({ ...remote, preset: v2 })?.preset).toEqual(v2);
   });
 
   it("an unknown palette, mode or switch, or a huge answer is not trusted at all", () => {
@@ -302,12 +307,21 @@ describe("palettes", () => {
 describe("seeds in schema.sql match the shared values", () => {
   const schema = readFileSync(join(__dirname, "../../../supabase/schema.sql"), "utf8");
   const seed = (marker: string): unknown => {
-    const match = new RegExp(`-- brand-seed:${marker}\\n\\s*'([^']+)'`).exec(schema);
+    // Line ends may be CRLF in a Windows working copy.
+    const match = new RegExp(`-- brand-seed:${marker}\\r?\\n\\s*'([^']+)'`).exec(schema);
     return match?.[1] !== undefined ? JSON.parse(match[1]) : null;
   };
 
   it("presets", () => {
     for (const preset of BUILTIN_PRESETS) expect(seed(preset.id)).toEqual(preset.params);
+  });
+
+  it("presets as Animation v2 (frame for frame the same as their v1 parameters)", () => {
+    const v2 = (id: string): unknown => {
+      const match = new RegExp(`-- brand-seed-v2:${id}\\r?\\n\\s*'([^']+)'`).exec(schema);
+      return match?.[1] !== undefined ? JSON.parse(match[1]) : null;
+    };
+    for (const preset of BUILTIN_PRESETS) expect(v2(preset.id)).toEqual(migrateV1(preset.params));
   });
 
   it("logos", () => {

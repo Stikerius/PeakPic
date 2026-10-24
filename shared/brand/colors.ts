@@ -71,6 +71,7 @@ export function onAccentColor(accent: string): string {
 
 /** `top` laid over `bottom` with the given opacity, as an opaque colour (both #rrggbb). */
 export function blendHex(bottom: string, top: string, alpha: number): string {
+  "worklet";
   const mix = (i: number) => {
     const a = Number.parseInt(bottom.slice(i, i + 2), 16);
     const b = Number.parseInt(top.slice(i, i + 2), 16);

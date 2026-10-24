@@ -4,7 +4,7 @@
 import { DEFAULT_COLOR_SET, colorSetToPublic, parseColorSet, type ColorSet } from "./colors";
 import { APP_LOGO_SPEC, validateLogoSpec, type LogoSpec } from "./logoSpec";
 import type { BrandPaletteName } from "./palettes";
-import { STANDARD_PARAMS, validatePresetParams, type PresetParams } from "./presets";
+import { STANDARD_ANIMATION, parseAnimation, type AnimationSpec } from "./animation";
 
 export type LoginMode = "system" | "light" | "dark";
 
@@ -13,7 +13,8 @@ export type PublicDesignConfig = {
   mode: LoginMode;
   animation: boolean;
   logo: LogoSpec;
-  preset: PresetParams;
+  /** Animation v2 (a v1 preset is converted when read). */
+  preset: AnimationSpec;
   /** Active colour set of the app login ("Hauptfarbe"); "Orange" when missing or invalid. */
   colors: ColorSet;
 };
@@ -23,7 +24,7 @@ export const DEFAULT_DESIGN_CONFIG: PublicDesignConfig = {
   mode: "system",
   animation: true,
   logo: APP_LOGO_SPEC,
-  preset: STANDARD_PARAMS,
+  preset: STANDARD_ANIMATION,
   colors: DEFAULT_COLOR_SET,
 };
 
@@ -50,13 +51,12 @@ export function parsePublicDesignConfig(value: unknown): PublicDesignConfig | nu
   if (mode !== "system" && mode !== "light" && mode !== "dark") return null;
   if (animation !== "on" && animation !== "off") return null;
   const logo = validateLogoSpec(raw.logo);
-  const preset = validatePresetParams(raw.preset);
   return {
     palette,
     mode,
     animation: animation === "on",
     logo: logo.ok ? logo.spec : APP_LOGO_SPEC,
-    preset: preset.ok ? preset.params : STANDARD_PARAMS,
+    preset: parseAnimation(raw.preset) ?? STANDARD_ANIMATION,
     colors: parseColorSet(raw.colors) ?? DEFAULT_COLOR_SET,
   };
 }

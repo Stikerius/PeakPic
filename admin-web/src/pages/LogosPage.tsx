@@ -5,7 +5,7 @@ import { BrandLogo } from "../components/BrandLogo";
 import { ConfirmDialog } from "../components/ConfirmDialog";
 import { LogoUploadWizard } from "../components/LogoUploadWizard";
 import { Modal } from "../components/Modal";
-import { PresetPicker } from "../components/PresetPicker";
+import { AnimationStudio } from "../components/animation/AnimationStudio";
 import {
   TARGET_LABELS,
   deleteLogo,
@@ -20,6 +20,7 @@ import {
 import { validateLogoSpec, type ShapeRole } from "../lib/brand";
 import { useDashboardBrand } from "../lib/dashboardBrand";
 import { formatDateTime } from "../lib/format";
+import { presetParams, presetSpec } from "../lib/animationEditor";
 import { deleteBlocker, duplicateName } from "../lib/logoLibrary";
 import { PageHeader, Skeleton } from "../components/ui";
 
@@ -122,7 +123,7 @@ export function LogosPage() {
               <div className="logo-tile-preview">
                 <BrandLogo
                   spec={logo.spec}
-                  params={presets.find((p) => p.id === logo.presetId)?.params}
+                  animation={presets.find((p) => p.id === logo.presetId)?.animation}
                   palette={brand.palette}
                   mode={brand.mode}
                   size={160}
@@ -198,7 +199,7 @@ export function LogosPage() {
                   <button
                     type="button"
                     className="button small"
-                    onClick={() => void run(() => savePreset(null, duplicateName(preset.name), preset.params), `„${preset.name}“ dupliziert.`)}
+                    onClick={() => void run(() => savePreset(null, duplicateName(preset.name), presetSpec(preset), presetParams(preset)), `„${preset.name}“ dupliziert.`)}
                   >
                     Duplizieren
                   </button>
@@ -427,7 +428,7 @@ function AnimationDialog({
         </>
       }
     >
-      <PresetPicker spec={logo.spec} presets={presets} presetId={presetId} onSelect={setPresetId} onSaved={async () => onPresetsChanged()} onDirtyChange={setDirty} />
+      <AnimationStudio spec={logo.spec} presets={presets} presetId={presetId} onSelect={setPresetId} onSaved={async () => onPresetsChanged()} onDirtyChange={setDirty} />
     </Modal>
   );
 }
@@ -480,7 +481,7 @@ function RenamePresetDialog({ preset, onClose, onSave }: { preset: PresetRow; on
           <button type="button" className="button" onClick={onClose}>
             Abbrechen
           </button>
-          <button type="button" className="button primary" disabled={name.trim() === ""} onClick={() => onSave(() => savePreset(preset.id, name.trim(), preset.params))}>
+          <button type="button" className="button primary" disabled={name.trim() === ""} onClick={() => onSave(() => savePreset(preset.id, name.trim(), presetSpec(preset), presetParams(preset)))}>
             Speichern
           </button>
         </>

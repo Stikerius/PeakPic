@@ -1191,6 +1191,7 @@ const LOGO_ERRORS: Record<string, string> = {
   invalid_targets: "Bitte mindestens ein Ziel wählen.",
   preset_not_found: "Preset nicht gefunden.",
   invalid_params: "Ein Parameter liegt ausserhalb des erlaubten Bereichs.",
+  invalid_spec: "Die Animation erfüllt die Regeln nicht (Bereiche, Anzahl Spuren und Keyframes oder Aufwand).",
   too_many_presets: "Höchstens 50 eigene Presets.",
   builtin_preset: "Eingebaute Presets bleiben unverändert. Bitte duplizieren.",
   preset_in_use: "Das Preset wird noch von einem Logo verwendet.",
@@ -1270,17 +1271,54 @@ export async function activateLogo(id: string, targets: DesignTarget[]): Promise
   await logoRpc("admin_logo_activate", { p_logo_id: id, p_targets: targets });
 }
 
-export type PresetRow = { id: string; name: string; kind: "builtin" | "custom"; params: unknown; usedBy: number };
+export type PresetRow = {
+  id: string;
+  name: string;
+  kind: "builtin" | "custom";
+  /** Animation v2, or v1 parameters of an older preset (read with parseAnimation). */
+  animation: unknown;
+  /** The v1 parameters behind the tab "Einfach", if the preset was made there. */
+  params: unknown;
+  usedBy: number;
+  versions: number;
+};
 
 export async function fetchPresets(): Promise<PresetRow[]> {
   return asArray(await logoRpc("admin_preset_list", {})).map((value) => {
     const r = asRecord(value);
-    return { id: str(r.id), name: str(r.name), kind: r.kind === "builtin" ? "builtin" : "custom", params: r.params, usedBy: num(r.used_by) };
+    return {
+      id: str(r.id),
+      name: str(r.name),
+      kind: r.kind === "builtin" ? "builtin" : "custom",
+      animation: r.spec_version === 2 ? r.spec : r.params,
+      params: r.params ?? null,
+      usedBy: num(r.used_by),
+      versions: num(r.versions),
+    };
   });
 }
 
-export async function savePreset(id: string | null, name: string, params: unknown): Promise<string> {
-  return str(await logoRpc("admin_preset_save", { p_id: id, p_name: name, p_params: params }));
+/** Saves an Animation v2 (checked again on the server); `params` only when made in the tab "Einfach". */
+export async function savePreset(id: string | null, name: string, spec: unknown, params: unknown = null): Promise<string> {
+  return str(await logoRpc("admin_preset_save", { p_id: id, p_name: name, p_spec: spec, p_params: params }));
+}
+
+export type PresetVersionRow = { id: string; version: number; name: string; spec: unknown; params: unknown; savedAt: string; savedBy: string | null };
+
+/** The last saves of a preset, newest first (at most 10). */
+export async function fetchPresetVersions(presetId: string): Promise<PresetVersionRow[]> {
+  return asArray(await logoRpc("admin_preset_versions", { p_preset_id: presetId })).map((value) => {
+    const r = asRecord(value);
+    return {
+      id: str(r.id),
+      version: num(r.version),
+      name: str(r.name),
+      spec: r.spec,
+      params: r.params ?? null,
+      savedAt: str(r.saved_at),
+      savedBy: strOrNull(r.saved_by),
+    };
+  });
 }
 
 export async function deletePreset(id: string): Promise<void> {
@@ -1323,11 +1361,11 @@ export async function importLogo(svg: string, fileName: string): Promise<LogoImp
 }
 
 /** The active dashboard logo with its preset (public, also before signing in). */
-export async function fetchDashboardLogo(): Promise<{ spec: unknown; params: unknown } | null> {
+export async function fetchDashboardLogo(): Promise<{ spec: unknown; animation: unknown } | null> {
   const { data, error } = await supabase.rpc("get_dashboard_logo");
   if (error || data === null) return null;
   const r = asRecord(data);
-  return { spec: r.logo, params: r.preset };
+  return { spec: r.logo, animation: r.preset };
 }
 
 // ------------------------------------------------------------------ design of the app login screen (admins)

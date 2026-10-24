@@ -2,7 +2,7 @@ import { useMemo, useState } from "react";
 
 import { BrandLogo } from "./BrandLogo";
 import { Modal } from "./Modal";
-import { PresetPicker } from "./PresetPicker";
+import { AnimationStudio } from "./animation/AnimationStudio";
 import { importLogo, saveLogo, type LogoImport, type PresetRow } from "../lib/api";
 import { STANDARD_PRESET_ID, validateLogoSpec, type BrandMode, type LogoSpec, type ShapeRole } from "../lib/brand";
 import { assembleLogo, uploadProblem, type ShapeChoice } from "../lib/logoLibrary";
@@ -157,7 +157,7 @@ export function LogoUploadWizard({ presets, mode, onPresetsChanged, onClose, onS
         <section className="logo-shapes-step">
           <div className="logo-preview-box">
             {spec !== null ? (
-              <BrandLogo spec={spec} params={null} palette="bw" mode={mode} size={220} background dots={false} />
+              <BrandLogo spec={spec} animation={null} palette="bw" mode={mode} size={220} background dots={false} />
             ) : (
               <p className="error">{assembled?.ok === false ? assembled.error : "Keine sichtbare Form."}</p>
             )}
@@ -223,7 +223,7 @@ export function LogoUploadWizard({ presets, mode, onPresetsChanged, onClose, onS
       )}
 
       {step === 2 && spec !== null && (
-        <PresetPicker
+        <AnimationStudio
           spec={spec}
           presets={presets}
           presetId={presetId}
@@ -235,7 +235,7 @@ export function LogoUploadWizard({ presets, mode, onPresetsChanged, onClose, onS
 
       {step === 3 && spec !== null && (
         <section>
-          <BrandLogo spec={spec} params={presets.find((p) => p.id === presetId)?.params} palette="bw" mode={mode} size={180} background playing />
+          <BrandLogo spec={spec} animation={presets.find((p) => p.id === presetId)?.animation} palette="bw" mode={mode} size={180} background playing />
           <label className="choice">
             <input type="checkbox" checked={rights} onChange={(e) => setRights(e.target.checked)} />
             Ich habe das Recht, dieses Logo zu verwenden.

@@ -2,7 +2,8 @@ import { Circle, Ellipse, Line, Path, Polygon, Polyline, Rect } from "react-nati
 import Animated, { useAnimatedProps, type SharedValue } from "react-native-reanimated";
 
 import { isIdentity, matrixAttribute, pointsAttribute, type LogoShape } from "../../../shared/brand/logoSpec";
-import type { BrandFrame } from "../../../shared/brand/timeline";
+import type { AnimFrame } from "../../../shared/brand/animation";
+import { frameColor } from "../../../shared/brand/palettes";
 
 /** Shared drawing props of a logo shape (colour, outline). Everything else comes from the spec. */
 type Paint = {
@@ -53,22 +54,35 @@ const AnimatedPolyline = Animated.createAnimatedComponent(Polyline);
 
 /**
  * A shape whose outline is drawn: dash = its length, the offset follows the frame (1 -> 0) on the
- * UI thread. `length` is in the shape's own units (shapeLength).
+ * UI thread: the shape's own value when tracks act on single shapes, else the whole outline's.
+ * `length` is in the shape's own units (shapeLength). With `swatches` the colour follows colour
+ * tracks; otherwise it stays `color`.
  */
 export function OutlineShape({
   shape,
+  index,
   length,
   frame,
   color,
+  swatches,
   strokeWidth,
 }: {
   shape: LogoShape;
+  index: number;
   length: number;
-  frame: SharedValue<BrandFrame>;
+  frame: SharedValue<AnimFrame>;
   color: string;
+  swatches: readonly string[] | null;
   strokeWidth: number;
 }) {
-  const animatedProps = useAnimatedProps(() => ({ strokeDashoffset: length * frame.get().strokeOffset }));
+  const animatedProps = useAnimatedProps((): { strokeDashoffset: number; stroke?: string } => {
+    const f = frame.get();
+    const own = f.shapes[index];
+    const offset = length * (own !== undefined ? 1 - own.draw : f.strokeOffset);
+    if (swatches === null) return { strokeDashoffset: offset };
+    const c = own !== undefined ? frameColor(swatches, own.colorFrom, own.colorTo, own.colorMix) : frameColor(swatches, f.colorFrom, f.colorTo, f.colorMix);
+    return { strokeDashoffset: offset, stroke: c };
+  });
   const transform = transformOf(shape);
   const paint = {
     fill: "none",

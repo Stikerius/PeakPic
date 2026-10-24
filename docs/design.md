@@ -179,6 +179,89 @@ Eingebaute Presets: „Standard“, „Ruhig“ (nur Einblenden und Punktraster)
 Glanz, kräftige Welle, 6 Sekunden), „Nur Zeichnen“. Eigene Presets lassen sich anlegen, duplizieren,
 umbenennen und löschen, letzteres nur, wenn kein Logo sie verwendet.
 
+Diese Parameter (v1) bleiben die Grundlage des Tabs „Einfach“. Gespeichert und abgespielt wird seit
+dem Animations-Editor immer „Animation v2“ (nächster Abschnitt).
+
+### Animation v2 (Editor)
+
+Eine Animation ist eine Zeitleiste mit Spuren (`shared/brand/animation.ts`, Typ `AnimationSpec`):
+`{ version: 2, duration, strokeWidth, tracks }`. Nur feste Spurarten mit Zahlen in festen Bereichen,
+kein Code, keine Ausdrücke, keine freien Texte (nur der Name des Presets).
+
+| Spurart | Wert der Keyframes | Weitere Einstellungen |
+|---|---|---|
+| Linie zeichnen | gezeichnet 0 bis 1 | – |
+| Füllen | gefüllt 0 bis 1 | Einblenden, Aufblühen, Wischen von unten/oben/links/rechts |
+| Glanz | Position 0 bis 1 | Breite 20 bis 120, Neigung ±30°, Stärke 0,1 bis 0,8 |
+| Welle (mehrere möglich) | Deckkraft 0 bis 1 | Endgrösse 3 bis 8, Easing des Wachsens |
+| Punktraster (höchstens eines) | Leuchten 0 bis 1 | Leuchten oder Verlauf, Abstand, Radien, Randausblendung |
+| Funken | Flug 0 bis 1 | Anzahl (alle Spuren zusammen höchstens 40), Seed, Grösse, Flugweite |
+| Atmen | Grösse ±0,1 (±10 %) | – |
+| Drehen | Winkel ±360° | – |
+| Schweben | Verschiebung ±30 Einheiten | waagrecht oder senkrecht |
+| Ausblenden | 0 bis 1 | Ausblenden oder Schrumpfen, ganzes Logo, nur Linie oder nur Füllung |
+| Farbwechsel | Mischung 0 bis 1 | von/nach: Akzent, Akzent hell, Akzent dunkel, Neutral |
+
+Jede Spur hat: Ziel (alle Formen, eine Form, Formen einer Rolle; Glanz, Welle, Punktraster und
+Funken wirken immer auf alles), 1 bis 12 Keyframes (Zeit 0 bis 1 aufsteigend, Wert, Easing des
+folgenden Segments), Staffelung (keine, in Reihenfolge, von der Mitte, zufällig mit Seed; Versatz 0
+bis 0,5 des Durchlaufs) und Wiederholung 1 bis 4 innerhalb des Durchlaufs. Vor dem ersten und nach
+dem letzten Keyframe gilt dessen Wert; Glanz, Wellen und Funken sind nur zwischen erstem und letztem
+Keyframe sichtbar. Spuren für alle Formen ohne Staffelung wirken auf ganze Ebenen (Logo, Füllung,
+Linie), die übrigen zusätzlich auf einzelne Formen.
+
+**Easing** (`shared/brand/easing.ts`): Auswahl (Linear, Weich, Knackig, Ein, Aus, Ein und Aus, je
+auch stark), eigene Kurve (cubic-bezier, x 0 bis 1, y −1 bis 2), Feder (Dämpfung 0,2 bis 1, 1 bis 6
+Schwünge), Abpraller (1 bis 4, Höhe 0,2 bis 0,8), Halten; jede Kurve auch „umgekehrt“ (in der Zeit
+gespiegelt).
+
+**Grenzen** (gleich in `validateAnimationSpec` und `brand_animation_problem()`, ein Test vergleicht
+beide an über 1400 gültigen und manipulierten Specs): Dauer 2 bis 30 Sekunden, Linienstärke 1 bis
+6, höchstens 16 Spuren und 12 Keyframes je Spur, alle Zahlen endlich und in ihren Bereichen, Seeds
+ganze Zahlen, unbekannte Felder werden abgelehnt.
+
+**Kosten**: Anzahl animierter Elemente mal Aufwand der Spurart (Linie 1 je Form, Füllen 2, Glanz 4,
+Welle 6, Punktraster 3 bzw. 5 als Verlauf, Funke 1, Farbe 2, sonst 1; Spuren auf einzelnen Formen
+zählen die erreichten Formen, dazu einmal eine Ebene je Form). Warnung ab 80, Grenze 160 (bei 24
+Formen gerechnet, mehr Formen werden nicht einzeln animiert). Über der Warnung starten App und
+Dashboard gleich eine Stufe leichter. Zur Laufzeit schalten beide bei zu vielen langsamen Bildern
+weiter herunter (`limitAnimation`): Stufe 1 höchstens 12 Funken, 2 Wellen, Verlauf als Leuchten,
+weitere Punkte; Stufe 2 keine Funken und kein Glanz, eine Welle, ruhiges Raster. Zeichnen, Füllen,
+Bewegung und Ausblenden bleiben, der Ablauf ändert sich nicht.
+
+**Migration**: v1-Presets werden mit `migrateV1` umgewandelt; jede Phase von `brandTimeline` wird
+eine Spur mit denselben Zeiten, Kurven und Werten. Ein Test vergleicht „Standard“, alle eingebauten
+und 120 zufällige v1-Presets an je über 400 Zeitpunkten mit `brandFrame`: alle Werte sind exakt
+gleich (`Object.is`). Die Datenbank hat `animation_presets.spec_version` und `spec`; eingebaute
+Presets sind v2 (Seeds im Schema, per Test gleich der Migration), ältere eigene Presets bleiben v1
+lesbar und werden beim Lesen umgewandelt, beim nächsten Speichern v2.
+
+**Editor** (Logos → Animation, Tab „Editor“; der Tab „Einfach“ zeigt die Standard-Parameter):
+Vorschau mit Abspielen, Pause, Bild für Bild, Tempo 0,25 bis 2, Bereich als Schleife, Bildrate und
+Kosten; A-B-Vergleich, Hell/Dunkel, Hauptfarbe/Schwarz-Weiss, Standbild-Test und Vorschau für
+„Bewegung reduzieren“. Zeitleiste mit Zoom, Raster zum Einrasten und Abspielkopf (Maus und Tastatur);
+Spuren hinzufügen, solo, stumm, umsortieren, duplizieren, löschen; Keyframes ziehen, mehrfach
+auswählen, kopieren, einfügen, löschen; Rückgängig und Wiederholen (100 Schritte). Eigenschaften je
+Spur und Keyframe, Easing-Werkzeug mit zwei Ziehpunkten, Formenliste (hervorgehoben in der
+Vorschau), Werkzeuge „Staffeln“, „Zufall“ (innerhalb der Bereiche, mit Seed), „Zeit spiegeln“,
+„Tempo skalieren“; Vorlagen (die vier eingebauten Presets sowie „Pulsieren“, „Funkeln“,
+„Wellenstart“, „Zeichnen und Drehen“); Export und Import als JSON (höchstens 64 KB, geprüft wie ein
+Upload); Versionsverlauf (letzte 10 Speicherungen je Preset in `preset_versions`, „In den Editor
+laden“, dann speichern).
+
+**Bedienung ohne Maus**: Tab wechselt die Spur, ←/→ verschiebt die gewählten Keyframes (Umschalt
+10-fach), ↑/↓ ändert den Wert, Alt+←/→ oder [ ] wählt den vorigen/nächsten, Enter legt einen beim
+Abspielkopf an, Entf löscht, Strg+C/V, Strg+Z/Y, Leertaste. Im Lineal ←/→ ein Bild, Bild↑/↓ 10 %.
+Ausgewählte Keyframes sind grösser und gefüllt, stumme Spuren gestrichelt und mit „stumm“
+beschriftet (nie nur über Farbe).
+
+**Server** (`admin_preset_save(id, name, spec, params)`, `admin_preset_delete`,
+`admin_preset_versions`; Admin mit Zwei-Faktor): prüft die Spec erneut und lehnt Ungültiges ab
+(`invalid_spec`), speichert eine Version (die letzten 10 bleiben), protokolliert Name, Hash der Spec,
+Dauer und Spurzahl vorher und nachher (nie die ganze Spec). `get_public_design_config()` und
+`get_dashboard_logo()` liefern bei v2-Presets die Spec, sonst die v1-Parameter; App und Dashboard
+prüfen erneut und fallen auf „Standard“ zurück.
+
 ### Ziele und Aktivieren
 
 - **App-Anmeldung** (`app_login`): Logo-Animation im Anmeldebildschirm der App.
