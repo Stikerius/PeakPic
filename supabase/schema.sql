@@ -10045,3 +10045,200 @@ begin
   end loop;
 end;
 $$;
+
+
+-- ================================================================ brand: logos and login design
+-- Logos are stored as a checked JSON structure (shared/brand/logoSpec.ts), never as raw SVG;
+-- animations are presets with parameters in fixed ranges (shared/brand/presets.ts). Each place a
+-- logo appears ("target": app_login = app login screen, dashboard = dashboard login, loading
+-- screen, sidebar) has one active logo; the logo brings its preset. app_design_config holds the
+-- look of the app login screen. Clients have no table rights: everybody (also signed out) reads
+-- only get_public_design_config(); admins (aal2) change things through functions, logged.
+
+-- One number from a JSON value within a range (JSON has no NaN or Infinity). Internal.
+create or replace function public.brand_number_between(p_value jsonb, p_min numeric, p_max numeric)
+returns boolean
+language sql immutable set search_path = ''
+as $$
+  select coalesce(jsonb_typeof(p_value) = 'number' and (p_value #>> '{}')::numeric between p_min and p_max, false);
+$$;
+
+-- Exactly the parameters of shared/brand/presets.ts, each within its range.
+create or replace function public.brand_preset_params_valid(p jsonb)
+returns boolean
+language sql immutable set search_path = ''
+as $$
+  select coalesce(
+    jsonb_typeof(p) = 'object'
+    and p ?& array['duration', 'drawLine', 'drawPortion', 'strokeWidth', 'fill', 'fillMode', 'shine', 'shineWidth',
+                   'shineAngle', 'wave', 'waveStrength', 'waveScale', 'dots', 'dotSpacing', 'dotRadius', 'dotGlowRadius',
+                   'dotFade', 'breathe', 'breatheStrength', 'hold', 'exit', 'easing']
+    and (select count(*) from jsonb_object_keys(p)) = 22
+    and public.brand_number_between(p -> 'duration', 4, 16)
+    and public.brand_number_between(p -> 'drawPortion', 0.1, 0.5)
+    and public.brand_number_between(p -> 'strokeWidth', 1, 6)
+    and public.brand_number_between(p -> 'shineWidth', 20, 120)
+    and public.brand_number_between(p -> 'shineAngle', -30, 30)
+    and public.brand_number_between(p -> 'waveStrength', 0.3, 1)
+    and public.brand_number_between(p -> 'waveScale', 3, 8)
+    and public.brand_number_between(p -> 'dotSpacing', 12, 28)
+    and public.brand_number_between(p -> 'dotRadius', 0.8, 2.2)
+    and public.brand_number_between(p -> 'dotGlowRadius', 1.2, 2.6)
+    and public.brand_number_between(p -> 'dotFade', 0.2, 0.8)
+    and public.brand_number_between(p -> 'breatheStrength', 0, 4)
+    and public.brand_number_between(p -> 'hold', 0, 0.4)
+    and jsonb_typeof(p -> 'drawLine') = 'boolean' and jsonb_typeof(p -> 'fill') = 'boolean'
+    and jsonb_typeof(p -> 'shine') = 'boolean' and jsonb_typeof(p -> 'wave') = 'boolean'
+    and jsonb_typeof(p -> 'dots') = 'boolean' and jsonb_typeof(p -> 'breathe') = 'boolean'
+    and jsonb_typeof(p -> 'fillMode') = 'string' and p ->> 'fillMode' in ('fade', 'wipeUp', 'wipeLeft', 'bloom')
+    and jsonb_typeof(p -> 'exit') = 'string' and p ->> 'exit' in ('fade', 'shrink', 'none')
+    and jsonb_typeof(p -> 'easing') = 'string' and p ->> 'easing' in ('smooth', 'snappy', 'linear'),
+    false);
+$$;
+
+create table if not exists public.animation_presets (
+  id         uuid primary key default gen_random_uuid(),
+  name       text not null check (char_length(btrim(name)) between 1 and 40),
+  kind       text not null check (kind in ('builtin', 'custom')),
+  params     jsonb not null check (public.brand_preset_params_valid(params)),
+  created_by uuid references public.profiles (id) on delete set null,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+alter table public.animation_presets enable row level security;
+revoke all on public.animation_presets from public, anon, authenticated;
+
+create table if not exists public.logo_library (
+  id                  uuid primary key default gen_random_uuid(),
+  name                text not null check (char_length(btrim(name)) between 1 and 40),
+  kind                text not null check (kind in ('builtin', 'uploaded')),
+  -- The checked structure only (never the SVG text); size limited.
+  spec                jsonb not null check (jsonb_typeof(spec) = 'object' and octet_length(spec::text) <= 120000),
+  preset_id           uuid not null references public.animation_presets (id) on delete restrict,
+  source_hash         text check (source_hash ~ '^[0-9a-f]{64}$'),
+  uploaded_by         uuid references public.profiles (id) on delete set null,
+  created_at          timestamptz not null default now(),
+  rights_confirmed_at timestamptz,
+  check (kind = 'builtin' or rights_confirmed_at is not null)
+);
+alter table public.logo_library enable row level security;
+revoke all on public.logo_library from public, anon, authenticated;
+
+create table if not exists public.design_assignments (
+  target     text primary key check (target in ('app_login', 'dashboard')),
+  logo_id    uuid not null references public.logo_library (id) on delete restrict,
+  updated_at timestamptz not null default now(),
+  updated_by uuid references public.profiles (id) on delete set null
+);
+alter table public.design_assignments enable row level security;
+revoke all on public.design_assignments from public, anon, authenticated;
+
+-- Exactly one row (id is always true).
+create table if not exists public.app_design_config (
+  id              boolean primary key default true check (id),
+  login_palette   text not null default 'bw' check (login_palette in ('color', 'bw')),
+  login_mode      text not null default 'system' check (login_mode in ('system', 'light', 'dark')),
+  login_animation text not null default 'on' check (login_animation in ('on', 'off')),
+  updated_at      timestamptz not null default now(),
+  updated_by      uuid references public.profiles (id) on delete set null
+);
+alter table public.app_design_config enable row level security;
+revoke all on public.app_design_config from public, anon, authenticated;
+
+-- Seeds: the built-in presets and logos (same values as shared/brand, checked by a test). Running
+-- the file again restores their canonical values; custom presets and uploads are not touched.
+insert into public.animation_presets (id, name, kind, params) values
+  ('00000000-0000-4000-8000-00000000a001', 'Standard', 'builtin',
+-- brand-seed:00000000-0000-4000-8000-00000000a001
+   '{"duration":8,"drawLine":true,"drawPortion":0.3,"strokeWidth":2.4,"fill":true,"fillMode":"fade","shine":true,"shineWidth":50,"shineAngle":12,"wave":true,"waveStrength":0.95,"waveScale":6,"dots":true,"dotSpacing":18,"dotRadius":1.1,"dotGlowRadius":1.6,"dotFade":0.35,"breathe":true,"breatheStrength":2,"hold":0.2,"exit":"fade","easing":"smooth"}'::jsonb),
+  ('00000000-0000-4000-8000-00000000a002', 'Ruhig', 'builtin',
+-- brand-seed:00000000-0000-4000-8000-00000000a002
+   '{"duration":10,"drawLine":false,"drawPortion":0.3,"strokeWidth":2.4,"fill":true,"fillMode":"fade","shine":false,"shineWidth":50,"shineAngle":12,"wave":false,"waveStrength":0.95,"waveScale":6,"dots":true,"dotSpacing":18,"dotRadius":1.1,"dotGlowRadius":1.6,"dotFade":0.35,"breathe":false,"breatheStrength":2,"hold":0.2,"exit":"fade","easing":"smooth"}'::jsonb),
+  ('00000000-0000-4000-8000-00000000a003', 'Lebendig', 'builtin',
+-- brand-seed:00000000-0000-4000-8000-00000000a003
+   '{"duration":6,"drawLine":true,"drawPortion":0.3,"strokeWidth":2.4,"fill":true,"fillMode":"bloom","shine":true,"shineWidth":70,"shineAngle":12,"wave":true,"waveStrength":1,"waveScale":8,"dots":true,"dotSpacing":18,"dotRadius":1.1,"dotGlowRadius":1.6,"dotFade":0.35,"breathe":true,"breatheStrength":3,"hold":0.2,"exit":"fade","easing":"snappy"}'::jsonb),
+  ('00000000-0000-4000-8000-00000000a004', 'Nur Zeichnen', 'builtin',
+-- brand-seed:00000000-0000-4000-8000-00000000a004
+   '{"duration":8,"drawLine":true,"drawPortion":0.5,"strokeWidth":2.4,"fill":false,"fillMode":"fade","shine":false,"shineWidth":50,"shineAngle":12,"wave":false,"waveStrength":0.95,"waveScale":6,"dots":true,"dotSpacing":18,"dotRadius":1.1,"dotGlowRadius":1.6,"dotFade":0.35,"breathe":false,"breatheStrength":2,"hold":0.2,"exit":"fade","easing":"smooth"}'::jsonb)
+on conflict (id) do update set name = excluded.name, kind = 'builtin', params = excluded.params;
+
+-- App-Logo: the shapes of assets/peakpic-icons/svg-quellen/default_bw.svg (without the square
+-- background). Flamme: PLATZHALTER (the login screen used the Ionicons glyph, no vector file).
+insert into public.logo_library (id, name, kind, spec, preset_id) values
+  ('00000000-0000-4000-8000-00000000b001', 'App-Logo', 'builtin',
+-- brand-seed:00000000-0000-4000-8000-00000000b001
+   '{"version":1,"viewBox":[131,92,167,212],"shapes":[{"type":"path","d":"M148 128 C 158 108, 188 104, 202 122 C 218 142, 222 168, 210 190 C 202 204, 196 210, 202 220 C 214 228, 232 232, 250 244 C 236 250, 226 258, 224 268 C 206 250, 186 236, 172 218 C 160 202, 152 190, 150 170 C 149 156, 143 142, 148 128 Z","role":"fill","transform":[1,0,0,1,0,0]},{"type":"circle","cx":252,"cy":258,"r":34,"role":"fill","transform":[1,0,0,1,0,0]},{"type":"rect","x":242,"y":218,"width":20,"height":10,"rx":4,"ry":4,"role":"fill","transform":[1,0,0,1,0,0]},{"type":"circle","cx":252,"cy":258,"r":18,"role":"cutout","transform":[1,0,0,1,0,0]}]}'::jsonb,
+   '00000000-0000-4000-8000-00000000a001'),
+  ('00000000-0000-4000-8000-00000000b002', 'Flamme', 'builtin',
+-- brand-seed:00000000-0000-4000-8000-00000000b002
+   '{"version":1,"viewBox":[0,0,200,240],"shapes":[{"type":"path","d":"M104 8C112 52 168 84 168 150C168 200 136 228 100 228C64 228 32 200 32 150C32 112 56 92 72 66C78 84 88 96 98 98C92 70 94 36 104 8Z","role":"fill","transform":[1,0,0,1,0,0]},{"type":"path","d":"M100 150C112 168 122 180 122 194C122 208 112 216 100 216C88 216 78 208 78 194C78 180 88 168 100 150Z","role":"cutout","transform":[1,0,0,1,0,0]}]}'::jsonb,
+   '00000000-0000-4000-8000-00000000a001')
+on conflict (id) do update set name = excluded.name, kind = 'builtin', spec = excluded.spec;
+
+insert into public.design_assignments (target, logo_id) values
+  ('app_login', '00000000-0000-4000-8000-00000000b001'),
+  ('dashboard', '00000000-0000-4000-8000-00000000b001')
+on conflict (target) do nothing;
+
+insert into public.app_design_config (id) values (true) on conflict (id) do nothing;
+
+-- For everybody, also signed out (the login screen): palette, mode, animation on/off, the active
+-- logo of the app login screen and its preset. Nothing else (no names, ids or people).
+create or replace function public.get_public_design_config()
+returns jsonb
+language sql stable security definer set search_path = ''
+as $$
+  select jsonb_build_object(
+    'palette', c.login_palette,
+    'mode', c.login_mode,
+    'animation', c.login_animation,
+    'logo', l.spec,
+    'preset', p.params
+  )
+  from public.app_design_config c
+  join public.design_assignments a on a.target = 'app_login'
+  join public.logo_library l on l.id = a.logo_id
+  join public.animation_presets p on p.id = l.preset_id
+  where c.id;
+$$;
+
+-- Look of the app login screen ("Design" page). Admin with aal2; logged with before and after.
+create or replace function public.set_app_design_config(p_palette text, p_mode text, p_animation text)
+returns void
+language plpgsql security definer set search_path = ''
+as $$
+declare
+  before public.app_design_config%rowtype;
+begin
+  perform public.require_admin();
+  if p_palette is null or p_palette not in ('color', 'bw') then
+    raise exception 'invalid_palette';
+  end if;
+  if p_mode is null or p_mode not in ('system', 'light', 'dark') then
+    raise exception 'invalid_mode';
+  end if;
+  if p_animation is null or p_animation not in ('on', 'off') then
+    raise exception 'invalid_animation';
+  end if;
+  insert into public.app_design_config (id) values (true) on conflict (id) do nothing;
+  select * into before from public.app_design_config c where c.id for update;
+  update public.app_design_config
+  set login_palette = p_palette, login_mode = p_mode, login_animation = p_animation,
+      updated_at = now(), updated_by = auth.uid()
+  where id;
+  perform public.log_moderation_action(
+    'design_app_login', 'app_design_config', null, null, null, 'Design des App-Anmeldebildschirms geändert', null,
+    jsonb_build_object(
+      'before', jsonb_build_object('palette', before.login_palette, 'mode', before.login_mode, 'animation', before.login_animation),
+      'after', jsonb_build_object('palette', p_palette, 'mode', p_mode, 'animation', p_animation)
+    )
+  );
+end;
+$$;
+
+revoke all on function public.brand_number_between(jsonb, numeric, numeric) from public, anon, authenticated;
+revoke all on function public.brand_preset_params_valid(jsonb) from public, anon, authenticated;
+revoke all on function public.get_public_design_config() from public;
+grant execute on function public.get_public_design_config() to anon, authenticated;
+revoke all on function public.set_app_design_config(text, text, text) from public, anon;
+grant execute on function public.set_app_design_config(text, text, text) to authenticated;

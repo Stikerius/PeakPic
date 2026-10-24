@@ -665,6 +665,10 @@ export type Database = {
         Args: { p_conversation_id: Uuid };
         Returns: undefined;
       };
+      get_public_design_config: {
+        Args: Record<string, never>;
+        Returns: Json;
+      };
       get_my_cleared_conversations: {
         Args: Record<string, never>;
         Returns: { conversation_id: Uuid; cleared_at: Timestamp }[];

@@ -11,7 +11,8 @@ select * from (
       or has_table_privilege('authenticated', 'public.' || t, 'delete')
       or has_table_privilege('anon', 'public.' || t, 'select')) as ok
   from unnest(array['app_settings', 'protected_accounts', 'reset_jobs', 'reset_job_targets', 'seed_markers',
-                     'mail_campaigns', 'mail_recipients', 'mail_templates', 'mail_tests']) t
+                     'mail_campaigns', 'mail_recipients', 'mail_templates', 'mail_tests',
+                     'logo_library', 'animation_presets', 'design_assignments', 'app_design_config']) t
 
   union all
   -- RLS on, and no policies at all (access only through the functions).
@@ -20,7 +21,8 @@ select * from (
   from pg_class c join pg_namespace n on n.oid = c.relnamespace
   where n.nspname = 'public'
     and c.relname in ('app_settings', 'protected_accounts', 'reset_jobs', 'reset_job_targets', 'seed_markers',
-                      'mail_campaigns', 'mail_recipients', 'mail_templates', 'mail_tests')
+                      'mail_campaigns', 'mail_recipients', 'mail_templates', 'mail_tests',
+                      'logo_library', 'animation_presets', 'design_assignments', 'app_design_config')
 
   union all
   -- Every reset function: security definer with a fixed search_path.

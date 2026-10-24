@@ -1,6 +1,8 @@
 import { DarkTheme, DefaultTheme, type Theme as NavigationTheme } from "expo-router";
 import type { TextStyle } from "react-native";
 
+import { brandColors, type BrandColors, type BrandPaletteName } from "../../shared/brand/palettes";
+
 /**
  * Design tokens. Components never use raw colour values: they read the
  * active palette through `useTheme()` (see lib/theme.tsx). The only
@@ -119,6 +121,21 @@ export const photoTextColors = [
 
 /** Ring around people with unseen stories, from bottom-left to top-right. */
 export const storyRingGradient = ["#FFB020", accent, "#E8336F"] as const;
+
+/**
+ * Logo animation (login screen): background, lines, muted dots and the accent per palette
+ * ("Hauptfarbe" / "Schwarz-Weiss") and scheme. The values live in shared/brand/palettes.ts, which
+ * the admin dashboard uses as well.
+ */
+export { brandColors };
+export type { BrandColors, BrandPaletteName };
+
+/**
+ * Technical colours of the logo animation, not design colours: an SVG mask shows where it is
+ * white and hides where it is black; the shine is white at 55 % opacity in every palette.
+ */
+export const brandMask = { show: "#FFFFFF", hide: "#000000" } as const;
+export const brandShine = "#FFFFFF";
 
 /** Flame colour per streak tier (see FLAME_TIER_THRESHOLDS in lib/streak.ts). */
 export const flameColors = ["#FFB347", "#FF7A1A", "#FF3B30", "#4DA3FF"] as const;

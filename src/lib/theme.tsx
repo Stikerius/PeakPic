@@ -94,6 +94,16 @@ export function DarkScheme({ children }: { children: ReactNode }) {
   return <ThemeContext value={theme}>{children}</ThemeContext>;
 }
 
+/**
+ * Forces one scheme for everything inside (the login screen when its design fixes light or dark).
+ * The rest of the app keeps following the user's own setting.
+ */
+export function SchemeOverride({ scheme, children }: { scheme: ColorScheme; children: ReactNode }) {
+  const parent = useTheme();
+  const theme: Theme = { ...parent, scheme, colors: palettes[scheme] };
+  return <ThemeContext value={theme}>{children}</ThemeContext>;
+}
+
 export function useTheme(): Theme {
   const theme = use(ThemeContext);
   if (theme === null) throw new Error("useTheme must be used inside <ThemeProvider>");

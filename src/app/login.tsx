@@ -1,5 +1,5 @@
-import Ionicons from "@expo/vector-icons/Ionicons";
 import { router } from "expo-router";
+import { StatusBar } from "expo-status-bar";
 import { useEffect, useState } from "react";
 import {
   KeyboardAvoidingView,
@@ -9,9 +9,12 @@ import {
   StyleSheet,
   Text,
   View,
+  useWindowDimensions,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
+import type { PublicDesignConfig } from "../../shared/brand/config";
+import { BrandAnimation } from "@/components/brand-animation/brand-animation";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { TextField } from "@/components/ui/text-field";
@@ -28,8 +31,9 @@ import {
 import { confirmOnSignUp } from "@/lib/legalGate";
 import { fetchCurrentLegalDocuments, type LegalDocument } from "@/lib/legalRepo";
 import { useLegalViewed } from "@/lib/legalViewed";
+import { useLoginDesign } from "@/lib/loginDesign";
 import { DISPLAY_NAME_MAX_LENGTH } from "@/lib/names";
-import { makeStyles, useTheme } from "@/lib/theme";
+import { SchemeOverride, makeStyles, useTheme } from "@/lib/theme";
 import type { LegalDocType } from "@/types/database";
 
 function openLegal(docType: LegalDocType) {
@@ -55,10 +59,35 @@ function validate(mode: Mode, email: string, password: string, username: string)
   return null;
 }
 
+/** Logo height on the login screen: grows with the screen, small phones get a smaller logo. */
+function logoSizeFor(screenHeight: number): number {
+  return Math.round(Math.min(160, Math.max(88, screenHeight * 0.15)));
+}
+
+/**
+ * The design from the dashboard (Design page) decides logo, animation, palette and, if set to
+ * light or dark, the scheme of this screen. The tree stays the same when the design arrives, so
+ * nothing typed is lost; after signing in the user's own setting applies again.
+ */
 export default function LoginScreen() {
-  const { colors } = useTheme();
+  const design = useLoginDesign();
+  const { scheme } = useTheme();
+  const fixed = design.mode === "system" ? null : design.mode;
+  return (
+    <SchemeOverride scheme={fixed ?? scheme}>
+      {fixed !== null && <StatusBar style={fixed === "dark" ? "light" : "dark"} />}
+      <LoginForm design={design} />
+    </SchemeOverride>
+  );
+}
+
+function LoginForm({ design }: { design: PublicDesignConfig }) {
+  const { colors, scheme } = useTheme();
   const styles = useStyles();
   const insets = useSafeAreaInsets();
+  const window = useWindowDimensions();
+  const logoSize = logoSizeFor(window.height);
+  const topPadding = insets.top + spacing.xxl;
   const [mode, setMode] = useState<Mode>("login");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -144,12 +173,22 @@ export default function LoginScreen() {
       <ScrollView
         contentContainerStyle={[
           styles.content,
-          { paddingTop: insets.top + spacing.xxl, paddingBottom: insets.bottom + spacing.lg },
+          { paddingTop: topPadding, paddingBottom: insets.bottom + spacing.lg },
         ]}
         keyboardShouldPersistTaps="handled"
       >
+        {/* Background only: the free area above the title, behind everything, never touchable. */}
+        <BrandAnimation
+          config={design}
+          scheme={scheme}
+          background={colors.background}
+          width={window.width}
+          height={topPadding + logoSize + spacing.xs}
+          logoSize={logoSize}
+          logoCenterY={topPadding + logoSize / 2}
+        />
         <View style={styles.brand}>
-          <Ionicons name="flame" size={56} color={colors.accent} />
+          <View style={{ height: logoSize }} />
           <Text style={styles.title}>PeakPic</Text>
           <Text style={styles.subtitle}>
             {mode === "login" ? "Willkommen zurück!" : "Starte deinen Streak."}
