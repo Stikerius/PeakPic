@@ -1,8 +1,9 @@
 import { useIsFocused } from "expo-router";
 import { useEffect, useMemo, useState } from "react";
-import { AppState, StyleSheet } from "react-native";
+import { AccessibilityInfo, AppState, StyleSheet } from "react-native";
 import Animated, {
   Easing,
+  ReduceMotion,
   cancelAnimation,
   interpolate,
   useAnimatedKeyboard,
@@ -10,7 +11,6 @@ import Animated, {
   useAnimatedStyle,
   useDerivedValue,
   useFrameCallback,
-  useReducedMotion,
   useSharedValue,
   withRepeat,
   withTiming,
@@ -48,6 +48,26 @@ type BrandAnimationProps = {
   logoCenterY: number;
 };
 
+/**
+ * "Bewegung reduzieren" of the system, live: Reanimated's useReducedMotion only reads it once at
+ * app start, so switching it while the app is open would change nothing.
+ */
+function useReduceMotionLive(): boolean {
+  const [reduced, setReduced] = useState(false);
+  useEffect(() => {
+    let active = true;
+    void AccessibilityInfo.isReduceMotionEnabled().then((value) => {
+      if (active) setReduced(value);
+    });
+    const subscription = AccessibilityInfo.addEventListener("reduceMotionChanged", setReduced);
+    return () => {
+      active = false;
+      subscription.remove();
+    };
+  }, []);
+  return reduced;
+}
+
 function useAppActive(): boolean {
   const [active, setActive] = useState(AppState.currentState === "active");
   useEffect(() => {
@@ -80,7 +100,7 @@ export function BrandAnimation({ config, scheme, background, width, height, logo
   const lengths = useMemo(() => spec.shapes.map((shape) => shapeLength(shape, false)), [spec]);
   const colors = brandColors(config.palette, scheme);
 
-  const reducedMotion = useReducedMotion();
+  const reducedMotion = useReduceMotionLive();
   const focused = useIsFocused();
   const appActive = useAppActive();
   const [simple, setSimple] = useState(false);
@@ -93,7 +113,16 @@ export function BrandAnimation({ config, scheme, background, width, height, logo
       return;
     }
     progress.set(0);
-    progress.set(withRepeat(withTiming(1, { duration: params.duration * 1000, easing: Easing.linear }), -1, false));
+    // Reduce motion is handled here (live); Reanimated's own handling only knows the start value.
+    progress.set(
+      withRepeat(
+        withTiming(1, { duration: params.duration * 1000, easing: Easing.linear, reduceMotion: ReduceMotion.Never }),
+        -1,
+        false,
+        undefined,
+        ReduceMotion.Never,
+      ),
+    );
     return () => cancelAnimation(progress);
   }, [moving, params.duration, progress]);
 
