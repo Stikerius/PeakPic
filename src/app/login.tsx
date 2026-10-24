@@ -65,8 +65,9 @@ function logoSizeFor(screenHeight: number): number {
 }
 
 /**
- * The design from the dashboard (Design page) decides logo, animation, palette and, if set to
- * light or dark, the scheme of this screen. The tree stays the same when the design arrives, so
+ * The design from the dashboard (Design page) decides logo, animation, palette, with the palette
+ * "Hauptfarbe" the accent (colour set "App-Anmeldung") and, if set to light or dark, the scheme
+ * of this screen. The tree stays the same when the design arrives, so
  * nothing typed is lost; after signing in the user's own setting applies again.
  */
 export default function LoginScreen() {
@@ -74,7 +75,7 @@ export default function LoginScreen() {
   const { scheme } = useTheme();
   const fixed = design.mode === "system" ? null : design.mode;
   return (
-    <SchemeOverride scheme={fixed ?? scheme}>
+    <SchemeOverride scheme={fixed ?? scheme} colorSet={design.palette === "color" ? design.colors : undefined}>
       {fixed !== null && <StatusBar style={fixed === "dark" ? "light" : "dark"} />}
       <LoginForm design={design} />
     </SchemeOverride>

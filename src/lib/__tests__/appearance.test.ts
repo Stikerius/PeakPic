@@ -12,10 +12,14 @@ import {
   type Appearance,
 } from "../../../admin-web/src/lib/appearance";
 import { AMBIENT_MAX_OPACITY, blend, contrast, tokensFor, type TokenName } from "../../../admin-web/src/lib/tokens";
+import { BUILTIN_COLOR_SETS, DEFAULT_COLOR_SET } from "../../../shared/brand/colors";
 
 const MODES = ["light", "dark"] as const;
 const PALETTES = ["color", "bw"] as const;
 const combos = STYLES.flatMap((s) => MODES.flatMap((m) => PALETTES.map((p) => [s.id, m, p] as const)));
+/** Every style, mode and built-in colour set with the palette "Hauptfarbe". */
+const colorCombos = STYLES.flatMap((s) => MODES.flatMap((m) => BUILTIN_COLOR_SETS.map((c) => [s.id, m, c.name] as const)));
+const setNamed = (name: string) => BUILTIN_COLOR_SETS.find((c) => c.name === name) ?? DEFAULT_COLOR_SET;
 
 describe("appearance choice (stored per browser)", () => {
   it("defaults: Neu, System, Schwarz-Weiss, animations on", () => {
@@ -98,6 +102,16 @@ describe("tokens", () => {
     for (const [fg, bg, min] of CHECKS) {
       const ratio = contrast(hex(t, fg), hex(t, bg));
       if (ratio < min) throw new Error(`${s}/${m}/${p}: ${fg} on ${bg} = ${ratio.toFixed(2)} (< ${min})`);
+    }
+  });
+
+  it.each(colorCombos)("WCAG AA with the colour set in %s / %s / %s", (s, m, name) => {
+    const t = tokensFor(s, m, "color", setNamed(name));
+    const checks: Check[] = [...CHECKS, ["accent-text", "bg", 4.5], ["accent-text", "surface", 4.5]];
+    for (let i = 1; i <= 8; i += 1) checks.push([`chart-${i}` as TokenName, "surface", 3], [`chart-${i}` as TokenName, "bg", 3]);
+    for (const [fg, bg, min] of checks) {
+      const ratio = contrast(hex(t, fg), hex(t, bg));
+      if (ratio < min) throw new Error(`${s}/${m}/${name}: ${fg} on ${bg} = ${ratio.toFixed(2)} (< ${min})`);
     }
   });
 });

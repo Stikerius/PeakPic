@@ -1,6 +1,8 @@
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { useEffect, useState } from "react";
 
 import { BrandLogo } from "../components/BrandLogo";
+import { ColorSets } from "../components/ColorSets";
+import { TokenPreview } from "../components/TokenPreview";
 import { EmptyState, PageHeader, SegmentedChoice, Skeleton } from "../components/ui";
 import { AMBIENT_LABELS, MODE_LABELS, STYLES, type Ambient, type ModePreference, type StyleId } from "../lib/appearance";
 import { useAppearance } from "../lib/appearanceContext";
@@ -8,7 +10,6 @@ import { fetchAppLoginDesign, saveAppLoginDesign, type AppLoginDesign } from "..
 import { BRAND_PALETTE_LABELS, type BrandMode, type BrandPaletteName } from "../lib/brand";
 import { useDashboardBrand } from "../lib/dashboardBrand";
 import { href } from "../lib/router";
-import { applyTokens, tokensFor } from "../lib/tokens";
 
 const STYLE_OPTIONS = STYLES.map((s) => [s.id, s.label] as const);
 const MODE_OPTIONS = (["system", "light", "dark"] as const).map((m) => [m, MODE_LABELS[m]] as const);
@@ -19,30 +20,14 @@ const ANIMATION_OPTIONS = [
   ["off", "Aus"],
 ] as const;
 
-/**
- * A box that shows its content with the tokens of another style, mode and palette. Only a picture:
- * hidden from screen readers and not focusable (inert), its buttons do nothing.
- */
-function TokenPreview({ style, mode, palette, children, className }: { style: StyleId; mode: BrandMode; palette: BrandPaletteName; children: ReactNode; className: string }) {
-  const ref = useRef<HTMLDivElement>(null);
-  useEffect(() => {
-    if (ref.current !== null) applyTokens(ref.current, tokensFor(style, mode, palette));
-  }, [style, mode, palette]);
-  return (
-    <div ref={ref} className={className} aria-hidden="true" inert>
-      {children}
-    </div>
-  );
-}
-
 /** "Design" (admins only): the dashboard's look in this browser, and the app's login screen. */
 export function DesignPage() {
-  const { appearance, mode, update } = useAppearance();
+  const { appearance, mode, colorSet, update } = useAppearance();
   const brand = useDashboardBrand();
   const [previewMode, setPreviewMode] = useState<BrandMode | null>(null);
   const shownMode = previewMode ?? mode;
 
-  const [app, setApp] = useState<(AppLoginDesign & { logo: unknown; preset: unknown }) | null>(null);
+  const [app, setApp] = useState<Awaited<ReturnType<typeof fetchAppLoginDesign>> | null>(null);
   const [saved, setSaved] = useState<AppLoginDesign | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -66,6 +51,13 @@ export function DesignPage() {
 
   const appMode: BrandMode = app === null || app.mode === "system" ? mode : app.mode;
   const changed = app !== null && saved !== null && (app.palette !== saved.palette || app.mode !== saved.mode || app.animation !== saved.animation);
+
+  /** After a colour set was activated: only the colours of the phone preview, unsaved choices stay. */
+  function reloadAppColors() {
+    fetchAppLoginDesign()
+      .then((design) => setApp((cur) => (cur === null ? cur : { ...cur, colors: design.colors })))
+      .catch(() => undefined);
+  }
 
   async function saveApp() {
     if (app === null) return;
@@ -101,7 +93,7 @@ export function DesignPage() {
             <SegmentedChoice<Ambient> label="Hintergrundanimationen" value={appearance.ambient} options={AMBIENT_OPTIONS} onChange={(ambient) => update({ ambient })} />
           </div>
           <div>
-            <TokenPreview style={appearance.style} mode={shownMode} palette={appearance.palette} className="design-preview">
+            <TokenPreview style={appearance.style} mode={shownMode} palette={appearance.palette} colorSet={colorSet} className="design-preview">
               <div className="design-preview-head">
                 <BrandLogo spec={brand.spec} params={brand.params} palette={appearance.palette} mode={shownMode} size={44} dots={false} />
                 <strong>PeakPic Moderation</strong>
@@ -155,6 +147,8 @@ export function DesignPage() {
         </div>
       </section>
 
+      <ColorSets onActivated={reloadAppColors} />
+
       <section className="panel" aria-labelledby="design-app">
         <h2 id="design-app">App-Anmeldebildschirm</h2>
         <p className="muted">
@@ -183,8 +177,8 @@ export function DesignPage() {
                 </button>
               </div>
             </div>
-            <TokenPreview style="new" mode={appMode} palette={app.palette} className="phone-preview">
-              <BrandLogo spec={app.logo} params={app.preset} palette={app.palette} mode={appMode} size={200} playing={app.animation} />
+            <TokenPreview style="new" mode={appMode} palette={app.palette} colorSet={app.colors} className="phone-preview">
+              <BrandLogo spec={app.logo} params={app.preset} palette={app.palette} mode={appMode} size={200} playing={app.animation} colorSet={app.colors} />
               <p className="phone-title">PeakPic</p>
               <p className="muted">Willkommen zurück!</p>
               <span className="phone-field" />

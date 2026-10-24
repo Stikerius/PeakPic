@@ -1,5 +1,5 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
-import { createContext, use, useEffect, useState, type ReactNode } from "react";
+import { createContext, use, useEffect, useMemo, useState, type ReactNode } from "react";
 import { Appearance, useColorScheme } from "react-native";
 
 import {
@@ -12,6 +12,9 @@ import {
   type Palette,
   type ThemePreference,
 } from "@/constants/theme";
+import { withColorSet } from "@/lib/accentPalette";
+
+import type { ColorSetValues } from "../../shared/brand/colors";
 
 const STORAGE_KEY = "peakpic.themePreference";
 
@@ -95,12 +98,14 @@ export function DarkScheme({ children }: { children: ReactNode }) {
 }
 
 /**
- * Forces one scheme for everything inside (the login screen when its design fixes light or dark).
- * The rest of the app keeps following the user's own setting.
+ * Forces one scheme for everything inside (the login screen when its design fixes light or dark),
+ * optionally with the accent of a colour set from the dashboard. The rest of the app keeps
+ * following the user's own setting and the flame orange.
  */
-export function SchemeOverride({ scheme, children }: { scheme: ColorScheme; children: ReactNode }) {
+export function SchemeOverride({ scheme, colorSet, children }: { scheme: ColorScheme; colorSet?: ColorSetValues; children: ReactNode }) {
   const parent = useTheme();
-  const theme: Theme = { ...parent, scheme, colors: palettes[scheme] };
+  const colors = useMemo(() => (colorSet === undefined ? palettes[scheme] : withColorSet(palettes[scheme], scheme, colorSet)), [scheme, colorSet]);
+  const theme: Theme = { ...parent, scheme, colors };
   return <ThemeContext value={theme}>{children}</ThemeContext>;
 }
 
@@ -122,7 +127,17 @@ export function makeStyles<T>(factory: (theme: { colors: Palette; scheme: ColorS
     light: factory({ colors: palettes.light, scheme: "light" }),
     dark: factory({ colors: palettes.dark, scheme: "dark" }),
   };
+  // Sheets for palettes other than the two standard ones (login screen with a colour set), built
+  // once per palette object.
+  const custom = new WeakMap<Palette, T>();
   return function useStyles() {
-    return sheets[useTheme().scheme];
+    const { scheme, colors } = useTheme();
+    if (colors === palettes[scheme]) return sheets[scheme];
+    let sheet = custom.get(colors);
+    if (sheet === undefined) {
+      sheet = factory({ colors, scheme });
+      custom.set(colors, sheet);
+    }
+    return sheet;
   };
 }

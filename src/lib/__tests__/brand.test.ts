@@ -264,6 +264,7 @@ describe("design config and fallback", () => {
       animation: false,
       logo: FLAME_LOGO_SPEC,
       preset: BUILTIN_PRESETS[1]?.params,
+      colors: DEFAULT_DESIGN_CONFIG.colors,
     });
   });
 

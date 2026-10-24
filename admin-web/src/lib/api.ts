@@ -1,4 +1,6 @@
 import { asArray, asRecord, bool, isRecord, num, str, strOrNull, type Json } from "./decode";
+import { DEFAULT_COLOR_SET, parseColorSet, type ColorSet } from "./brand";
+import type { ColorTarget } from "./colorLibrary";
 import { toCounts, type Candidate, type Counts, type JobStatus, type ResetMode } from "./reset";
 import { SIGNED_URL_SECONDS, supabase } from "./supabase";
 
@@ -1340,7 +1342,7 @@ const DESIGN_ERRORS: Record<string, string> = {
 };
 
 /** What the app's login screen shows now (the same public answer the app reads), with its logo. */
-export async function fetchAppLoginDesign(): Promise<AppLoginDesign & { logo: unknown; preset: unknown }> {
+export async function fetchAppLoginDesign(): Promise<AppLoginDesign & { logo: unknown; preset: unknown; colors: ColorSet }> {
   const { data, error } = await supabase.rpc("get_public_design_config");
   if (error) throw new ApiError("Die Einstellungen der App konnten nicht geladen werden.");
   const r = asRecord(data);
@@ -1350,6 +1352,7 @@ export async function fetchAppLoginDesign(): Promise<AppLoginDesign & { logo: un
     animation: r.animation !== "off",
     logo: r.logo,
     preset: r.preset,
+    colors: parseColorSet(r.colors) ?? DEFAULT_COLOR_SET,
   };
 }
 
@@ -1361,4 +1364,71 @@ export async function saveAppLoginDesign(design: AppLoginDesign): Promise<void> 
     p_animation: design.animation ? "on" : "off",
   });
   if (error) throw new ApiError(DESIGN_ERRORS[error.message] ?? `Fehler: ${error.message}`);
+}
+
+// ------------------------------------------------------------------ colour sets ("Hauptfarben", admins)
+
+export type { ColorTarget };
+export const COLOR_TARGET_LABELS: Record<ColorTarget, string> = { dashboard_colors: "Dashboard", app_login_colors: "App-Anmeldung" };
+
+const COLOR_ERRORS: Record<string, string> = {
+  not_authorized: "Nur Admins mit Zwei-Faktor-Anmeldung.",
+  invalid_name: "Name fehlt oder ist länger als 40 Zeichen.",
+  invalid_hex: "Farben bitte als #RRGGBB angeben.",
+  accent_dark_contrast: "Die Farbe für Dunkel hebt sich zu wenig vom dunklen Hintergrund ab.",
+  accent_light_contrast: "Die Farbe für Hell hebt sich zu wenig vom hellen Hintergrund ab.",
+  on_accent_dark: "Auf der Farbe für Dunkel ist keine Schrift gut lesbar.",
+  on_accent_light: "Auf der Farbe für Hell ist keine Schrift gut lesbar.",
+  invalid_chart: "Höchstens 8 Diagrammfarben als #RRGGBB.",
+  chart_contrast: "Eine Diagrammfarbe hebt sich nicht ausreichend ab.",
+  too_many_color_sets: "Höchstens 20 eigene Farbsätze.",
+  color_set_not_found: "Farbsatz nicht gefunden.",
+  builtin_color_set: "Eingebaute Farbsätze bleiben unverändert. Bitte duplizieren.",
+  color_set_active: "Ein aktiver Farbsatz lässt sich nicht löschen. Zuerst einen anderen aktivieren.",
+  invalid_targets: "Bitte mindestens ein Ziel wählen.",
+};
+
+async function colorRpc(name: string, args: Record<string, unknown>): Promise<unknown> {
+  const { data, error } = await supabase.rpc(name, args);
+  if (error) throw new ApiError(COLOR_ERRORS[error.message] ?? ERROR_TEXTS[error.message] ?? `Fehler: ${error.message}`);
+  return data;
+}
+
+export type ColorSetRow = {
+  id: string;
+  name: string;
+  kind: "builtin" | "custom";
+  accentDark: string;
+  accentLight: string;
+  chartColors: string[] | null;
+  createdBy: string | null;
+  targets: ColorTarget[];
+};
+
+export async function fetchColorSets(): Promise<ColorSetRow[]> {
+  return asArray(await colorRpc("admin_color_list", {})).map((value) => {
+    const r = asRecord(value);
+    return {
+      id: str(r.id),
+      name: str(r.name),
+      kind: r.kind === "builtin" ? "builtin" : "custom",
+      accentDark: str(r.accent_dark),
+      accentLight: str(r.accent_light),
+      chartColors: Array.isArray(r.chart_colors) ? r.chart_colors.map(str) : null,
+      createdBy: strOrNull(r.created_by),
+      targets: asArray(r.targets).filter((t): t is ColorTarget => t === "dashboard_colors" || t === "app_login_colors"),
+    };
+  });
+}
+
+export async function saveColorSet(id: string | null, name: string, accentDark: string, accentLight: string, chartColors: string[] | null): Promise<string> {
+  return str(await colorRpc("admin_color_save", { p_id: id, p_name: name, p_dark: accentDark, p_light: accentLight, p_chart: chartColors }));
+}
+
+export async function deleteColorSet(id: string): Promise<void> {
+  await colorRpc("admin_color_delete", { p_id: id });
+}
+
+export async function activateColorSet(id: string, targets: ColorTarget[]): Promise<void> {
+  await colorRpc("admin_color_activate", { p_color_id: id, p_targets: targets });
 }

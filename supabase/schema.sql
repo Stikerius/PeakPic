@@ -10182,25 +10182,7 @@ on conflict (target) do nothing;
 
 insert into public.app_design_config (id) values (true) on conflict (id) do nothing;
 
--- For everybody, also signed out (the login screen): palette, mode, animation on/off, the active
--- logo of the app login screen and its preset. Nothing else (no names, ids or people).
-create or replace function public.get_public_design_config()
-returns jsonb
-language sql stable security definer set search_path = ''
-as $$
-  select jsonb_build_object(
-    'palette', c.login_palette,
-    'mode', c.login_mode,
-    'animation', c.login_animation,
-    'logo', l.spec,
-    'preset', p.params
-  )
-  from public.app_design_config c
-  join public.design_assignments a on a.target = 'app_login'
-  join public.logo_library l on l.id = a.logo_id
-  join public.animation_presets p on p.id = l.preset_id
-  where c.id;
-$$;
+-- get_public_design_config() is defined after the colour sets (it includes them), see below.
 
 -- Look of the app login screen ("Design" page). Admin with aal2; logged with before and after.
 create or replace function public.set_app_design_config(p_palette text, p_mode text, p_animation text)
@@ -10238,8 +10220,6 @@ $$;
 
 revoke all on function public.brand_number_between(jsonb, numeric, numeric) from public, anon, authenticated;
 revoke all on function public.brand_preset_params_valid(jsonb) from public, anon, authenticated;
-revoke all on function public.get_public_design_config() from public;
-grant execute on function public.get_public_design_config() to anon, authenticated;
 revoke all on function public.set_app_design_config(text, text, text) from public, anon;
 grant execute on function public.set_app_design_config(text, text, text) to authenticated;
 
@@ -10673,3 +10653,300 @@ begin
   end loop;
 end;
 $$;
+
+
+-- ---------------------------------------------------------------- colour sets ("Hauptfarben")
+-- The accent of the palette "Hauptfarbe" for dark and light, plus chart colours; one active set
+-- per target ('dashboard_colors', 'app_login_colors'). Readability is enforced here with the same
+-- rules as shared/brand/colors.ts (compared by a test): accent at least 3:1 against every reference
+-- background of its mode, text on the accent (#1b0f0a or #ffffff) at least 4.5:1, at most 8 chart
+-- colours with at least 3:1 against the backgrounds of both modes. "Schwarz-Weiss" is independent.
+
+-- Relative luminance (WCAG) of #rrggbb. Internal.
+create or replace function public.brand_luminance(p_hex text)
+returns double precision
+language sql immutable set search_path = ''
+as $$
+  select 0.2126 * c[1] + 0.7152 * c[2] + 0.0722 * c[3]
+  from (
+    select array(
+      select case when v <= 0.03928 then v / 12.92 else power((v + 0.055) / 1.055, 2.4) end
+      from (select (('x' || substr(lower(p_hex), i, 2))::bit(8)::integer) / 255.0::double precision as v
+            from unnest(array[2, 4, 6]) with ordinality as t(i, n) order by n) channels
+    ) as c
+  ) x;
+$$;
+
+create or replace function public.brand_contrast(p_a text, p_b text)
+returns double precision
+language sql immutable set search_path = ''
+as $$
+  select (greatest(public.brand_luminance(p_a), public.brand_luminance(p_b)) + 0.05)
+       / (least(public.brand_luminance(p_a), public.brand_luminance(p_b)) + 0.05);
+$$;
+
+create or replace function public.brand_min_contrast(p_color text, p_backgrounds text[])
+returns double precision
+language sql immutable set search_path = ''
+as $$
+  select min(public.brand_contrast(p_color, bg)) from unnest(p_backgrounds) bg;
+$$;
+
+-- Text colour on an accent: the one of #1b0f0a and #ffffff with more contrast (tie: the dark one).
+create or replace function public.brand_on_accent(p_accent text)
+returns text
+language sql immutable set search_path = ''
+as $$
+  select case when public.brand_contrast('#ffffff', p_accent) > public.brand_contrast('#1b0f0a', p_accent) then '#ffffff' else '#1b0f0a' end;
+$$;
+
+-- Why a colour set can't be used, or null. Same order and codes as colorSetProblem().
+create or replace function public.brand_color_set_problem(p_dark text, p_light text, p_chart jsonb)
+returns text
+language plpgsql immutable set search_path = ''
+as $$
+declare
+  dark_bg constant text[] := array['#09090b', '#111114', '#111113', '#1a1a1d'];
+  light_bg constant text[] := array['#f7f7f5', '#fdfdfb', '#f2f2f4', '#fbfbfc'];
+  c jsonb;
+begin
+  if p_dark is null or p_light is null or p_dark !~ '^#[0-9a-fA-F]{6}$' or p_light !~ '^#[0-9a-fA-F]{6}$' then
+    return 'invalid_hex';
+  end if;
+  if public.brand_min_contrast(p_dark, dark_bg) < 3 then return 'accent_dark_contrast'; end if;
+  if public.brand_min_contrast(p_light, light_bg) < 3 then return 'accent_light_contrast'; end if;
+  if public.brand_contrast(public.brand_on_accent(p_dark), p_dark) < 4.5 then return 'on_accent_dark'; end if;
+  if public.brand_contrast(public.brand_on_accent(p_light), p_light) < 4.5 then return 'on_accent_light'; end if;
+  if p_chart is not null and p_chart <> 'null'::jsonb then
+    if jsonb_typeof(p_chart) <> 'array' or jsonb_array_length(p_chart) > 8 then return 'invalid_chart'; end if;
+    for c in select value from jsonb_array_elements(p_chart) loop
+      if jsonb_typeof(c) <> 'string' or (c #>> '{}') !~ '^#[0-9a-fA-F]{6}$' then return 'invalid_chart'; end if;
+    end loop;
+    for c in select value from jsonb_array_elements(p_chart) loop
+      if public.brand_min_contrast(c #>> '{}', dark_bg || light_bg) < 3 then return 'chart_contrast'; end if;
+    end loop;
+  end if;
+  return null;
+end;
+$$;
+
+create table if not exists public.brand_colors (
+  id           uuid primary key default gen_random_uuid(),
+  name         text not null check (char_length(btrim(name)) between 1 and 40),
+  kind         text not null check (kind in ('builtin', 'custom')),
+  accent_dark  text not null check (accent_dark ~ '^#[0-9a-f]{6}$'),
+  accent_light text not null check (accent_light ~ '^#[0-9a-f]{6}$'),
+  -- null: chart colours are derived from the accent.
+  chart_colors jsonb check (chart_colors is null or (jsonb_typeof(chart_colors) = 'array' and jsonb_array_length(chart_colors) between 1 and 8)),
+  created_at   timestamptz not null default now(),
+  created_by   uuid references public.profiles (id) on delete set null,
+  updated_at   timestamptz not null default now(),
+  check (public.brand_color_set_problem(accent_dark, accent_light, chart_colors) is null)
+);
+alter table public.brand_colors enable row level security;
+revoke all on public.brand_colors from public, anon, authenticated;
+
+-- Built-in sets (same ids and values as shared/brand/colors.ts). "Orange" is the default.
+insert into public.brand_colors (id, name, kind, accent_dark, accent_light) values
+  ('00000000-0000-4000-8000-00000000c001', 'Orange', 'builtin', '#ff5a36', '#f2481f'),
+  ('00000000-0000-4000-8000-00000000c002', 'Blau', 'builtin', '#4d9fff', '#1f6fd6'),
+  ('00000000-0000-4000-8000-00000000c003', 'Grün', 'builtin', '#34c77b', '#14804a'),
+  ('00000000-0000-4000-8000-00000000c004', 'Violett', 'builtin', '#a78bfa', '#7c3aed'),
+  ('00000000-0000-4000-8000-00000000c005', 'Rot', 'builtin', '#ff6b6b', '#d62839')
+on conflict (id) do update
+  set name = excluded.name, kind = 'builtin', accent_dark = excluded.accent_dark,
+      accent_light = excluded.accent_light, chart_colors = null;
+
+-- Two more targets: the active colour set of the dashboard and of the app login. A target holds
+-- either a logo or a colour set, never both.
+alter table public.design_assignments alter column logo_id drop not null;
+alter table public.design_assignments
+  add column if not exists color_id uuid references public.brand_colors (id) on delete restrict;
+alter table public.design_assignments drop constraint if exists design_assignments_target_check;
+alter table public.design_assignments add constraint design_assignments_target_check
+  check (target in ('app_login', 'dashboard', 'dashboard_colors', 'app_login_colors'));
+alter table public.design_assignments drop constraint if exists design_assignments_kind_check;
+alter table public.design_assignments add constraint design_assignments_kind_check
+  check ((target in ('app_login', 'dashboard') and logo_id is not null and color_id is null)
+      or (target in ('dashboard_colors', 'app_login_colors') and color_id is not null and logo_id is null));
+insert into public.design_assignments (target, color_id) values
+  ('dashboard_colors', '00000000-0000-4000-8000-00000000c001'),
+  ('app_login_colors', '00000000-0000-4000-8000-00000000c001')
+on conflict (target) do nothing;
+
+-- The public fields of a colour set. Internal.
+create or replace function public.brand_color_public(p_target text)
+returns jsonb
+language sql stable security definer set search_path = ''
+as $$
+  select jsonb_build_object('name', b.name, 'accent_dark', b.accent_dark, 'accent_light', b.accent_light, 'chart_colors', b.chart_colors)
+  from public.design_assignments a join public.brand_colors b on b.id = a.color_id
+  where a.target = p_target;
+$$;
+
+-- For everybody, also signed out (the login screens): palette, mode, animation on/off, the active
+-- logo of the app login screen and its preset, the active colour sets of the app login and of the
+-- dashboard (name, two accents, chart colours). Nothing else (no ids, no people).
+create or replace function public.get_public_design_config()
+returns jsonb
+language sql stable security definer set search_path = ''
+as $$
+  select jsonb_build_object(
+    'palette', c.login_palette,
+    'mode', c.login_mode,
+    'animation', c.login_animation,
+    'logo', l.spec,
+    'preset', p.params,
+    'colors', public.brand_color_public('app_login_colors'),
+    'dashboard_colors', public.brand_color_public('dashboard_colors')
+  )
+  from public.app_design_config c
+  join public.design_assignments a on a.target = 'app_login'
+  join public.logo_library l on l.id = a.logo_id
+  join public.animation_presets p on p.id = l.preset_id
+  where c.id;
+$$;
+
+-- All colour sets with the targets they are active on. Admin.
+create or replace function public.admin_color_list()
+returns jsonb
+language plpgsql stable security definer set search_path = ''
+as $$
+begin
+  perform public.require_admin();
+  return coalesce((
+    select jsonb_agg(jsonb_build_object(
+      'id', b.id, 'name', b.name, 'kind', b.kind, 'accent_dark', b.accent_dark, 'accent_light', b.accent_light,
+      'chart_colors', b.chart_colors, 'created_at', b.created_at, 'created_by', u.username,
+      'targets', coalesce((select jsonb_agg(a.target order by a.target) from public.design_assignments a where a.color_id = b.id), '[]'::jsonb)
+    ) order by b.kind, b.created_at)
+    from public.brand_colors b left join public.profiles u on u.id = b.created_by
+  ), '[]'::jsonb);
+end;
+$$;
+
+-- Creates (p_id null, also "Duplizieren") or changes a custom colour set: hex, contrast and number
+-- checked; at most 20 custom sets; built-in sets never change. Logged with before and after.
+create or replace function public.admin_color_save(p_id uuid, p_name text, p_dark text, p_light text, p_chart jsonb)
+returns uuid
+language plpgsql security definer set search_path = ''
+as $$
+declare
+  existing public.brand_colors%rowtype;
+  problem text;
+  chart jsonb := case when p_chart is null or p_chart = 'null'::jsonb then null else p_chart end;
+  saved uuid;
+begin
+  perform public.require_admin();
+  if p_name is null or char_length(btrim(p_name)) not between 1 and 40 then
+    raise exception 'invalid_name';
+  end if;
+  problem := public.brand_color_set_problem(p_dark, p_light, chart);
+  if problem is not null then
+    raise exception '%', problem;
+  end if;
+  if chart is not null then
+    chart := (select jsonb_agg(lower(v #>> '{}')) from jsonb_array_elements(chart) v);
+  end if;
+  if p_id is null then
+    if (select count(*) from public.brand_colors b where b.kind = 'custom') >= 20 then
+      raise exception 'too_many_color_sets';
+    end if;
+    insert into public.brand_colors (name, kind, accent_dark, accent_light, chart_colors, created_by)
+    values (btrim(p_name), 'custom', lower(p_dark), lower(p_light), chart, auth.uid())
+    returning id into saved;
+    perform public.log_moderation_action('color_create', 'brand_colors', saved, null, null, 'Farbsatz angelegt', null,
+      jsonb_build_object('name', btrim(p_name), 'accent_dark', lower(p_dark), 'accent_light', lower(p_light), 'chart_colors', chart));
+    return saved;
+  end if;
+  select * into existing from public.brand_colors b where b.id = p_id for update;
+  if not found then
+    raise exception 'color_set_not_found';
+  end if;
+  if existing.kind = 'builtin' then
+    raise exception 'builtin_color_set';
+  end if;
+  update public.brand_colors
+  set name = btrim(p_name), accent_dark = lower(p_dark), accent_light = lower(p_light), chart_colors = chart, updated_at = now()
+  where id = p_id;
+  perform public.log_moderation_action('color_update', 'brand_colors', p_id, null, null, 'Farbsatz geändert', null,
+    jsonb_build_object(
+      'before', jsonb_build_object('name', existing.name, 'accent_dark', existing.accent_dark, 'accent_light', existing.accent_light, 'chart_colors', existing.chart_colors),
+      'after', jsonb_build_object('name', btrim(p_name), 'accent_dark', lower(p_dark), 'accent_light', lower(p_light), 'chart_colors', chart)));
+  return p_id;
+end;
+$$;
+
+-- Deletes a custom colour set that is not active anywhere.
+create or replace function public.admin_color_delete(p_id uuid)
+returns void
+language plpgsql security definer set search_path = ''
+as $$
+declare
+  existing public.brand_colors%rowtype;
+begin
+  perform public.require_admin();
+  select * into existing from public.brand_colors b where b.id = p_id for update;
+  if not found then
+    raise exception 'color_set_not_found';
+  end if;
+  if existing.kind = 'builtin' then
+    raise exception 'builtin_color_set';
+  end if;
+  if exists (select 1 from public.design_assignments a where a.color_id = p_id) then
+    raise exception 'color_set_active';
+  end if;
+  delete from public.brand_colors where id = p_id;
+  perform public.log_moderation_action('color_delete', 'brand_colors', p_id, null, null, 'Farbsatz gelöscht', null,
+    jsonb_build_object('name', existing.name, 'accent_dark', existing.accent_dark, 'accent_light', existing.accent_light));
+end;
+$$;
+
+-- Makes a colour set active on the given targets ('dashboard_colors', 'app_login_colors').
+create or replace function public.admin_color_activate(p_color_id uuid, p_targets text[])
+returns void
+language plpgsql security definer set search_path = ''
+as $$
+declare
+  targets text[] := array(select distinct x from unnest(coalesce(p_targets, '{}')) x order by x);
+  before jsonb;
+begin
+  perform public.require_admin();
+  if cardinality(targets) = 0 or exists (select 1 from unnest(targets) x where x not in ('dashboard_colors', 'app_login_colors')) then
+    raise exception 'invalid_targets';
+  end if;
+  if not exists (select 1 from public.brand_colors b where b.id = p_color_id) then
+    raise exception 'color_set_not_found';
+  end if;
+  select coalesce(jsonb_object_agg(a.target, a.color_id), '{}'::jsonb) into before
+  from public.design_assignments a where a.target = any (targets);
+  insert into public.design_assignments (target, color_id, updated_at, updated_by)
+  select x, p_color_id, now(), auth.uid() from unnest(targets) x
+  on conflict (target) do update set color_id = excluded.color_id, updated_at = excluded.updated_at, updated_by = excluded.updated_by;
+  perform public.log_moderation_action('color_activate', 'brand_colors', p_color_id, null, null, 'Farbsatz aktiviert', null,
+    jsonb_build_object('targets', to_jsonb(targets), 'before', before,
+                       'after', (select jsonb_object_agg(x, p_color_id) from unnest(targets) x)));
+end;
+$$;
+
+do $$
+declare
+  f text;
+begin
+  foreach f in array array[
+    'public.brand_luminance(text)', 'public.brand_contrast(text, text)', 'public.brand_min_contrast(text, text[])',
+    'public.brand_on_accent(text)', 'public.brand_color_set_problem(text, text, jsonb)', 'public.brand_color_public(text)'
+  ] loop
+    execute format('revoke all on function %s from public, anon, authenticated', f);
+  end loop;
+  foreach f in array array[
+    'public.admin_color_list()', 'public.admin_color_save(uuid, text, text, text, jsonb)',
+    'public.admin_color_delete(uuid)', 'public.admin_color_activate(uuid, text[])'
+  ] loop
+    execute format('revoke all on function %s from public, anon', f);
+    execute format('grant execute on function %s to authenticated', f);
+  end loop;
+end;
+$$;
+revoke all on function public.get_public_design_config() from public;
+grant execute on function public.get_public_design_config() to anon, authenticated;

@@ -22,10 +22,12 @@ import {
   type BrandFrame,
   type BrandMode,
   type BrandPaletteName,
+  type ColorSetValues,
   type LogoShape,
   type LogoSpec,
   type PresetParams,
 } from "../lib/brand";
+import { useAppearance } from "../lib/appearanceContext";
 
 /** Stage: 240 units, the logo box is the middle 120 (as in the app, where the logo box is 120 units). */
 const STAGE = 240;
@@ -53,6 +55,8 @@ type BrandLogoProps = {
   /** Fill the stage with the palette's background (previews). */
   background?: boolean;
   className?: string;
+  /** Colour set for "Hauptfarbe" (previews); default: the dashboard's active one. */
+  colorSet?: ColorSetValues;
 };
 
 type Refs = {
@@ -121,7 +125,9 @@ export function BrandLogo({
   restartKey = 0,
   background = false,
   className,
+  colorSet,
 }: BrandLogoProps) {
+  const appearance = useAppearance();
   const spec: LogoSpec = useMemo(() => {
     const checked = validateLogoSpec(specIn);
     return checked.ok ? checked.spec : APP_LOGO_SPEC;
@@ -133,7 +139,7 @@ export function BrandLogo({
   }, [paramsIn, spec]);
   const timeline = useMemo(() => brandTimeline(params), [params]);
   const lengths = useMemo(() => spec.shapes.map((s) => shapeLength(s, false)), [spec]);
-  const colors = brandColors(palette, mode);
+  const colors = brandColors(palette, mode, colorSet ?? appearance.colorSet);
   const id = useId().replace(/[^a-zA-Z0-9]/g, "");
   const reducedMotion = useReducedMotion();
   const refs = useRef<Refs>({ ring: null, logo: null, fill: null, fillRect: null, shine: null, stroke: null });

@@ -1,6 +1,7 @@
 // The public design configuration of the app login screen (get_public_design_config) and how a
 // client falls back when it is missing or broken: last good copy, else the built-in defaults.
 
+import { DEFAULT_COLOR_SET, colorSetToPublic, parseColorSet, type ColorSet } from "./colors";
 import { APP_LOGO_SPEC, validateLogoSpec, type LogoSpec } from "./logoSpec";
 import type { BrandPaletteName } from "./palettes";
 import { STANDARD_PARAMS, validatePresetParams, type PresetParams } from "./presets";
@@ -13,6 +14,8 @@ export type PublicDesignConfig = {
   animation: boolean;
   logo: LogoSpec;
   preset: PresetParams;
+  /** Active colour set of the app login ("Hauptfarbe"); "Orange" when missing or invalid. */
+  colors: ColorSet;
 };
 
 export const DEFAULT_DESIGN_CONFIG: PublicDesignConfig = {
@@ -21,6 +24,7 @@ export const DEFAULT_DESIGN_CONFIG: PublicDesignConfig = {
   animation: true,
   logo: APP_LOGO_SPEC,
   preset: STANDARD_PARAMS,
+  colors: DEFAULT_COLOR_SET,
 };
 
 /** Larger answers are not even looked at. */
@@ -28,8 +32,8 @@ export const MAX_CONFIG_CHARS = 300_000;
 
 /**
  * Checks an answer of get_public_design_config (or a cached copy). Unknown palette, mode or
- * switch: null (the whole answer is not trusted). A broken logo or preset alone falls back to the
- * built-in app logo / the standard preset.
+ * switch: null (the whole answer is not trusted). A broken logo, preset or colour set alone falls
+ * back to the built-in app logo / the standard preset / "Orange".
  */
 export function parsePublicDesignConfig(value: unknown): PublicDesignConfig | null {
   if (typeof value !== "object" || value === null || Array.isArray(value)) return null;
@@ -53,6 +57,7 @@ export function parsePublicDesignConfig(value: unknown): PublicDesignConfig | nu
     animation: animation === "on",
     logo: logo.ok ? logo.spec : APP_LOGO_SPEC,
     preset: preset.ok ? preset.params : STANDARD_PARAMS,
+    colors: parseColorSet(raw.colors) ?? DEFAULT_COLOR_SET,
   };
 }
 
@@ -64,6 +69,7 @@ export function serializeDesignConfig(config: PublicDesignConfig): string {
     animation: config.animation ? "on" : "off",
     logo: config.logo,
     preset: config.preset,
+    colors: colorSetToPublic(config.colors),
   });
 }
 

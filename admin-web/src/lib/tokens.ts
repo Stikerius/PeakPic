@@ -4,7 +4,16 @@
 // in src/lib/__tests__/appearance.test.ts (WCAG AA).
 
 import type { StyleId } from "./appearance";
-import { brandColors, type BrandMode, type BrandPaletteName } from "./brand";
+import {
+  DEFAULT_COLOR_SET,
+  accentTextColor,
+  blendHex,
+  brandColors,
+  chartColorsOf,
+  type BrandMode,
+  type BrandPaletteName,
+  type ColorSetValues,
+} from "./brand";
 
 export type TokenName =
   | "bg"
@@ -20,6 +29,7 @@ export type TokenName =
   | "accent"
   | "on-accent"
   | "accent-soft"
+  | "accent-text"
   | "focus"
   | "danger"
   | "success"
@@ -32,11 +42,20 @@ export type TokenName =
   | "qr-bg"
   | "muted-dot"
   | "ambient-line"
-  | "ambient-alert";
+  | "ambient-alert"
+  | "chart-1"
+  | "chart-2"
+  | "chart-3"
+  | "chart-4"
+  | "chart-5"
+  | "chart-6"
+  | "chart-7"
+  | "chart-8";
 
 export type Tokens = Record<TokenName, string>;
 
-type Neutral = Omit<Tokens, "accent" | "on-accent" | "accent-soft" | "focus" | "ambient-line" | "ambient-alert">;
+type ChartToken = `chart-${1 | 2 | 3 | 4 | 5 | 6 | 7 | 8}`;
+type Neutral = Omit<Tokens, "accent" | "on-accent" | "accent-soft" | "accent-text" | "focus" | "ambient-line" | "ambient-alert" | ChartToken>;
 
 /** Highest opacity of a background animation (also in styles.css, checked by the contrast test). */
 export const AMBIENT_MAX_OPACITY = 0.18;
@@ -148,19 +167,33 @@ const CLASSIC: Record<BrandMode, Neutral> = {
 
 const NEUTRALS: Record<StyleId, Record<BrandMode, Neutral>> = { new: NEW, classic: CLASSIC };
 
-/** Quiet accent backgrounds (selected states, highlighted rows). */
-const ACCENT_SOFT: Record<BrandPaletteName, Record<BrandMode, string>> = {
-  color: { dark: "#3a1a12", light: "#fde3da" },
-  bw: { dark: "#26262b", light: "#e4e4e0" },
-};
+/** Quiet accent backgrounds in black and white (with a colour set they are mixed from the accent). */
+const BW_ACCENT_SOFT: Record<BrandMode, string> = { dark: "#26262b", light: "#e4e4e0" };
 
-export function tokensFor(style: StyleId, mode: BrandMode, palette: BrandPaletteName): Tokens {
-  const brand = brandColors(palette, mode);
+/**
+ * All tokens of a style, mode and palette. With "Hauptfarbe" the accent comes from the active
+ * colour set (default "Orange"); text on it, the link colour (accent-text) and the quiet accent
+ * background are derived so they stay readable.
+ */
+export function tokensFor(style: StyleId, mode: BrandMode, palette: BrandPaletteName, colorSet: ColorSetValues = DEFAULT_COLOR_SET): Tokens {
+  const brand = brandColors(palette, mode, colorSet);
+  const neutral = NEUTRALS[style][mode];
+  const charts = chartColorsOf(colorSet);
+  const chart = (i: number) => charts[i % charts.length] ?? brand.accent;
   return {
-    ...NEUTRALS[style][mode],
+    ...neutral,
+    "accent-text": palette === "bw" ? neutral.text : accentTextColor(brand.accent, mode),
+    "chart-1": chart(0),
+    "chart-2": chart(1),
+    "chart-3": chart(2),
+    "chart-4": chart(3),
+    "chart-5": chart(4),
+    "chart-6": chart(5),
+    "chart-7": chart(6),
+    "chart-8": chart(7),
     accent: brand.accent,
     "on-accent": brand.onAccent,
-    "accent-soft": ACCENT_SOFT[palette][mode],
+    "accent-soft": palette === "bw" ? BW_ACCENT_SOFT[mode] : blend(neutral.bg, brand.accent, mode === "dark" ? 0.2 : 0.16),
     // The focus ring is the accent; in black and white it is the text colour (always visible).
     focus: palette === "bw" ? NEUTRALS[style][mode].text : brand.accent,
     "ambient-line": AMBIENT[palette][mode].line,
@@ -181,16 +214,7 @@ function channel(hex: string, start: number): number {
 }
 
 /** `top` over `bottom` with `alpha` (both #rrggbb), as #rrggbb. */
-export function blend(bottom: string, top: string, alpha: number): string {
-  const mix = (i: number) => {
-    const a = Number.parseInt(bottom.slice(i, i + 2), 16);
-    const b = Number.parseInt(top.slice(i, i + 2), 16);
-    return Math.round(a * (1 - alpha) + b * alpha)
-      .toString(16)
-      .padStart(2, "0");
-  };
-  return `#${mix(1)}${mix(3)}${mix(5)}`;
-}
+export const blend = blendHex;
 
 /** Relative luminance of #rrggbb. */
 export function luminance(hex: string): number {

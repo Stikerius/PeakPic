@@ -98,7 +98,7 @@ export function BrandAnimation({ config, scheme, background, width, height, logo
   const timeline = useMemo(() => brandTimeline(params), [params]);
   // Dash lengths in each shape's own units (the transform is applied to the element).
   const lengths = useMemo(() => spec.shapes.map((shape) => shapeLength(shape, false)), [spec]);
-  const colors = brandColors(config.palette, scheme);
+  const colors = brandColors(config.palette, scheme, config.colors);
 
   const reducedMotion = useReduceMotionLive();
   const focused = useIsFocused();

@@ -1,5 +1,8 @@
 // Brand colours of the logo animation (app login and dashboard). The app re-exports them as tokens
-// in src/constants/theme.ts; nowhere else are these values written down.
+// in src/constants/theme.ts; nowhere else are these values written down. The accent of the palette
+// "Hauptfarbe" comes from the active colour set (colors.ts, default "Orange").
+
+import { DEFAULT_COLOR_SET, onAccentColor, type ColorSetValues } from "./colors";
 
 export type BrandPaletteName = "color" | "bw";
 export type BrandMode = "light" | "dark";
@@ -20,21 +23,16 @@ const BASE: Record<BrandMode, Pick<BrandColors, "background" | "line" | "mutedDo
   light: { background: "#f7f7f5", line: "#e4e4e0", mutedDot: "#cfcfc8" },
 };
 
-const ACCENT: Record<BrandPaletteName, Record<BrandMode, Pick<BrandColors, "accent" | "onAccent">>> = {
-  // "Hauptfarbe": flame orange.
-  color: {
-    dark: { accent: "#ff5a36", onAccent: "#1b0f0a" },
-    light: { accent: "#f2481f", onAccent: "#1b0f0a" },
-  },
-  // "Schwarz-Weiss": white on dark, near black on light.
-  bw: {
-    dark: { accent: "#fafafa", onAccent: "#1b0f0a" },
-    light: { accent: "#18181b", onAccent: "#ffffff" },
-  },
+/** "Schwarz-Weiss": white on dark, near black on light. Independent of the colour sets. */
+const BLACK_AND_WHITE: Record<BrandMode, Pick<BrandColors, "accent" | "onAccent">> = {
+  dark: { accent: "#fafafa", onAccent: "#1b0f0a" },
+  light: { accent: "#18181b", onAccent: "#ffffff" },
 };
 
-export function brandColors(palette: BrandPaletteName, mode: BrandMode): BrandColors {
-  return { ...BASE[mode], ...ACCENT[palette][mode] };
+export function brandColors(palette: BrandPaletteName, mode: BrandMode, colorSet: ColorSetValues = DEFAULT_COLOR_SET): BrandColors {
+  if (palette === "bw") return { ...BASE[mode], ...BLACK_AND_WHITE[mode] };
+  const accent = mode === "dark" ? colorSet.accentDark : colorSet.accentLight;
+  return { ...BASE[mode], accent, onAccent: onAccentColor(accent) };
 }
 
 /**

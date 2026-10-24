@@ -59,6 +59,40 @@ Grundfarben der Logo-Animation: Dunkel Grund `#09090b`, Linien `#27272a`, gedäm
 `#3a3a40`; Hell Grund `#f7f7f5`, Linien `#e4e4e0`, gedämpfte Punkte `#cfcfc8`. Quelle:
 `shared/brand/palettes.ts`; die App gibt sie in `src/constants/theme.ts` als Tokens weiter.
 
+### Hauptfarben (Farbsätze)
+
+Die Palette „Hauptfarbe“ nimmt ihren Akzent aus einem **Farbsatz** (Tabelle `brand_colors`):
+Name (1–40 Zeichen), Akzent für Dunkel und für Hell (`#rrggbb`), optional bis 8 Diagrammfarben
+(sonst abgeleitet). „Schwarz-Weiss“ hängt von keinem Farbsatz ab. Eingebaut und nicht löschbar:
+
+| Farbsatz | Dunkel | Hell | Text auf Akzent (Dunkel / Hell) |
+|---|---|---|---|
+| Orange (Standard) | `#ff5a36` | `#f2481f` | `#1b0f0a` / `#1b0f0a` |
+| Blau | `#4d9fff` | `#1f6fd6` | `#1b0f0a` / `#ffffff` |
+| Grün | `#34c77b` | `#14804a` | `#1b0f0a` / `#ffffff` |
+| Violett | `#a78bfa` | `#7c3aed` | `#1b0f0a` / `#ffffff` |
+| Rot | `#ff6b6b` | `#d62839` | `#1b0f0a` / `#ffffff` |
+
+**Lesbarkeit** (gleiche Regeln in `shared/brand/colors.ts` und `brand_color_set_problem()` in der
+Datenbank, ein Check auf der Tabelle; der Editor zeigt bei Verstoss einen korrigierten Vorschlag):
+
+- Akzent mindestens 3 : 1 gegen jeden Hintergrund seines Modus (`REFERENCE_BACKGROUNDS`).
+- Text auf dem Akzent ist `#1b0f0a` oder `#ffffff`, je nachdem, was mehr Kontrast hat; mindestens 4,5 : 1.
+- Links nutzen `--accent-text`: der Akzent, falls nötig abgedunkelt oder aufgehellt auf 4,5 : 1.
+- Diagrammfarben mindestens 3 : 1 auf hellen und dunklen Hintergründen; Diagramme zeigen zusätzlich
+  Muster und die Werte als Text (`PatternChart`), Farbe ist nie die einzige Unterscheidung.
+
+**Ziele:** `dashboard_colors` (Dashboard aller Staff-Konten, auch die Anmeldeseite) und
+`app_login_colors` (nur Anmeldebildschirm und Logo-Animation der App, nur bei der Palette
+„Hauptfarbe“; der Rest der App bleibt beim Flammen-Orange). Beide kommen öffentlich über
+`get_public_design_config()` (`colors`, `dashboard_colors`: Name, zwei Akzente, Diagrammfarben, keine
+IDs). App und Dashboard prüfen die Werte erneut und fallen auf „Orange“ zurück.
+
+**Verwaltung** (Design → Hauptfarben, nur Admins mit Zwei-Faktor): `admin_color_list`,
+`admin_color_save` (Neu, Duplizieren, Bearbeiten, Umbenennen; höchstens 20 eigene), `admin_color_delete`
+(nicht eingebaute, nicht aktive), `admin_color_activate`. Jede Änderung steht mit Vorher-Nachher in
+`moderation_actions` (`color_create`, `color_update`, `color_delete`, `color_activate`).
+
 ### Wahl im Dashboard
 
 Pro Browser gespeichert (`localStorage`, ohne Bezug zur Person): Stil, Modus (System, Hell, Dunkel),
