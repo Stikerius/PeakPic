@@ -381,12 +381,15 @@ a.card:hover { border-color: var(--text-3); }
  * interactive, at most 0.18 opacity (--ambient-opacity, checked by a test), only transform and
  * opacity move. data-moving="false" (Ruhig, hidden tab, reduce motion) holds the still image.
  */
-.ambient { position: fixed; inset: 0; z-index: 0; pointer-events: none; user-select: none; overflow: hidden; --ambient-opacity: 0.14; opacity: var(--ambient-opacity); }
+.ambient { position: fixed; inset: 0; z-index: 0; pointer-events: none; user-select: none; overflow: hidden; contain: strict; --ambient-opacity: 0.14; opacity: var(--ambient-opacity); }
 .ambient svg { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
 .ambient * { fill: none; stroke: var(--ambient-line); stroke-width: 1; vector-effect: non-scaling-stroke; }
 .ambient[data-moving="false"] *, .ambient svg[data-still] * { animation-play-state: paused !important; }
 .ambient[data-level="simple"] .amb-secondary { display: none; }
 .sidebar { z-index: 2; }
+/* While backgrounds move, the bars don't blur what is behind them (that would be redone every frame,
+   also while scrolling long tables); their surface is nearly opaque anyway. */
+:root[data-ambient="on"] .sidebar, :root[data-ambient="on"] .pagebar { backdrop-filter: none; }
 .main { position: relative; z-index: 1; }
 .ambient[data-variant="dots"] { --ambient-opacity: 0.16; }
 .ambient[data-variant="hazard"] { --ambient-opacity: 0.12; }

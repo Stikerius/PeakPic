@@ -19,14 +19,17 @@ const ANIMATION_OPTIONS = [
   ["off", "Aus"],
 ] as const;
 
-/** A box that shows its content with the tokens of another style, mode and palette. */
+/**
+ * A box that shows its content with the tokens of another style, mode and palette. Only a picture:
+ * hidden from screen readers and not focusable (inert), its buttons do nothing.
+ */
 function TokenPreview({ style, mode, palette, children, className }: { style: StyleId; mode: BrandMode; palette: BrandPaletteName; children: ReactNode; className: string }) {
   const ref = useRef<HTMLDivElement>(null);
   useEffect(() => {
     if (ref.current !== null) applyTokens(ref.current, tokensFor(style, mode, palette));
   }, [style, mode, palette]);
   return (
-    <div ref={ref} className={className}>
+    <div ref={ref} className={className} aria-hidden="true" inert>
       {children}
     </div>
   );

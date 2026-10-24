@@ -4,6 +4,8 @@
 
 **Rechner gewechselt?** Was du ausser `git pull` tun musst, steht in [docs/geraetewechsel.md](docs/geraetewechsel.md).
 
+**Design, Logos und Animationen:** Tokens, Stile, Logo-Bibliothek, Upload-Regeln und Hintergrundanimationen stehen in [docs/design.md](docs/design.md).
+
 ---
 
 # Welcome to your Expo app 👋

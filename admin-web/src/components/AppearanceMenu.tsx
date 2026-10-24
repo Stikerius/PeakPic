@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import { SegmentedChoice } from "./ui";
 import { MODE_LABELS, type ModePreference } from "../lib/appearance";
@@ -12,9 +12,23 @@ const PALETTES = (["color", "bw"] as const).map((p) => [p, BRAND_PALETTE_LABELS[
 export function AppearanceMenu() {
   const { appearance, update } = useAppearance();
   const [open, setOpen] = useState(false);
+  const button = useRef<HTMLButtonElement>(null);
+
+  // Escape closes the menu and returns to its button.
+  useEffect(() => {
+    if (!open) return;
+    function onKey(event: KeyboardEvent) {
+      if (event.key !== "Escape") return;
+      setOpen(false);
+      button.current?.focus();
+    }
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [open]);
+
   return (
     <div className="appearance-menu">
-      <button type="button" className="button small" aria-expanded={open} aria-controls="appearance-menu-panel" onClick={() => setOpen(!open)}>
+      <button ref={button} type="button" className="button small" aria-expanded={open} aria-controls="appearance-menu-panel" onClick={() => setOpen(!open)}>
         Darstellung
       </button>
       {open && (

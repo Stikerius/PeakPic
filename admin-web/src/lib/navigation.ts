@@ -68,6 +68,12 @@ export function filterCommands(items: readonly NavItem[], query: string): NavIte
   });
 }
 
+/** Window title per page, so screen readers and the tab bar name where you are. */
+export function pageTitle(route: Route): string {
+  const item = activeItem(route);
+  return item === undefined ? "PeakPic Moderation" : `${item.label} · PeakPic Moderation`;
+}
+
 /** Keyboard shortcuts stay quiet while someone types. */
 export function isTypingTarget(target: { tagName?: string; isContentEditable?: boolean } | null): boolean {
   if (target === null) return false;

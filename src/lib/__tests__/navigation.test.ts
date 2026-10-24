@@ -1,6 +1,6 @@
 import { describe, expect, it } from "@jest/globals";
 
-import { NAV_ITEMS, activeItem, filterCommands, isTypingTarget, navFor } from "../../../admin-web/src/lib/navigation";
+import { NAV_ITEMS, activeItem, filterCommands, isTypingTarget, navFor, pageTitle } from "../../../admin-web/src/lib/navigation";
 
 describe("navigation", () => {
   it("moderators see only the moderation pages", () => {
@@ -22,6 +22,11 @@ describe("navigation", () => {
     expect(filterCommands(NAV_ITEMS, "hell dunkel").map((i) => i.label)).toEqual(["Design"]);
     expect(filterCommands(NAV_ITEMS, "gestaltung").map((i) => i.label)).toEqual(["Logos", "Design"]);
     expect(filterCommands(navFor(false), "logos")).toEqual([]);
+  });
+
+  it("the window title names the page", () => {
+    expect(pageTitle({ page: "queue" })).toBe("Warteschlange · PeakPic Moderation");
+    expect(pageTitle({ page: "user", id: "x" })).toBe("Nutzer · PeakPic Moderation");
   });
 
   it("shortcuts stay quiet while typing", () => {

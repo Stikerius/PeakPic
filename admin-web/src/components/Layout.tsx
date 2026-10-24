@@ -8,7 +8,7 @@ import { ShortcutsDialog } from "./ShortcutsDialog";
 import { useAppearance } from "../lib/appearanceContext";
 import { useAuth } from "../lib/auth";
 import { useDashboardBrand } from "../lib/dashboardBrand";
-import { NAV_GROUPS, activeItem, isTypingTarget, navFor } from "../lib/navigation";
+import { NAV_GROUPS, activeItem, isTypingTarget, navFor, pageTitle } from "../lib/navigation";
 import { href, type Route } from "../lib/router";
 
 const COLLAPSED_KEY = "peakpic-admin-sidebar";
@@ -49,6 +49,10 @@ export function Layout({ route, children }: LayoutProps) {
       return !value;
     });
   }
+
+  useEffect(() => {
+    document.title = pageTitle(route);
+  }, [route]);
 
   useEffect(() => {
     function onKey(event: KeyboardEvent) {
