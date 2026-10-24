@@ -1,6 +1,7 @@
 import { useState, type FormEvent } from "react";
 
 import { BrandLogo } from "../components/BrandLogo";
+import { useAppearance } from "../lib/appearanceContext";
 import { useAuth } from "../lib/auth";
 import { useDashboardBrand } from "../lib/dashboardBrand";
 import { configError } from "../lib/supabase";
@@ -8,10 +9,20 @@ import { configError } from "../lib/supabase";
 export function LoginPage() {
   const { state, signIn, verifyCode, signOut } = useAuth();
   const brand = useDashboardBrand();
-  // Background only: the logo animation above the card (aria-hidden, never interactive).
+  const { appearance } = useAppearance();
+  // Background only: the logo animation above the card (aria-hidden, never interactive). "Ruhig":
+  // still image; "Aus": still image without the dot raster.
   const logo = (
     <div className="auth-logo">
-      <BrandLogo spec={brand.spec} params={brand.params} palette={brand.palette} mode={brand.mode} size={220} playing />
+      <BrandLogo
+        spec={brand.spec}
+        params={brand.params}
+        palette={brand.palette}
+        mode={brand.mode}
+        size={220}
+        playing={appearance.ambient === "on"}
+        dots={appearance.ambient !== "off"}
+      />
     </div>
   );
   const [email, setEmail] = useState("");

@@ -1,62 +1,168 @@
-import type { ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 
 import { BrandLogo } from "./BrandLogo";
+import { CommandPalette } from "./CommandPalette";
+import { Icon } from "./Icon";
+import { ShortcutsDialog } from "./ShortcutsDialog";
+import { useAppearance } from "../lib/appearanceContext";
 import { useAuth } from "../lib/auth";
 import { useDashboardBrand } from "../lib/dashboardBrand";
+import { NAV_GROUPS, activeItem, isTypingTarget, navFor } from "../lib/navigation";
 import { href, type Route } from "../lib/router";
 
-type LayoutProps = { route: Route; children: ReactNode; theme: "light" | "dark"; onToggleTheme: () => void };
+const COLLAPSED_KEY = "peakpic-admin-sidebar";
 
-export function Layout({ route, children, theme, onToggleTheme }: LayoutProps) {
+function readCollapsed(): boolean {
+  try {
+    return window.localStorage.getItem(COLLAPSED_KEY) === "collapsed";
+  } catch {
+    return false;
+  }
+}
+
+type LayoutProps = { route: Route; children: ReactNode };
+
+/**
+ * Sidebar (areas with icons, collapsible to icons), header with area and page, command palette
+ * (Strg+K) and the list of shortcuts (?). The style ("Neu" or "Klassisch") only changes tokens and a
+ * few layout rules (styles.css); the markup is the same.
+ */
+export function Layout({ route, children }: LayoutProps) {
   const { state, signOut } = useAuth();
+  const { appearance, mode, update } = useAppearance();
   const brand = useDashboardBrand();
   const isAdmin = state.step === "ready" && state.role === "admin";
-  const links: { route: Route; label: string; active: boolean }[] = [
-    { route: { page: "overview" }, label: "Übersicht", active: route.page === "overview" },
-    { route: { page: "queue" }, label: "Warteschlange", active: route.page === "queue" || route.page === "report" },
-    { route: { page: "users" }, label: "Nutzer", active: route.page === "users" || route.page === "user" },
-    ...(isAdmin
-      ? [
-          { route: { page: "usage" } as Route, label: "Nutzung", active: route.page === "usage" },
-          { route: { page: "legal" } as Route, label: "Rechtstexte", active: route.page === "legal" || route.page === "legal-edit" },
-          { route: { page: "pending" } as Route, label: "Offene Bestätigungen", active: route.page === "pending" },
-          { route: { page: "reset" } as Route, label: "Bereinigung", active: route.page === "reset" || route.page === "reset-job" },
-          { route: { page: "mail" } as Route, label: "Mitteilungen", active: route.page === "mail" || route.page === "mail-campaign" },
-          { route: { page: "logos" } as Route, label: "Logos", active: route.page === "logos" },
-          { route: { page: "audit" } as Route, label: "Audit-Log", active: route.page === "audit" },
-        ]
-      : []),
-  ];
+  const items = navFor(isAdmin);
+  const current = activeItem(route);
+  const [collapsed, setCollapsed] = useState(readCollapsed);
+  const [paletteOpen, setPaletteOpen] = useState(false);
+  const [helpOpen, setHelpOpen] = useState(false);
+
+  function toggleSidebar() {
+    setCollapsed((value) => {
+      try {
+        window.localStorage.setItem(COLLAPSED_KEY, value ? "open" : "collapsed");
+      } catch {
+        // Only a convenience: without storage the choice lasts until reload.
+      }
+      return !value;
+    });
+  }
+
+  useEffect(() => {
+    function onKey(event: KeyboardEvent) {
+      if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "k") {
+        event.preventDefault();
+        setPaletteOpen(true);
+        return;
+      }
+      if (event.ctrlKey || event.metaKey || event.altKey || isTypingTarget(event.target as HTMLElement | null)) return;
+      if (document.querySelector("dialog[open]") !== null) return;
+      if (event.key === "?") {
+        event.preventDefault();
+        setHelpOpen(true);
+      } else if (event.key === "[" && appearance.style === "new") {
+        event.preventDefault();
+        toggleSidebar();
+      }
+    }
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [appearance.style]);
 
   return (
-    <div className="layout">
-      <header className="topbar">
-        <strong className="brand">
-          <BrandLogo spec={brand.spec} params={brand.params} palette={brand.palette} mode={brand.mode} size={32} dots={false} className="brand-logo" />
-          PeakPic Moderation
-        </strong>
-        <nav aria-label="Hauptnavigation">
-          {links.map((link) => (
-            <a key={link.label} href={href(link.route)} className={link.active ? "nav-link active" : "nav-link"} aria-current={link.active ? "page" : undefined}>
-              {link.label}
-            </a>
-          ))}
-        </nav>
-        <div className="topbar-right">
-          {state.step === "ready" && (
-            <span className="muted">
-              {state.email} · {state.role === "admin" ? "Admin" : "Moderator"}
-            </span>
-          )}
-          <button type="button" className="button small" onClick={onToggleTheme} aria-label="Hell oder dunkel">
-            {theme === "dark" ? "Hell" : "Dunkel"}
-          </button>
-          <button type="button" className="button small" onClick={signOut}>
-            Abmelden
+    <div className={collapsed ? "layout collapsed" : "layout"}>
+      <a className="skip-link" href="#main">
+        Zum Inhalt springen
+      </a>
+      <aside className="sidebar">
+        <div className="sidebar-head">
+          <a className="brand" href={href({ page: "overview" })} aria-label="PeakPic Moderation, Übersicht">
+            <BrandLogo spec={brand.spec} params={brand.params} palette={brand.palette} mode={brand.mode} size={28} dots={false} className="brand-logo" />
+            <span className="brand-name">PeakPic</span>
+          </a>
+          <button
+            type="button"
+            className="icon-button collapse-toggle"
+            onClick={toggleSidebar}
+            aria-expanded={!collapsed}
+            aria-label={collapsed ? "Seitenleiste ausklappen" : "Seitenleiste einklappen"}
+            title="Seitenleiste ein- oder ausklappen ([)"
+          >
+            <Icon name={collapsed ? "expand" : "collapse"} />
           </button>
         </div>
-      </header>
-      <main className="content">{children}</main>
+        <nav aria-label="Hauptnavigation" className="nav">
+          {NAV_GROUPS.map((group) => {
+            const inGroup = items.filter((item) => item.group === group);
+            if (inGroup.length === 0) return null;
+            return (
+              <div key={group} className="nav-group">
+                <p className="nav-group-title">{group}</p>
+                {inGroup.map((item) => {
+                  const active = item === current;
+                  return (
+                    <a
+                      key={item.label}
+                      href={href(item.route)}
+                      className={active ? "nav-link active" : "nav-link"}
+                      aria-current={active ? "page" : undefined}
+                      title={collapsed ? item.label : undefined}
+                    >
+                      <Icon name={item.icon} />
+                      <span className="nav-label">{item.label}</span>
+                    </a>
+                  );
+                })}
+              </div>
+            );
+          })}
+        </nav>
+      </aside>
+
+      <div className="main">
+        <header className="pagebar">
+          <p className="crumbs">
+            {current !== undefined && (
+              <>
+                <span className="muted">{current.group}</span>
+                <span className="muted" aria-hidden="true">
+                  {" "}
+                  ›{" "}
+                </span>
+                <span>{current.label}</span>
+              </>
+            )}
+          </p>
+          <div className="pagebar-actions">
+            <button type="button" className="command-button" onClick={() => setPaletteOpen(true)} aria-label="Befehlspalette öffnen (Strg+K)">
+              <Icon name="search" />
+              <span className="command-label">Suchen …</span>
+              <kbd>Strg K</kbd>
+            </button>
+            <button type="button" className="icon-button" onClick={() => setHelpOpen(true)} aria-label="Tastaturkürzel anzeigen (?)" title="Tastaturkürzel (?)">
+              <Icon name="keyboard" />
+            </button>
+            <button type="button" className="button small" onClick={() => update({ mode: mode === "dark" ? "light" : "dark" })}>
+              {mode === "dark" ? "Hell" : "Dunkel"}
+            </button>
+            {state.step === "ready" && (
+              <span className="muted user-label">
+                {state.email} · {state.role === "admin" ? "Admin" : "Moderator"}
+              </span>
+            )}
+            <button type="button" className="button small" onClick={signOut}>
+              Abmelden
+            </button>
+          </div>
+        </header>
+        <main id="main" className="content" tabIndex={-1}>
+          {children}
+        </main>
+      </div>
+
+      <CommandPalette open={paletteOpen} items={items} onClose={() => setPaletteOpen(false)} />
+      <ShortcutsDialog open={helpOpen} onClose={() => setHelpOpen(false)} />
     </div>
   );
 }

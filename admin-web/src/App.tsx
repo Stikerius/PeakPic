@@ -1,10 +1,11 @@
-import { useEffect, useState } from "react";
-
 import { Layout } from "./components/Layout";
+import { AppearanceMenu } from "./components/AppearanceMenu";
+import { useAppearance } from "./lib/appearanceContext";
 import { useAuth } from "./lib/auth";
 import { DashboardBrandProvider } from "./lib/dashboardBrand";
 import { useRoute } from "./lib/router";
 import { AuditPage } from "./pages/AuditPage";
+import { DesignPage } from "./pages/DesignPage";
 import { LegalEditPage } from "./pages/LegalEditPage";
 import { LegalPage } from "./pages/LegalPage";
 import { LoginPage } from "./pages/LoginPage";
@@ -19,64 +20,47 @@ import { ReportDetailPage } from "./pages/ReportDetailPage";
 import { UserDetailPage } from "./pages/UserDetailPage";
 import { UsersPage } from "./pages/UsersPage";
 
-type Theme = "light" | "dark";
-const THEME_KEY = "peakpic-admin-theme";
-
-function initialTheme(): Theme {
-  // Only the colour preference is stored; no data from the dashboard ever is.
-  const stored = window.localStorage.getItem(THEME_KEY);
-  if (stored === "light" || stored === "dark") return stored;
-  return window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
-}
-
 export function App() {
   const { state } = useAuth();
   const route = useRoute();
-  const [theme, setTheme] = useState<Theme>(initialTheme);
+  const { appearance, mode } = useAppearance();
 
-  useEffect(() => {
-    document.documentElement.dataset.theme = theme;
-  }, [theme]);
-
-  // Without a staff role and a two-factor session there is only the login page.
+  // Without a staff role and a two-factor session there is only the login page (with a small menu
+  // for mode and colour).
   if (state.step !== "ready") {
     return (
-      <DashboardBrandProvider mode={theme} palette="bw">
+      <DashboardBrandProvider mode={mode} palette={appearance.palette}>
         <div className="auth-screen">
+          <AppearanceMenu />
           <LoginPage />
         </div>
       </DashboardBrandProvider>
     );
   }
 
-  function toggleTheme() {
-    const next: Theme = theme === "dark" ? "light" : "dark";
-    window.localStorage.setItem(THEME_KEY, next);
-    setTheme(next);
-  }
-
-  // Legal texts and pending confirmations are admin pages (the SQL functions check is_admin() as well).
+  // Admin pages: the SQL functions check is_admin() as well.
   const isAdmin = state.role === "admin";
 
   return (
-    <DashboardBrandProvider mode={theme} palette="bw">
-    <Layout route={route} theme={theme} onToggleTheme={toggleTheme}>
-      {route.page === "overview" && <OverviewPage />}
-      {route.page === "queue" && <QueuePage />}
-      {route.page === "report" && <ReportDetailPage key={route.id} id={route.id} />}
-      {route.page === "users" && <UsersPage />}
-      {route.page === "user" && <UserDetailPage key={route.id} id={route.id} />}
-      {route.page === "audit" && <AuditPage />}
-      {route.page === "legal" && isAdmin && <LegalPage />}
-      {route.page === "legal-edit" && isAdmin && <LegalEditPage key={route.id} id={route.id} />}
-      {route.page === "pending" && isAdmin && <PendingPage />}
-      {route.page === "usage" && isAdmin && <UsagePage />}
-      {route.page === "reset" && isAdmin && <ResetPage jobId={null} />}
-      {route.page === "reset-job" && isAdmin && <ResetPage key={route.id} jobId={route.id} />}
-      {route.page === "mail" && isAdmin && <MailPage campaignId={null} />}
-      {route.page === "mail-campaign" && isAdmin && <MailPage key={route.id} campaignId={route.id} />}
-      {route.page === "logos" && isAdmin && <LogosPage />}
-    </Layout>
+    <DashboardBrandProvider mode={mode} palette={appearance.palette}>
+      <Layout route={route}>
+        {route.page === "overview" && <OverviewPage />}
+        {route.page === "queue" && <QueuePage />}
+        {route.page === "report" && <ReportDetailPage key={route.id} id={route.id} />}
+        {route.page === "users" && <UsersPage />}
+        {route.page === "user" && <UserDetailPage key={route.id} id={route.id} />}
+        {route.page === "audit" && <AuditPage />}
+        {route.page === "legal" && isAdmin && <LegalPage />}
+        {route.page === "legal-edit" && isAdmin && <LegalEditPage key={route.id} id={route.id} />}
+        {route.page === "pending" && isAdmin && <PendingPage />}
+        {route.page === "usage" && isAdmin && <UsagePage />}
+        {route.page === "reset" && isAdmin && <ResetPage jobId={null} />}
+        {route.page === "reset-job" && isAdmin && <ResetPage key={route.id} jobId={route.id} />}
+        {route.page === "mail" && isAdmin && <MailPage campaignId={null} />}
+        {route.page === "mail-campaign" && isAdmin && <MailPage key={route.id} campaignId={route.id} />}
+        {route.page === "logos" && isAdmin && <LogosPage />}
+        {route.page === "design" && isAdmin && <DesignPage />}
+      </Layout>
     </DashboardBrandProvider>
   );
 }

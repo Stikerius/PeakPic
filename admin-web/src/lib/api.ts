@@ -1327,3 +1327,38 @@ export async function fetchDashboardLogo(): Promise<{ spec: unknown; params: unk
   const r = asRecord(data);
   return { spec: r.logo, params: r.preset };
 }
+
+// ------------------------------------------------------------------ design of the app login screen (admins)
+
+export type AppLoginDesign = { palette: "color" | "bw"; mode: "system" | "light" | "dark"; animation: boolean };
+
+const DESIGN_ERRORS: Record<string, string> = {
+  not_authorized: "Nur Admins mit Zwei-Faktor-Anmeldung.",
+  invalid_palette: "Unbekannte Farbe.",
+  invalid_mode: "Unbekannter Modus.",
+  invalid_animation: "Ungültige Einstellung der Animation.",
+};
+
+/** What the app's login screen shows now (the same public answer the app reads), with its logo. */
+export async function fetchAppLoginDesign(): Promise<AppLoginDesign & { logo: unknown; preset: unknown }> {
+  const { data, error } = await supabase.rpc("get_public_design_config");
+  if (error) throw new ApiError("Die Einstellungen der App konnten nicht geladen werden.");
+  const r = asRecord(data);
+  return {
+    palette: r.palette === "color" ? "color" : "bw",
+    mode: r.mode === "light" || r.mode === "dark" ? r.mode : "system",
+    animation: r.animation !== "off",
+    logo: r.logo,
+    preset: r.preset,
+  };
+}
+
+/** Saves the look of the app's login screen (logged with before and after). */
+export async function saveAppLoginDesign(design: AppLoginDesign): Promise<void> {
+  const { error } = await supabase.rpc("set_app_design_config", {
+    p_palette: design.palette,
+    p_mode: design.mode,
+    p_animation: design.animation ? "on" : "off",
+  });
+  if (error) throw new ApiError(DESIGN_ERRORS[error.message] ?? `Fehler: ${error.message}`);
+}
