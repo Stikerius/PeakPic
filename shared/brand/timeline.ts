@@ -184,6 +184,40 @@ export function brandFrame(progress: number, params: PresetParams, timeline: Bra
   };
 }
 
+export type ShineGeometry = { y: number; height: number; startX: number; endX: number };
+
+/**
+ * Where the shine strip runs, in the logo's viewBox units. The strip is rotated by `angle` around
+ * the centre of the viewBox; start and end are chosen so the tilted strip lies completely outside
+ * the box before and after its pass (no sliver at the edge when it appears or disappears), and it
+ * is tall enough to cover the box at any angle.
+ */
+export function shineGeometry(viewBox: readonly [number, number, number, number], width: number, angle: number): ShineGeometry {
+  "worklet";
+  const [x, y, w, h] = viewBox;
+  const cx = x + w / 2;
+  const cy = y + h / 2;
+  const rad = (Math.abs(angle) * Math.PI) / 180;
+  const cos = Math.cos(rad);
+  const sin = Math.sin(rad);
+  // Half the box's extent across and along the strip, seen in the strip's rotated frame.
+  const across = (w / 2) * cos + (h / 2) * sin;
+  const along = (w / 2) * sin + (h / 2) * cos;
+  const margin = Math.max(w, h) * 0.02;
+  return {
+    y: cy - along - margin,
+    height: 2 * (along + margin),
+    startX: cx - across - width - margin,
+    endX: cx + across + margin,
+  };
+}
+
+/** x of the shine strip for the frame's shine progress (0 -> 1). */
+export function shineX(geometry: ShineGeometry, shine: number): number {
+  "worklet";
+  return geometry.startX + (geometry.endX - geometry.startX) * shine;
+}
+
 /** The calm still image (reduced motion, animation off): the finished logo, no wave, no shine. */
 export function stillFrame(params: PresetParams): BrandFrame {
   "worklet";

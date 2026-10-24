@@ -11,6 +11,8 @@ import {
   brandFrame,
   brandTimeline,
   isIdentity,
+  shineGeometry,
+  shineX,
   matrixAttribute,
   pointsAttribute,
   shapeLength,
@@ -141,6 +143,7 @@ export function BrandLogo({
   const vbPerUnit = Math.max(vbW, vbH) / BOX;
   const strokeVb = params.strokeWidth * vbPerUnit;
   const shineWidth = params.shineWidth * vbPerUnit;
+  const shineBox = useMemo(() => shineGeometry([vbX, vbY, vbW, vbH], shineWidth, params.shineAngle), [vbX, vbY, vbW, vbH, shineWidth, params.shineAngle]);
   const wipe = params.fillMode === "wipeUp" || params.fillMode === "wipeLeft";
 
   useEffect(() => {
@@ -164,7 +167,7 @@ export function BrandLogo({
           r.fillRect.setAttribute("width", String(vbW * reveal));
         }
       }
-      r.shine?.setAttribute("x", String(vbX - shineWidth * 1.5 + (vbW + shineWidth * 2) * frame.shine));
+      r.shine?.setAttribute("x", String(shineX(shineBox, frame.shine)));
       r.shine?.setAttribute("opacity", frame.shineOpacity > 0 && !simple.current ? "1" : "0");
       r.stroke?.setAttribute("opacity", String(frame.strokeOpacity));
       outlines.forEach((el, i) => el.setAttribute("stroke-dashoffset", String((lengths[i] ?? 1) * frame.strokeOffset)));
@@ -217,7 +220,7 @@ export function BrandLogo({
       cancelAnimationFrame(raf);
       document.removeEventListener("visibilitychange", onVisibility);
     };
-  }, [playing, progress, reducedMotion, params, timeline, lengths, restartKey, wipe, vbX, vbY, vbW, vbH, shineWidth]);
+  }, [playing, progress, reducedMotion, params, timeline, lengths, restartKey, wipe, vbX, vbY, vbW, vbH, shineBox]);
 
   const still = stillFrame(params);
   const box = (STAGE - BOX) / 2;
@@ -310,10 +313,10 @@ export function BrandLogo({
                       ref={(el) => {
                         refs.current.shine = el;
                       }}
-                      x={vbX - shineWidth * 2}
-                      y={vbY - vbH}
+                      x={shineBox.startX}
+                      y={shineBox.y}
                       width={shineWidth}
-                      height={vbH * 3}
+                      height={shineBox.height}
                       fill={`url(#${id}-shine)`}
                       opacity={0}
                     />

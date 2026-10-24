@@ -21,7 +21,7 @@ import { scheduleOnRN } from "react-native-worklets";
 import type { PublicDesignConfig } from "../../../shared/brand/config";
 import { APP_LOGO_SPEC, shapeLength, validateLogoSpec, type LogoSpec } from "../../../shared/brand/logoSpec";
 import { STANDARD_PARAMS, validatePresetParams, type PresetParams } from "../../../shared/brand/presets";
-import { WAVE_LINE_WIDTH, WAVE_RADIUS, brandFrame, brandTimeline, stillFrame } from "../../../shared/brand/timeline";
+import { WAVE_LINE_WIDTH, WAVE_RADIUS, brandFrame, brandTimeline, shineGeometry, shineX, stillFrame } from "../../../shared/brand/timeline";
 import { LogoShapeElement, OutlineShape } from "@/components/brand-animation/logo-shapes";
 import { brandColors, brandMask, brandShine, type ColorScheme } from "@/constants/theme";
 
@@ -181,6 +181,7 @@ export function BrandAnimation({ config, scheme, background, width, height, logo
   const spacing = params.dotSpacing * unit;
   const edgeRadius = Math.max(cx, width - cx, cy, height - cy, 1);
   const shineWidth = (params.shineWidth * unit) / pxPerVb;
+  const shineBox = shineGeometry(spec.viewBox, shineWidth, params.shineAngle);
   const showWave = params.wave && !simple;
   const showShine = params.shine && params.fill && !simple;
   const wipe = params.fillMode === "wipeUp" || params.fillMode === "wipeLeft";
@@ -198,7 +199,7 @@ export function BrandAnimation({ config, scheme, background, width, height, logo
         : { x: vbX, y: vbY, width: vbW, height: vbH };
   });
   const shineProps = useAnimatedProps(() => ({
-    x: vbX - shineWidth * 1.5 + (vbW + shineWidth * 2) * frame.get().shine,
+    x: shineX(shineBox, frame.get().shine),
     opacity: frame.get().shineOpacity > 0 ? 1 : 0,
   }));
 
@@ -259,7 +260,7 @@ export function BrandAnimation({ config, scheme, background, width, height, logo
                 )}
                 {showShine && (
                   <G transform={`rotate(${params.shineAngle} ${vbX + vbW / 2} ${vbY + vbH / 2})`}>
-                    <AnimatedRect y={vbY - vbH} width={shineWidth} height={vbH * 3} fill="url(#brandShine)" animatedProps={shineProps} />
+                    <AnimatedRect x={shineBox.startX} y={shineBox.y} width={shineWidth} height={shineBox.height} fill="url(#brandShine)" animatedProps={shineProps} />
                   </G>
                 )}
               </G>

@@ -21,6 +21,8 @@ import {
   resolveDesignConfig,
   serializeDesignConfig,
   shapeLength,
+  shineGeometry,
+  shineX,
   stillFrame,
   validateLogoSpec,
   validatePresetParams,
@@ -309,5 +311,44 @@ describe("seeds in schema.sql match the shared values", () => {
 
   it("logos", () => {
     for (const logo of BUILTIN_LOGOS) expect(seed(logo.id)).toEqual(JSON.parse(JSON.stringify(logo.spec)));
+  });
+});
+
+describe("shine strip", () => {
+  // Corners of the viewBox seen in the frame of the strip (the strip is rotated by angle around the centre).
+  function cornersInStripFrame(vb: [number, number, number, number], angle: number) {
+    const [x, y, w, h] = vb;
+    const cx = x + w / 2;
+    const cy = y + h / 2;
+    const a = (angle * Math.PI) / 180;
+    return [
+      [x, y],
+      [x + w, y],
+      [x, y + h],
+      [x + w, y + h],
+    ].map(([px = 0, py = 0]) => [
+      cx + (px - cx) * Math.cos(a) + (py - cy) * Math.sin(a),
+      cy - (px - cx) * Math.sin(a) + (py - cy) * Math.cos(a),
+    ]);
+  }
+
+  const cases: [[number, number, number, number], number, number][] = [
+    [[131, 92, 167, 212], 12, 70],
+    [[0, 0, 200, 240], -30, 120],
+    [[0, 0, 500, 100], 30, 20],
+    [[-50, -50, 100, 400], 0, 50],
+  ];
+  it.each(cases)("never touches the logo before and after its pass (viewBox %j, %d°)", (viewBox, angle, width) => {
+    const vb = viewBox;
+    const g = shineGeometry(vb, width, angle);
+    const corners = cornersInStripFrame(vb, angle);
+    const xs = corners.map(([cx]) => cx ?? 0);
+    const ys = corners.map(([, cy]) => cy ?? 0);
+    // Start: the whole box is right of the strip; end: the whole box is left of it.
+    expect(Math.min(...xs)).toBeGreaterThan(shineX(g, 0) + width);
+    expect(Math.max(...xs)).toBeLessThan(shineX(g, 1));
+    // Tall enough to cover the box during the pass.
+    expect(Math.min(...ys)).toBeGreaterThan(g.y);
+    expect(Math.max(...ys)).toBeLessThan(g.y + g.height);
   });
 });
