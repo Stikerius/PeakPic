@@ -11,7 +11,7 @@ import {
   serializeAppearance,
   type Appearance,
 } from "../../../admin-web/src/lib/appearance";
-import { contrast, tokensFor, type TokenName } from "../../../admin-web/src/lib/tokens";
+import { AMBIENT_MAX_OPACITY, blend, contrast, tokensFor, type TokenName } from "../../../admin-web/src/lib/tokens";
 
 const MODES = ["light", "dark"] as const;
 const PALETTES = ["color", "bw"] as const;
@@ -99,6 +99,26 @@ describe("tokens", () => {
       const ratio = contrast(hex(t, fg), hex(t, bg));
       if (ratio < min) throw new Error(`${s}/${m}/${p}: ${fg} on ${bg} = ${ratio.toFixed(2)} (< ${min})`);
     }
+  });
+});
+
+describe("background animations never cost contrast", () => {
+  it.each(combos)("text on the page background stays AA under a line at full ambient opacity (%s / %s / %s)", (s, m, p) => {
+    const t = tokensFor(s, m, p);
+    for (const line of ["ambient-line", "ambient-alert"] as const) {
+      const worst = blend(t.bg, t[line], AMBIENT_MAX_OPACITY);
+      for (const fg of ["text", "text-2", "text-3", "danger", "success"] as const) {
+        const ratio = contrast(t[fg], worst);
+        if (ratio < 4.5) throw new Error(`${s}/${m}/${p}: ${fg} over ${line} = ${ratio.toFixed(2)}`);
+      }
+    }
+  });
+
+  it("styles.css never gives the ambient layer more opacity than allowed", () => {
+    const css = readFileSync(join(__dirname, "../../../admin-web/src/styles.css"), "utf8");
+    const values = [...css.matchAll(/--ambient-opacity:\s*([0-9.]+)/g)].map((m) => Number(m[1]));
+    expect(values.length).toBeGreaterThan(0);
+    for (const v of values) expect(v).toBeLessThanOrEqual(AMBIENT_MAX_OPACITY);
   });
 });
 

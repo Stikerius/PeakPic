@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
 
 import { BrandLogo } from "../components/BrandLogo";
-import { EmptyState, SegmentedChoice, Skeleton } from "../components/ui";
+import { EmptyState, PageHeader, SegmentedChoice, Skeleton } from "../components/ui";
 import { AMBIENT_LABELS, MODE_LABELS, STYLES, type Ambient, type ModePreference, type StyleId } from "../lib/appearance";
 import { useAppearance } from "../lib/appearanceContext";
 import { fetchAppLoginDesign, saveAppLoginDesign, type AppLoginDesign } from "../lib/api";
@@ -83,10 +83,9 @@ export function DesignPage() {
 
   return (
     <>
-      <h1>Design</h1>
-      <p className="muted">
+      <PageHeader title="Design">
         Logos wählst und lädst du unter <a href={href({ page: "logos" })}>Logos</a> hoch.
-      </p>
+      </PageHeader>
 
       <section className="panel" aria-labelledby="design-dashboard">
         <h2 id="design-dashboard">Dashboard</h2>

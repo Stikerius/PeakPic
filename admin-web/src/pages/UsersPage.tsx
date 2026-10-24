@@ -3,6 +3,7 @@ import { useState, type FormEvent } from "react";
 import { searchUsers, type UserRow } from "../lib/api";
 import { ACCOUNT_STATUS_LABELS, formatDateTime, label } from "../lib/format";
 import { navigate } from "../lib/router";
+import { EmptyState, PageHeader } from "../components/ui";
 
 export function UsersPage() {
   const [query, setQuery] = useState("");
@@ -24,7 +25,7 @@ export function UsersPage() {
 
   return (
     <>
-      <h1>Nutzer</h1>
+      <PageHeader title="Nutzer">Konten suchen und ihren Verlauf öffnen.</PageHeader>
       <form className="filters" onSubmit={search}>
         <label className="grow">
           Username, Anzeigename oder ID
@@ -33,7 +34,7 @@ export function UsersPage() {
         <button type="submit" className="button primary">Suchen</button>
       </form>
       {error !== null && <p className="error">{error}</p>}
-      {rows !== null && rows.length === 0 && <p className="muted">Keine Treffer.</p>}
+      {rows !== null && rows.length === 0 && <EmptyState title="Keine Treffer">Anderen Namen oder die vollständige ID versuchen.</EmptyState>}
       {rows !== null && rows.length > 0 && (
         <table className="table">
           <thead>

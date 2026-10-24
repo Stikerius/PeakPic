@@ -3,6 +3,7 @@ import { useCallback, useEffect, useState } from "react";
 import { fetchLegalDocumentBody, fetchLegalList, saveLegalDraft, type LegalDocType, type LegalVersionRow } from "../lib/api";
 import { formatDateTime } from "../lib/format";
 import { href, navigate } from "../lib/router";
+import { EmptyState, PageHeader } from "../components/ui";
 
 export const LEGAL_LABELS: Record<LegalDocType, string> = {
   terms: "Nutzungsbedingungen",
@@ -58,11 +59,10 @@ export function LegalPage() {
 
   return (
     <>
-      <h1>Rechtstexte</h1>
-      <p className="muted">
+      <PageHeader title="Rechtstexte">
         Nutzungsbedingungen werden akzeptiert, Datenschutzerklärung und Richtlinien nur zur Kenntnis genommen.
         Veröffentlichte Versionen sind unveränderlich; Korrekturen sind immer eine neue Version.
-      </p>
+      </PageHeader>
       {error !== null && <p className="error">{error}</p>}
       {rows !== null &&
         TYPES.map((type) => {
@@ -83,7 +83,7 @@ export function LegalPage() {
                 </button>
               </h3>
               {versions.length === 0 ? (
-                <p className="muted">Noch keine Version. Entwürfe aus docs/legal kannst du mit supabase/seed-legal.sql anlegen.</p>
+                <EmptyState title="Noch keine Version">Entwürfe aus docs/legal kannst du mit supabase/seed-legal.sql anlegen.</EmptyState>
               ) : (
                 <table className="table compact">
                   <thead>

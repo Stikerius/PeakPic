@@ -355,3 +355,101 @@ a.card:hover { border-color: var(--text-3); }
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { transition: none !important; animation: none !important; }
 }
+
+/* ------------------------------------------------------------------ page heads */
+.page-header { display: flex; align-items: flex-end; justify-content: space-between; gap: 16px; flex-wrap: wrap; margin-bottom: 24px; }
+.page-header h1 { margin: 0; }
+:root[data-style="new"] .page-header h1 { font-size: 26px; letter-spacing: -0.02em; }
+.page-header-text { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.page-lead { max-width: 76ch; }
+.page-lead p { margin: 0; }
+.page-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+.back-link {
+  display: inline-flex; align-items: center; align-self: flex-start; min-height: 32px; font-size: 13px;
+  color: var(--text-2); text-decoration: none; border-radius: var(--radius); transition: color var(--ease);
+}
+.back-link:hover { color: var(--text); }
+/* "Neu": filters are a calm toolbar on its own surface. */
+:root[data-style="new"] .filters { padding: 12px 16px; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-lg); }
+:root[data-style="new"] .notice { border: 1px solid var(--border); }
+/* Content areas always have an opaque surface; text on the page background is checked for contrast. */
+.table-scroll { background: var(--surface); border-radius: var(--radius); }
+
+/* ------------------------------------------------------------------ background animations */
+/*
+ * One fixed layer behind everything (z-index 0), content above it (z-index 1 and 2). Never
+ * interactive, at most 0.18 opacity (--ambient-opacity, checked by a test), only transform and
+ * opacity move. data-moving="false" (Ruhig, hidden tab, reduce motion) holds the still image.
+ */
+.ambient { position: fixed; inset: 0; z-index: 0; pointer-events: none; user-select: none; overflow: hidden; --ambient-opacity: 0.14; opacity: var(--ambient-opacity); }
+.ambient svg { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+.ambient * { fill: none; stroke: var(--ambient-line); stroke-width: 1; vector-effect: non-scaling-stroke; }
+.ambient[data-moving="false"] *, .ambient svg[data-still] * { animation-play-state: paused !important; }
+.ambient[data-level="simple"] .amb-secondary { display: none; }
+.sidebar { z-index: 2; }
+.main { position: relative; z-index: 1; }
+.ambient[data-variant="dots"] { --ambient-opacity: 0.16; }
+.ambient[data-variant="hazard"] { --ambient-opacity: 0.12; }
+.ambient[data-variant="radar"], .ambient[data-variant="network"] { --ambient-opacity: 0.16; }
+
+/* Shared motions */
+.amb-drift { animation: amb-drift 46s ease-in-out infinite; }
+.amb-drift-b { animation-duration: 58s; animation-delay: -20s; }
+.amb-drift-c { animation-duration: 52s; animation-delay: -34s; }
+@keyframes amb-drift { 0%, 100% { transform: translate(0, 0); } 50% { transform: translate(36px, -22px); } }
+
+/* Übersicht: pulse rings from the bottom edge */
+.amb-pulse { transform-box: fill-box; transform-origin: center; animation: amb-pulse 12s ease-out infinite; opacity: 0; }
+.amb-pulse-2 { animation-delay: -4s; }
+.amb-pulse-3 { animation-delay: -8s; }
+@keyframes amb-pulse { 0% { transform: scale(0.3); opacity: 0.9; } 100% { transform: scale(4); opacity: 0; } }
+
+/* Warteschlange: radar */
+.amb-spin { transform-box: view-box; transform-origin: 1440px 450px; animation: amb-spin 24s linear infinite; }
+.ambient .amb-sector { fill: var(--ambient-line); fill-opacity: 0.35; stroke: none; }
+.ambient .amb-echo { fill: var(--ambient-line); stroke: none; opacity: 0; animation: amb-echo 8s ease-in-out infinite; }
+.amb-echo-2 { animation-delay: -3s; }
+.amb-echo-3 { animation-delay: -5.5s; }
+@keyframes amb-spin { to { transform: rotate(-360deg); } }
+@keyframes amb-echo { 0%, 100% { opacity: 0; } 15% { opacity: 1; } 45% { opacity: 0; } }
+
+/* Nutzer: nodes */
+.ambient .amb-node { fill: var(--ambient-line); stroke: none; }
+
+/* Nutzung: streams */
+.amb-flow { animation: amb-flow 26s linear infinite; }
+.amb-flow-slow { animation-duration: 40s; }
+@keyframes amb-flow { to { transform: translateX(-360px); } }
+
+/* Audit-Log and Rechtstexte: lines running up */
+.ambient .amb-bar { fill: var(--ambient-line); stroke: none; }
+.amb-scroll { animation: amb-scroll-ledger 9s linear infinite; }
+.amb-scroll-slow { animation: amb-scroll-paper 40s linear infinite; }
+@keyframes amb-scroll-ledger { to { transform: translateY(-96px); } }
+@keyframes amb-scroll-paper { to { transform: translateY(-168px); } }
+
+/* Mitteilungen: flight path and paper plane (keyframes sampled from the same curve as the path) */
+.ambient .amb-dashed { stroke-dasharray: 6 10; }
+.ambient .amb-plane-shape { fill: var(--ambient-line); stroke: none; }
+.amb-plane { opacity: 0; animation: amb-plane 11s ease-in-out infinite; }
+@keyframes amb-plane {
+  0% { transform: translate(-60px, 780px) rotate(-43deg); opacity: 0; }
+  4% { opacity: 1; }
+  12% { transform: translate(246px, 542px) rotate(-33deg); }
+  24% { transform: translate(554px, 386px) rotate(-20deg); }
+  36% { transform: translate(866px, 314px) rotate(-6deg); }
+  48% { transform: translate(1182px, 326px) rotate(9deg); opacity: 1; }
+  60% { transform: translate(1500px, 420px) rotate(23deg); opacity: 0; }
+  100% { transform: translate(1500px, 420px) rotate(23deg); opacity: 0; }
+}
+
+/* Bereinigung: warning stripes at the edges */
+.ambient .amb-stripe { fill: var(--ambient-alert); stroke: none; }
+.ambient svg.amb-edge { width: 36px; }
+.ambient svg.amb-edge-left { left: 0; right: auto; }
+.ambient svg.amb-edge-right { left: auto; right: 0; }
+.amb-hazard { animation: amb-hazard 6s linear infinite; }
+@keyframes amb-hazard { to { transform: translateY(-32px); } }
+
+/* Logos and Design: still dots */
+.ambient .amb-dot { fill: var(--ambient-line); stroke: none; }

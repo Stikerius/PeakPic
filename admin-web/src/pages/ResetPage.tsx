@@ -6,6 +6,7 @@ import { fetchResetJob, fetchResetJobs, fetchResetSettings, type ResetJob, type 
 import { formatDateTime } from "../lib/format";
 import { categoryListText } from "../lib/reset";
 import { href, navigate } from "../lib/router";
+import { EmptyState, PageHeader } from "../components/ui";
 
 export const JOB_STATUS_LABELS: Record<string, string> = {
   draft: "Entwurf",
@@ -52,7 +53,7 @@ export function ResetPage({ jobId }: { jobId: string | null }) {
 
   return (
     <>
-      <h1>Bereinigung</h1>
+      <PageHeader title="Bereinigung">Konten oder ausgewählte Daten löschen, mit Trockenlauf, Bestätigung und Protokoll.</PageHeader>
       {fullOff && (
         <p className="notice">
           Komplettes Löschen von Konten ist ausgeschaltet (<code>app_settings.allow_full_reset = false</code>). Nur das
@@ -95,7 +96,7 @@ export function ResetPage({ jobId }: { jobId: string | null }) {
           )}
 
           <h2 className="section-title">Frühere Aufträge</h2>
-          {jobs !== null && jobs.length === 0 && <p className="muted">Noch keine Aufträge.</p>}
+          {jobs !== null && jobs.length === 0 && <EmptyState title="Noch keine Aufträge">Mit „Neuer Auftrag“ legst du eine Bereinigung an; zuerst läuft immer ein Trockenlauf.</EmptyState>}
           {jobs !== null && jobs.length > 0 && (
             <table className="table">
               <thead>

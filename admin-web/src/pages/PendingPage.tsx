@@ -13,6 +13,7 @@ import {
 import { formatDateTime } from "../lib/format";
 import { href } from "../lib/router";
 import { LEGAL_LABELS } from "./LegalPage";
+import { PageHeader } from "../components/ui";
 
 type RowAction =
   | { kind: "suspend"; row: PendingRow }
@@ -150,11 +151,10 @@ export function PendingPage() {
 
   return (
     <>
-      <h1>Offene Bestätigungen</h1>
-      <p className="muted">
+      <PageHeader title="Offene Bestätigungen">
         Aktive Konten, die die aktuelle Version noch nicht bestätigt haben und deren nächste Prüfung fällig ist. Jede
         Aktion verschiebt die nächste Prüfung um 5 Tage. Gesperrte und gebannte Konten erscheinen hier nicht.
-      </p>
+      </PageHeader>
       {!email.configured && <p className="muted">E-Mail-Versand nicht verfügbar: {email.reason}</p>}
       <div className="action-row">
         <button

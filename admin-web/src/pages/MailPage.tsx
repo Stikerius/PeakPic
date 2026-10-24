@@ -35,6 +35,7 @@ import {
 } from "../lib/api";
 import { formatDateTime } from "../lib/format";
 import { href } from "../lib/router";
+import { EmptyState, PageHeader, Skeleton } from "../components/ui";
 
 const CAMPAIGN_STATUS: Record<string, string> = { sending: "Wird gesendet", waiting: "Wartet", done: "Abgeschlossen" };
 const RECIPIENT_STATUS: Record<string, string> = {
@@ -140,7 +141,7 @@ function MailOverview() {
 
   return (
     <>
-      <h1>Mitteilungen</h1>
+      <PageHeader title="Mitteilungen">Servicemitteilungen per E-Mail an Konten, mit Testmail, Bestätigung und Verlauf.</PageHeader>
       {status !== null && !status.configured && (
         <p className="notice">{status.reason ?? "Kein Mail-Dienst eingerichtet."} Testmails und Versand sind erst danach möglich.</p>
       )}
@@ -166,7 +167,8 @@ function MailOverview() {
           <span className="muted">Einzelnachrichten zuerst, dann die ältesten.</span>
         </div>
       )}
-      {campaigns !== null && campaigns.length === 0 && <p className="muted">Noch keine Sendungen.</p>}
+      {campaigns !== null && campaigns.length === 0 && <EmptyState title="Noch keine Sendungen">Neue Mitteilungen erscheinen hier mit Datum, Kategorie und Status.</EmptyState>}
+      {campaigns === null && error === null && <Skeleton lines={4} label="Verlauf lädt" />}
       {campaigns !== null && campaigns.length > 0 && (
         <div className="table-scroll">
           <table className="table">
@@ -657,10 +659,7 @@ function CampaignDetail({ id }: { id: string }) {
 
   return (
     <>
-      <p>
-        <a href={href({ page: "mail" })}>← Alle Mitteilungen</a>
-      </p>
-      <h1>Sendung</h1>
+      <PageHeader title="Sendung" back={{ href: href({ page: "mail" }), label: "Alle Mitteilungen" }} />
       {error !== null && <p className="error">{error}</p>}
       {notice !== null && <p className="success">{notice}</p>}
       {campaign !== null && (

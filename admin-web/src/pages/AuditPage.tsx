@@ -4,6 +4,7 @@ import { fetchAuditLog, type AuditRow } from "../lib/api";
 import { useAuth } from "../lib/auth";
 import { formatDateTime } from "../lib/format";
 import { href } from "../lib/router";
+import { PageHeader } from "../components/ui";
 
 const ACTIONS = [
   "remove_content", "quarantine_content", "restore_content", "warn_user", "suspend_user", "ban_user",
@@ -41,7 +42,7 @@ export function AuditPage() {
 
   return (
     <>
-      <h1>Audit-Log</h1>
+      <PageHeader title="Audit-Log">Jede Moderationsaktion und jedes Einsehen privater Inhalte. Unveränderlich.</PageHeader>
       <form className="filters" onSubmit={submit}>
         <label className="grow">
           Suche (Begründung, Aktion, Username)

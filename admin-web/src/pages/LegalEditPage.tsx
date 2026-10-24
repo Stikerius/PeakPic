@@ -14,6 +14,7 @@ import {
 import { diffLines, type DiffLine } from "../lib/diff";
 import { href, navigate } from "../lib/router";
 import { LEGAL_LABELS } from "./LegalPage";
+import { PageHeader, Skeleton } from "../components/ui";
 
 type View = "edit" | "preview" | "diff";
 
@@ -51,7 +52,7 @@ export function LegalEditPage({ id }: { id: string }) {
   useEffect(load, [load]);
 
   if (error !== null && draft === null) return <p className="error">{error}</p>;
-  if (draft === null) return <p className="muted">Lädt …</p>;
+  if (draft === null) return <Skeleton lines={8} label="Rechtstext lädt" />;
 
   const editable = status === "draft";
   const current = draft;
@@ -135,11 +136,15 @@ export function LegalEditPage({ id }: { id: string }) {
 
   return (
     <>
-      <p><a href={href({ page: "legal" })}>← Rechtstexte</a></p>
-      <h1>
-        {LEGAL_LABELS[current.docType]} · Version {version}{" "}
-        <span className="pill">{status === "draft" ? "Entwurf" : status === "published" ? "Veröffentlicht" : "Archiviert"}</span>
-      </h1>
+      <PageHeader
+        back={{ href: href({ page: "legal" }), label: "Rechtstexte" }}
+        title={
+          <>
+            {LEGAL_LABELS[current.docType]} · Version {version}{" "}
+            <span className="pill">{status === "draft" ? "Entwurf" : status === "published" ? "Veröffentlicht" : "Archiviert"}</span>
+          </>
+        }
+      />
       {!editable && <p className="muted">Veröffentlichte Versionen lassen sich nicht ändern. Für Korrekturen einen neuen Entwurf anlegen.</p>}
       <div className="detail-grid">
         <div>

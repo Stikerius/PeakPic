@@ -15,6 +15,7 @@ import {
   type StatsOverview,
 } from "../lib/api";
 import { BUCKETS, PERIODS, bucketLabel, changePercent, defaultBucket, periodRange, zurichToday, type PeriodKey } from "../lib/period";
+import { PageHeader, Skeleton } from "../components/ui";
 
 const SERIES: { metric: StatsMetric; label: string }[] = [
   { metric: "accounts", label: "Neue Konten" },
@@ -147,12 +148,11 @@ export function UsagePage() {
 
   return (
     <>
-      <h1>Nutzung</h1>
-      <p className="muted">
+      <PageHeader title="Nutzung">
         Nur Tagessummen ohne Bezug zu Personen. Bereiche zählen nur Geräte, auf denen die anonyme Statistik eingeschaltet
         ist. „Aktive Konten“ ist eine Annäherung: Konten, die an einem Tag etwas erstellt haben (Beitrag, Story,
         Kommentar, Nachricht, Like, Follow); reines Lesen ist darin nicht enthalten.
-      </p>
+      </PageHeader>
 
       <div className="toolbar">
         <div className="segmented" role="group" aria-label="Zeitraum">
@@ -239,7 +239,7 @@ export function UsagePage() {
         </section>
       )}
 
-      {loading && error === null && <p className="muted">Lädt …</p>}
+      {loading && error === null && <Skeleton lines={5} label="Zahlen laden" />}
 
       {!loading && data !== null && (
         <>

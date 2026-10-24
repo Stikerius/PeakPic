@@ -51,3 +51,34 @@ export function EmptyState({ title, children, action }: { title: string; childre
     </div>
   );
 }
+
+/**
+ * Head of every page: optional link back, the title, a short lead and actions on the right. The
+ * lead sits on the page background, so it is plain text without decoration.
+ */
+export function PageHeader({
+  title,
+  back,
+  actions,
+  children,
+}: {
+  title: ReactNode;
+  back?: { href: string; label: string };
+  actions?: ReactNode;
+  children?: ReactNode;
+}) {
+  return (
+    <header className="page-header">
+      <div className="page-header-text">
+        {back !== undefined && (
+          <a className="back-link" href={back.href}>
+            ← {back.label}
+          </a>
+        )}
+        <h1>{title}</h1>
+        {children !== undefined && <div className="page-lead muted">{children}</div>}
+      </div>
+      {actions !== undefined && <div className="page-actions">{actions}</div>}
+    </header>
+  );
+}

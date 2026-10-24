@@ -4,6 +4,7 @@ import { fetchLegalOverview, fetchOverview, type Overview } from "../lib/api";
 import { useAuth } from "../lib/auth";
 import { formatAge, formatDateTime } from "../lib/format";
 import { href } from "../lib/router";
+import { PageHeader } from "../components/ui";
 
 export function OverviewPage() {
   const [overview, setOverview] = useState<Overview | null>(null);
@@ -27,7 +28,7 @@ export function OverviewPage() {
 
   return (
     <>
-      <h1>Übersicht</h1>
+      <PageHeader title="Übersicht">Offene Arbeit auf einen Blick.</PageHeader>
       {error !== null && <p className="error">{error}</p>}
       {overview !== null && (
         <div className="cards">

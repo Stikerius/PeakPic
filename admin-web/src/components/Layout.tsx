@@ -1,5 +1,6 @@
 import { useEffect, useState, type ReactNode } from "react";
 
+import { AmbientBackground } from "./ambient/AmbientBackground";
 import { BrandLogo } from "./BrandLogo";
 import { CommandPalette } from "./CommandPalette";
 import { Icon } from "./Icon";
@@ -72,6 +73,7 @@ export function Layout({ route, children }: LayoutProps) {
 
   return (
     <div className={collapsed ? "layout collapsed" : "layout"}>
+      <AmbientBackground route={route} />
       <a className="skip-link" href="#main">
         Zum Inhalt springen
       </a>

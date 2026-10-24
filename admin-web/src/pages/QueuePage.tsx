@@ -3,6 +3,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { fetchQueue, type QueueFilter, type QueueRow } from "../lib/api";
 import { REASON_LABELS, STATUS_LABELS, TYPE_LABELS, formatAge, formatDateTime, label } from "../lib/format";
 import { navigate } from "../lib/router";
+import { EmptyState, PageHeader } from "../components/ui";
 
 const PAGE = 50;
 
@@ -66,7 +67,7 @@ export function QueuePage() {
 
   return (
     <>
-      <h1>Warteschlange</h1>
+      <PageHeader title="Warteschlange">Meldungen nach Alter. Mit j und k wählen, Enter öffnet.</PageHeader>
       <div className="filters" role="group" aria-label="Filter">
         <label>
           Status
@@ -111,7 +112,7 @@ export function QueuePage() {
         <button type="button" className="button small" onClick={load}>Neu laden (r)</button>
       </div>
       {error !== null && <p className="error">{error}</p>}
-      {rows !== null && rows.length === 0 && <p className="muted">Keine Meldungen für diese Filter.</p>}
+      {rows !== null && rows.length === 0 && <EmptyState title="Keine Meldungen">Für diese Filter ist nichts offen.</EmptyState>}
       {rows !== null && rows.length > 0 && (
         <table className="table">
           <thead>

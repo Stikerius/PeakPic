@@ -21,6 +21,7 @@ import { useAuth } from "../lib/auth";
 import { str, strOrNull } from "../lib/decode";
 import { ACCOUNT_STATUS_LABELS, REASON_LABELS, STATUS_LABELS, TYPE_LABELS, formatDateTime, label } from "../lib/format";
 import { href } from "../lib/router";
+import { PageHeader, Skeleton } from "../components/ui";
 
 const CONTENT_TYPES: readonly string[] = ["post", "story", "comment", "message", "plan", "workout"];
 
@@ -45,7 +46,7 @@ export function ReportDetailPage({ id }: { id: string }) {
   useEffect(load, [load]);
 
   if (error !== null) return <p className="error">{error}</p>;
-  if (detail === null) return <p className="muted">Lädt …</p>;
+  if (detail === null) return <Skeleton lines={8} label="Meldung lädt" />;
 
   const report = detail.report;
   const targetType = str(report.target_type);
@@ -127,10 +128,10 @@ export function ReportDetailPage({ id }: { id: string }) {
 
   return (
     <>
-      <p><a href={href({ page: "queue" })}>← Warteschlange</a></p>
-      <h1>
-        {label(TYPE_LABELS, targetType)} gemeldet: {label(REASON_LABELS, str(report.reason))}
-      </h1>
+      <PageHeader
+        back={{ href: href({ page: "queue" }), label: "Warteschlange" }}
+        title={`${label(TYPE_LABELS, targetType)} gemeldet: ${label(REASON_LABELS, str(report.reason))}`}
+      />
       <div className="detail-grid">
         <div>
           <section className="panel">

@@ -21,6 +21,7 @@ import { validateLogoSpec, type ShapeRole } from "../lib/brand";
 import { useDashboardBrand } from "../lib/dashboardBrand";
 import { formatDateTime } from "../lib/format";
 import { deleteBlocker, duplicateName } from "../lib/logoLibrary";
+import { PageHeader, Skeleton } from "../components/ui";
 
 const MAX_UPLOADED = 30;
 const ROLE_LABELS: Record<ShapeRole, string> = { fill: "Fläche", cutout: "Ausschnitt", stroke: "Nur Linie" };
@@ -92,11 +93,10 @@ export function LogosPage() {
 
   return (
     <>
-      <h1>Logos</h1>
-      <p className="muted">
+      <PageHeader title="Logos">
         Logos erscheinen einfarbig in der Akzentfarbe der gewählten Palette. Aktiv ist je Ziel genau ein Logo: „App-Anmeldung“ (Anmeldebildschirm der
         App) und „Dashboard“ (Anmeldeseite, Ladebildschirm, Kopfzeile).
-      </p>
+      </PageHeader>
       {error !== null && <p className="error">{error}</p>}
       {notice !== null && <p className="success">{notice}</p>}
       <div className="action-row">
@@ -108,7 +108,7 @@ export function LogosPage() {
         </span>
       </div>
 
-      {logos === null && <p className="muted">Lädt …</p>}
+      {logos === null && error === null && <Skeleton lines={4} label="Logos laden" />}
       <div className="logo-grid">
         {(logos ?? []).map((logo) => {
           const blocker = deleteBlocker(logo);

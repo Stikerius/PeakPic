@@ -30,11 +30,25 @@ export type TokenName =
   | "backdrop"
   | "skeleton"
   | "qr-bg"
-  | "muted-dot";
+  | "muted-dot"
+  | "ambient-line"
+  | "ambient-alert";
 
 export type Tokens = Record<TokenName, string>;
 
-type Neutral = Omit<Tokens, "accent" | "on-accent" | "accent-soft" | "focus">;
+type Neutral = Omit<Tokens, "accent" | "on-accent" | "accent-soft" | "focus" | "ambient-line" | "ambient-alert">;
+
+/** Highest opacity of a background animation (also in styles.css, checked by the contrast test). */
+export const AMBIENT_MAX_OPACITY = 0.18;
+
+/**
+ * Lines of the background animations. Chosen so that text on the page background keeps AA even
+ * where a line runs under it at full ambient opacity; "alert" is the data reset's hint of red.
+ */
+const AMBIENT: Record<BrandPaletteName, Record<BrandMode, { line: string; alert: string }>> = {
+  color: { dark: { line: "#8e8e98", alert: "#ff7a70" }, light: { line: "#b4b4ad", alert: "#e2a39c" } },
+  bw: { dark: { line: "#8e8e98", alert: "#8e8e98" }, light: { line: "#b4b4ad", alert: "#b4b4ad" } },
+};
 
 /** "Neu": deep black / warm light grey, 1px lines, no shadows. */
 const NEW: Record<BrandMode, Neutral> = {
@@ -96,7 +110,7 @@ const CLASSIC: Record<BrandMode, Neutral> = {
     "row-hover": "#202024",
     text: "#f2f2f3",
     "text-2": "#a1a1a8",
-    "text-3": "#8e8e96",
+    "text-3": "#9a9aa2",
     danger: "#ff6b61",
     success: "#30d158",
     "warn-bg": "#3a2d10",
@@ -120,7 +134,7 @@ const CLASSIC: Record<BrandMode, Neutral> = {
     "text-2": "#55555d",
     "text-3": "#64646c",
     danger: "#b4131a",
-    success: "#1f7a36",
+    success: "#1b6c30",
     "warn-bg": "#fff1d6",
     "warn-text": "#6b4100",
     "diff-added": "#dcf5e3",
@@ -149,6 +163,8 @@ export function tokensFor(style: StyleId, mode: BrandMode, palette: BrandPalette
     "accent-soft": ACCENT_SOFT[palette][mode],
     // The focus ring is the accent; in black and white it is the text colour (always visible).
     focus: palette === "bw" ? NEUTRALS[style][mode].text : brand.accent,
+    "ambient-line": AMBIENT[palette][mode].line,
+    "ambient-alert": AMBIENT[palette][mode].alert,
   };
 }
 
@@ -162,6 +178,18 @@ export function applyTokens(element: HTMLElement, tokens: Tokens): void {
 function channel(hex: string, start: number): number {
   const c = Number.parseInt(hex.slice(start, start + 2), 16) / 255;
   return c <= 0.03928 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4;
+}
+
+/** `top` over `bottom` with `alpha` (both #rrggbb), as #rrggbb. */
+export function blend(bottom: string, top: string, alpha: number): string {
+  const mix = (i: number) => {
+    const a = Number.parseInt(bottom.slice(i, i + 2), 16);
+    const b = Number.parseInt(top.slice(i, i + 2), 16);
+    return Math.round(a * (1 - alpha) + b * alpha)
+      .toString(16)
+      .padStart(2, "0");
+  };
+  return `#${mix(1)}${mix(3)}${mix(5)}`;
 }
 
 /** Relative luminance of #rrggbb. */

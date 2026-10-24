@@ -9,6 +9,7 @@ import { useAuth } from "../lib/auth";
 import { str, strOrNull } from "../lib/decode";
 import { ACCOUNT_STATUS_LABELS, formatDateTime, label } from "../lib/format";
 import { href, navigate } from "../lib/router";
+import { PageHeader, Skeleton } from "../components/ui";
 
 export function UserDetailPage({ id }: { id: string }) {
   const { state } = useAuth();
@@ -37,7 +38,7 @@ export function UserDetailPage({ id }: { id: string }) {
   useEffect(load, [load]);
 
   if (error !== null) return <p className="error">{error}</p>;
-  if (detail === null) return <p className="muted">Lädt …</p>;
+  if (detail === null) return <Skeleton lines={8} label="Konto lädt" />;
 
   const profile = detail.profile;
   const status = str(profile.account_status);
@@ -86,10 +87,14 @@ export function UserDetailPage({ id }: { id: string }) {
 
   return (
     <>
-      <p><a href={href({ page: "users" })}>← Nutzer</a></p>
-      <h1>
-        {str(profile.display_name)} <span className="muted">@{str(profile.username)}</span>
-      </h1>
+      <PageHeader
+        back={{ href: href({ page: "users" }), label: "Nutzer" }}
+        title={
+          <>
+            {str(profile.display_name)} <span className="muted">@{str(profile.username)}</span>
+          </>
+        }
+      />
       <div className="detail-grid">
         <div>
           <section className="panel">
