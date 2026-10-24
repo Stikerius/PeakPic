@@ -270,6 +270,7 @@ Nur nötig, wenn du Functions deployst. Die Supabase-CLI läuft über `npx`, ohn
    | `send_legal_notice_email` | E-Mail-Erinnerung an Konten, die geänderte Rechtstexte noch nicht bestätigt haben (nur Admins). |
    | `run_data_reset` | Führt einen bestätigten Bereinigungsauftrag in Batches aus und verschickt danach die Benachrichtigungen (nur Admins). |
    | `send_admin_mail` | E-Mail-Mitteilungen aus dem Dashboard („Mitteilungen“): Testmail, Versand, Rest senden (nur Admins). |
+   | `logo_import` | Prüft ein hochgeladenes SVG-Logo und gibt es als geprüfte Logo-Struktur zurück (nur Admins, höchstens 10 pro Stunde). |
 
    `_shared/` enthält gemeinsamen Code und ist keine eigene Function.
 

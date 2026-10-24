@@ -1166,3 +1166,164 @@ export async function sendMailCampaign(input: MailSendInput): Promise<MailRun> {
 export async function continueMail(campaignId: string | null): Promise<MailRun> {
   return noticeRunOf(await invokeMail(campaignId === null ? { action: "send_pending" } : { action: "continue", campaign_id: campaignId }));
 }
+
+// ------------------------------------------------------------------ logos and presets (admins)
+
+import type { DesignTarget } from "./logoLibrary";
+
+export type { DesignTarget };
+
+export const TARGET_LABELS: Record<DesignTarget, string> = { app_login: "App-Anmeldung", dashboard: "Dashboard" };
+
+const LOGO_ERRORS: Record<string, string> = {
+  not_authorized: "Nur Admins mit Zwei-Faktor-Anmeldung.",
+  forbidden: "Nur Admins mit Zwei-Faktor-Anmeldung.",
+  invalid_name: "Name fehlt oder ist länger als 40 Zeichen.",
+  invalid_logo: "Das Logo erfüllt die Regeln nicht.",
+  invalid_hash: "Ungültige Prüfsumme der Datei.",
+  rights_required: "Bitte bestätigen, dass du das Logo verwenden darfst.",
+  too_many_logos: "Höchstens 30 hochgeladene Logos. Bitte zuerst ein nicht verwendetes löschen.",
+  logo_not_found: "Logo nicht gefunden.",
+  builtin_logo: "Eingebaute Logos lassen sich nicht löschen und in ihrer Form nicht ändern.",
+  logo_active: "Ein aktives Logo lässt sich nicht löschen. Zuerst ein anderes Logo aktivieren.",
+  invalid_targets: "Bitte mindestens ein Ziel wählen.",
+  preset_not_found: "Preset nicht gefunden.",
+  invalid_params: "Ein Parameter liegt ausserhalb des erlaubten Bereichs.",
+  too_many_presets: "Höchstens 50 eigene Presets.",
+  builtin_preset: "Eingebaute Presets bleiben unverändert. Bitte duplizieren.",
+  preset_in_use: "Das Preset wird noch von einem Logo verwendet.",
+  rate_limited: "Höchstens 10 Prüfungen pro Stunde. Bitte später erneut versuchen.",
+  too_large: "Die Datei ist grösser als 200 KB.",
+};
+
+async function logoRpc(name: string, args: Record<string, unknown>): Promise<unknown> {
+  const { data, error } = await supabase.rpc(name, args);
+  if (error) throw new ApiError(LOGO_ERRORS[error.message] ?? ERROR_TEXTS[error.message] ?? `Fehler: ${error.message}`);
+  return data;
+}
+
+export type LogoRow = {
+  id: string;
+  name: string;
+  kind: "builtin" | "uploaded";
+  spec: unknown;
+  presetId: string;
+  presetName: string;
+  createdAt: string;
+  uploadedBy: string | null;
+  targets: DesignTarget[];
+};
+
+function targetsOf(value: unknown): DesignTarget[] {
+  return asArray(value).filter((t): t is DesignTarget => t === "app_login" || t === "dashboard");
+}
+
+export async function fetchLogos(): Promise<LogoRow[]> {
+  return asArray(await logoRpc("admin_logo_list", {})).map((value) => {
+    const r = asRecord(value);
+    return {
+      id: str(r.id),
+      name: str(r.name),
+      kind: r.kind === "builtin" ? "builtin" : "uploaded",
+      spec: r.spec,
+      presetId: str(r.preset_id),
+      presetName: str(r.preset_name),
+      createdAt: str(r.created_at),
+      uploadedBy: strOrNull(r.uploaded_by),
+      targets: targetsOf(r.targets),
+    };
+  });
+}
+
+export type LogoSave = {
+  id: string | null;
+  name: string;
+  /** null keeps the shapes (built-in logos). */
+  spec: unknown;
+  presetId: string;
+  sourceHash: string | null;
+  fileName: string | null;
+  rightsConfirmed: boolean;
+};
+
+export async function saveLogo(input: LogoSave): Promise<string> {
+  return str(
+    await logoRpc("admin_logo_save", {
+      p_id: input.id,
+      p_name: input.name,
+      p_spec: input.spec,
+      p_preset_id: input.presetId,
+      p_source_hash: input.sourceHash,
+      p_file_name: input.fileName,
+      p_rights_confirmed: input.rightsConfirmed,
+    }),
+  );
+}
+
+export async function deleteLogo(id: string): Promise<void> {
+  await logoRpc("admin_logo_delete", { p_id: id });
+}
+
+export async function activateLogo(id: string, targets: DesignTarget[]): Promise<void> {
+  await logoRpc("admin_logo_activate", { p_logo_id: id, p_targets: targets });
+}
+
+export type PresetRow = { id: string; name: string; kind: "builtin" | "custom"; params: unknown; usedBy: number };
+
+export async function fetchPresets(): Promise<PresetRow[]> {
+  return asArray(await logoRpc("admin_preset_list", {})).map((value) => {
+    const r = asRecord(value);
+    return { id: str(r.id), name: str(r.name), kind: r.kind === "builtin" ? "builtin" : "custom", params: r.params, usedBy: num(r.used_by) };
+  });
+}
+
+export async function savePreset(id: string | null, name: string, params: unknown): Promise<string> {
+  return str(await logoRpc("admin_preset_save", { p_id: id, p_name: name, p_params: params }));
+}
+
+export async function deletePreset(id: string): Promise<void> {
+  await logoRpc("admin_preset_delete", { p_id: id });
+}
+
+export type RoleSuggestionRow = { role: "fill" | "cutout" | "stroke"; omit: boolean; reason: string | null };
+export type LogoImport = { spec: unknown; suggestions: RoleSuggestionRow[]; ignored: number; sourceHash: string; fileName: string };
+
+/** Sends the SVG text to the Edge Function logo_import; the checked structure comes back (or why not). */
+export async function importLogo(svg: string, fileName: string): Promise<LogoImport> {
+  const { data, error } = await supabase.functions.invoke("logo_import", { body: { svg, file_name: fileName } });
+  if (error) {
+    const context: unknown = (error as { context?: unknown }).context;
+    let code = "";
+    let message = "";
+    if (context instanceof Response) {
+      try {
+        const r = asRecord(await context.json());
+        code = str(r.error);
+        message = str(r.message);
+      } catch {
+        code = "";
+      }
+    }
+    throw new ApiError(message !== "" ? message : (LOGO_ERRORS[code] ?? "Prüfung fehlgeschlagen. Ist die Edge Function logo_import deployt?"));
+  }
+  const r = asRecord(data);
+  return {
+    spec: r.spec,
+    suggestions: asArray(r.suggestions).map((value) => {
+      const s = asRecord(value);
+      const role = s.role === "cutout" || s.role === "stroke" ? s.role : "fill";
+      return { role, omit: bool(s.omit), reason: strOrNull(s.reason) };
+    }),
+    ignored: num(r.ignored),
+    sourceHash: str(r.source_hash),
+    fileName: str(r.file_name),
+  };
+}
+
+/** The active dashboard logo with its preset (public, also before signing in). */
+export async function fetchDashboardLogo(): Promise<{ spec: unknown; params: unknown } | null> {
+  const { data, error } = await supabase.rpc("get_dashboard_logo");
+  if (error || data === null) return null;
+  const r = asRecord(data);
+  return { spec: r.logo, params: r.preset };
+}

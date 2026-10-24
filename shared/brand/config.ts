@@ -24,7 +24,7 @@ export const DEFAULT_DESIGN_CONFIG: PublicDesignConfig = {
 };
 
 /** Larger answers are not even looked at. */
-export const MAX_CONFIG_CHARS = 150_000;
+export const MAX_CONFIG_CHARS = 300_000;
 
 /**
  * Checks an answer of get_public_design_config (or a cached copy). Unknown palette, mode or

@@ -37,4 +37,11 @@ export function brandColors(palette: BrandPaletteName, mode: BrandMode): BrandCo
   return { ...BASE[mode], ...ACCENT[palette][mode] };
 }
 
+/**
+ * Technical colours, not design colours: an SVG mask shows where it is white and hides where it is
+ * black; the shine is white (at 55 % opacity) in every palette.
+ */
+export const BRAND_MASK = { show: "#ffffff", hide: "#000000" } as const;
+export const BRAND_SHINE = "#ffffff";
+
 export const BRAND_PALETTE_LABELS: Record<BrandPaletteName, string> = { color: "Hauptfarbe", bw: "Schwarz-Weiss" };

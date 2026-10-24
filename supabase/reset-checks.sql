@@ -12,7 +12,7 @@ select * from (
       or has_table_privilege('anon', 'public.' || t, 'select')) as ok
   from unnest(array['app_settings', 'protected_accounts', 'reset_jobs', 'reset_job_targets', 'seed_markers',
                      'mail_campaigns', 'mail_recipients', 'mail_templates', 'mail_tests',
-                     'logo_library', 'animation_presets', 'design_assignments', 'app_design_config']) t
+                     'logo_library', 'animation_presets', 'design_assignments', 'app_design_config', 'logo_import_calls']) t
 
   union all
   -- RLS on, and no policies at all (access only through the functions).
@@ -22,7 +22,7 @@ select * from (
   where n.nspname = 'public'
     and c.relname in ('app_settings', 'protected_accounts', 'reset_jobs', 'reset_job_targets', 'seed_markers',
                       'mail_campaigns', 'mail_recipients', 'mail_templates', 'mail_tests',
-                      'logo_library', 'animation_presets', 'design_assignments', 'app_design_config')
+                      'logo_library', 'animation_presets', 'design_assignments', 'app_design_config', 'logo_import_calls')
 
   union all
   -- Every reset function: security definer with a fixed search_path.
@@ -54,6 +54,18 @@ select * from (
   where n.nspname = 'public' and (p.proname like 'admin_mail_%' or p.proname like 'mail_%')
     and p.proname not in ('mail_limits', 'mail_category_label', 'mail_check_content', 'mail_check_attachments',
                           'mail_content_hash')
+
+  union all
+  -- Logo and design functions: security definer with a fixed search_path; not for anonymous callers.
+  select 'definer + search_path, not anon: ' || p.proname,
+    p.prosecdef and coalesce(array_to_string(p.proconfig, ','), '') like '%search_path=%'
+      and not has_function_privilege('anon', p.oid, 'execute')
+  from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+  where n.nspname = 'public' and (p.proname like 'admin_logo_%' or p.proname like 'admin_preset_%' or p.proname = 'set_app_design_config')
+
+  union all
+  -- Every stored logo passes the structure check (also the built-in ones).
+  select 'all logos valid', not exists (select 1 from public.logo_library l where not public.brand_logo_spec_valid(l.spec))
 
   union all
   -- Addresses and the queue: only the service role (never clients, never the admin's session).

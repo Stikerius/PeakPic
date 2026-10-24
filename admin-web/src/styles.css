@@ -201,3 +201,25 @@ textarea { resize: vertical; }
 .mail-preview { padding: 12px; border: 1px solid var(--border); border-radius: var(--radius); background: var(--bg); }
 .mail-preview p { margin: 0 0 8px; }
 .progress { width: 100%; height: 8px; accent-color: var(--accent); }
+
+/* Logos: decorative SVGs never take pointer events or focus (they are aria-hidden too). */
+.brand { display: flex; align-items: center; gap: 8px; }
+.brand-logo { flex: none; }
+.auth-screen { gap: 0; }
+.auth-logo { display: grid; place-items: center; pointer-events: none; }
+.dialog.wide { max-width: 1040px; }
+.logo-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 16px; margin-top: 16px; }
+.logo-tile { padding: 16px; background: var(--surface); border: 1px solid var(--border); border-radius: 12px; display: flex; flex-direction: column; gap: 6px; }
+.logo-tile p { margin: 0; }
+.logo-tile-title { margin: 4px 0 0; font-size: 16px; }
+.logo-tile-preview, .logo-preview-box { display: grid; place-items: center; border-radius: var(--radius); overflow: hidden; }
+.logo-tile .pill { margin-right: 6px; }
+.logo-shapes-step { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 2fr); gap: 16px; align-items: start; }
+.animation-editor { display: grid; grid-template-columns: minmax(260px, 1fr) minmax(0, 1.4fr); gap: 16px; align-items: start; }
+.animation-preview { display: flex; flex-direction: column; gap: 10px; align-items: center; position: sticky; top: 0; }
+.animation-controls { display: flex; flex-direction: column; gap: 10px; max-height: 60vh; overflow-y: auto; padding-right: 4px; }
+.animation-controls .checklist { margin: 0; flex-direction: row; flex-wrap: wrap; gap: 12px; }
+@media (max-width: 760px) {
+  .logo-shapes-step, .animation-editor { grid-template-columns: 1fr; }
+  .animation-preview { position: static; }
+}

@@ -1,10 +1,19 @@
 import { useState, type FormEvent } from "react";
 
+import { BrandLogo } from "../components/BrandLogo";
 import { useAuth } from "../lib/auth";
+import { useDashboardBrand } from "../lib/dashboardBrand";
 import { configError } from "../lib/supabase";
 
 export function LoginPage() {
   const { state, signIn, verifyCode, signOut } = useAuth();
+  const brand = useDashboardBrand();
+  // Background only: the logo animation above the card (aria-hidden, never interactive).
+  const logo = (
+    <div className="auth-logo">
+      <BrandLogo spec={brand.spec} params={brand.params} palette={brand.palette} mode={brand.mode} size={220} playing />
+    </div>
+  );
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [code, setCode] = useState("");
@@ -30,7 +39,14 @@ export function LoginPage() {
   }
 
   if (state.step === "loading") {
-    return <div className="auth-card"><p className="muted">Lädt …</p></div>;
+    return (
+      <>
+        {logo}
+        <div className="auth-card" role="status">
+          <p className="muted">Lädt …</p>
+        </div>
+      </>
+    );
   }
 
   if (state.step === "no-role") {
@@ -77,6 +93,8 @@ export function LoginPage() {
   }
 
   return (
+    <>
+    {logo}
     <form className="auth-card" onSubmit={(e) => void submit(e, () => signIn(email, password))}>
       <h1>PeakPic Moderation</h1>
       <p className="muted">Nur für Moderatoren und Admins. Zwei-Faktor ist Pflicht.</p>
@@ -91,5 +109,6 @@ export function LoginPage() {
       {error !== null && <p className="error" role="alert">{error}</p>}
       <button type="submit" className="button primary" disabled={busy}>Anmelden</button>
     </form>
+    </>
   );
 }

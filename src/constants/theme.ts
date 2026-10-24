@@ -1,7 +1,7 @@
 import { DarkTheme, DefaultTheme, type Theme as NavigationTheme } from "expo-router";
 import type { TextStyle } from "react-native";
 
-import { brandColors, type BrandColors, type BrandPaletteName } from "../../shared/brand/palettes";
+import { BRAND_MASK, BRAND_SHINE, brandColors, type BrandColors, type BrandPaletteName } from "../../shared/brand/palettes";
 
 /**
  * Design tokens. Components never use raw colour values: they read the
@@ -134,8 +134,8 @@ export type { BrandColors, BrandPaletteName };
  * Technical colours of the logo animation, not design colours: an SVG mask shows where it is
  * white and hides where it is black; the shine is white at 55 % opacity in every palette.
  */
-export const brandMask = { show: "#FFFFFF", hide: "#000000" } as const;
-export const brandShine = "#FFFFFF";
+export const brandMask = BRAND_MASK;
+export const brandShine = BRAND_SHINE;
 
 /** Flame colour per streak tier (see FLAME_TIER_THRESHOLDS in lib/streak.ts). */
 export const flameColors = ["#FFB347", "#FF7A1A", "#FF3B30", "#4DA3FF"] as const;

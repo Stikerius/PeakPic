@@ -7,6 +7,7 @@ import type { BrandFrame } from "../../../shared/brand/timeline";
 /** Shared drawing props of a logo shape (colour, outline). Everything else comes from the spec. */
 type Paint = {
   fill?: string;
+  fillRule?: "nonzero" | "evenodd";
   stroke?: string;
   strokeWidth?: number;
   strokeLinecap?: "round";
@@ -19,8 +20,9 @@ function transformOf(shape: LogoShape): string | undefined {
 }
 
 /** One shape of a logo spec as a react-native-svg element (never raw SVG text). */
-export function LogoShapeElement({ shape, paint }: { shape: LogoShape; paint: Paint }) {
+export function LogoShapeElement({ shape, paint: base }: { shape: LogoShape; paint: Paint }) {
   const transform = transformOf(shape);
+  const paint: Paint = shape.fillRule !== undefined ? { ...base, fillRule: shape.fillRule } : base;
   switch (shape.type) {
     case "path":
       return <Path d={shape.d} transform={transform} {...paint} />;

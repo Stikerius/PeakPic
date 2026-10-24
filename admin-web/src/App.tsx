@@ -2,11 +2,13 @@ import { useEffect, useState } from "react";
 
 import { Layout } from "./components/Layout";
 import { useAuth } from "./lib/auth";
+import { DashboardBrandProvider } from "./lib/dashboardBrand";
 import { useRoute } from "./lib/router";
 import { AuditPage } from "./pages/AuditPage";
 import { LegalEditPage } from "./pages/LegalEditPage";
 import { LegalPage } from "./pages/LegalPage";
 import { LoginPage } from "./pages/LoginPage";
+import { LogosPage } from "./pages/LogosPage";
 import { MailPage } from "./pages/MailPage";
 import { OverviewPage } from "./pages/OverviewPage";
 import { PendingPage } from "./pages/PendingPage";
@@ -39,9 +41,11 @@ export function App() {
   // Without a staff role and a two-factor session there is only the login page.
   if (state.step !== "ready") {
     return (
-      <div className="auth-screen">
-        <LoginPage />
-      </div>
+      <DashboardBrandProvider mode={theme} palette="bw">
+        <div className="auth-screen">
+          <LoginPage />
+        </div>
+      </DashboardBrandProvider>
     );
   }
 
@@ -55,6 +59,7 @@ export function App() {
   const isAdmin = state.role === "admin";
 
   return (
+    <DashboardBrandProvider mode={theme} palette="bw">
     <Layout route={route} theme={theme} onToggleTheme={toggleTheme}>
       {route.page === "overview" && <OverviewPage />}
       {route.page === "queue" && <QueuePage />}
@@ -70,6 +75,8 @@ export function App() {
       {route.page === "reset-job" && isAdmin && <ResetPage key={route.id} jobId={route.id} />}
       {route.page === "mail" && isAdmin && <MailPage campaignId={null} />}
       {route.page === "mail-campaign" && isAdmin && <MailPage key={route.id} campaignId={route.id} />}
+      {route.page === "logos" && isAdmin && <LogosPage />}
     </Layout>
+    </DashboardBrandProvider>
   );
 }

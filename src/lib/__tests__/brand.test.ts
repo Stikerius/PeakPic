@@ -275,7 +275,7 @@ describe("design config and fallback", () => {
     expect(parsePublicDesignConfig({ ...remote, palette: "neon" })).toBeNull();
     expect(parsePublicDesignConfig({ ...remote, mode: "auto" })).toBeNull();
     expect(parsePublicDesignConfig({ ...remote, animation: true })).toBeNull();
-    expect(parsePublicDesignConfig({ ...remote, padding: "x".repeat(200_000) })).toBeNull();
+    expect(parsePublicDesignConfig({ ...remote, padding: "x".repeat(400_000) })).toBeNull();
     expect(parsePublicDesignConfig("bw")).toBeNull();
   });
 

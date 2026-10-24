@@ -11,7 +11,10 @@ export type ShapeRole = "fill" | "cutout" | "stroke";
 /** SVG matrix(a b c d e f). */
 export type Matrix = readonly [number, number, number, number, number, number];
 
-type ShapeBase = { role: ShapeRole; transform: Matrix; strokeWidth?: number };
+/** How overlapping parts of one shape are filled; evenodd makes inner sub-paths holes. */
+export type FillRule = "nonzero" | "evenodd";
+
+type ShapeBase = { role: ShapeRole; transform: Matrix; strokeWidth?: number; fillRule?: FillRule };
 
 export type LogoShape =
   | (ShapeBase & { type: "path"; d: string })
@@ -37,8 +40,8 @@ export const LOGO_LIMITS = {
   /** Scale, rotation and skew part of a matrix. */
   maxLinear: 1_000,
   maxStrokeWidth: 1_000,
-  /** JSON size of a whole spec (characters). */
-  maxJsonChars: 120_000,
+  /** All path data of a logo together (characters). */
+  maxTotalPathChars: 100_000,
 } as const;
 
 export const IDENTITY: Matrix = [1, 0, 0, 1, 0, 0];
@@ -116,13 +119,6 @@ export function validateLogoSpec(value: unknown): LogoCheck {
     if (key !== "version" && key !== "viewBox" && key !== "shapes") return fail("Unbekanntes Feld.");
   }
   if (input.version !== LOGO_SPEC_VERSION) return fail("Unbekannte Version.");
-  let json: string;
-  try {
-    json = JSON.stringify(value);
-  } catch {
-    return fail("Nicht lesbar.");
-  }
-  if (json.length > LOGO_LIMITS.maxJsonChars) return fail("Logo zu gross.");
   const vb = input.viewBox;
   if (!Array.isArray(vb) || vb.length !== 4 || !vb.every((n) => isNumber(n))) return fail("Ungültige viewBox.");
   const viewBox = vb as [number, number, number, number];
@@ -136,6 +132,7 @@ export function validateLogoSpec(value: unknown): LogoCheck {
 
   const shapes: LogoShape[] = [];
   let totalCommands = 0;
+  let totalPathChars = 0;
   for (const raw of shapesIn) {
     if (typeof raw !== "object" || raw === null || Array.isArray(raw)) return fail("Ungültige Form.");
     const s = raw as Record<string, unknown>;
@@ -143,7 +140,7 @@ export function validateLogoSpec(value: unknown): LogoCheck {
     if (typeof type !== "string" || !(type in SHAPE_KEYS)) return fail("Unbekannter Formtyp.");
     const keys = SHAPE_KEYS[type as LogoShape["type"]];
     for (const key of Object.keys(s)) {
-      if (key !== "type" && key !== "role" && key !== "transform" && key !== "strokeWidth" && !keys.includes(key)) {
+      if (key !== "type" && key !== "role" && key !== "transform" && key !== "strokeWidth" && key !== "fillRule" && !keys.includes(key)) {
         return fail("Unbekanntes Feld in einer Form.");
       }
     }
@@ -153,13 +150,17 @@ export function validateLogoSpec(value: unknown): LogoCheck {
     if (s.strokeWidth !== undefined && !isNumber(s.strokeWidth, 0.01, LOGO_LIMITS.maxStrokeWidth)) {
       return fail("Ungültige Linienstärke.");
     }
+    if (s.fillRule !== undefined && s.fillRule !== "nonzero" && s.fillRule !== "evenodd") return fail("Ungültige Füllregel.");
     const base = {
       role: s.role as ShapeRole,
       transform,
       ...(s.strokeWidth !== undefined ? { strokeWidth: s.strokeWidth as number } : {}),
+      ...(s.fillRule !== undefined ? { fillRule: s.fillRule as FillRule } : {}),
     };
     if (type === "path") {
       if (typeof s.d !== "string") return fail("Ungültiger Pfad.");
+      totalPathChars += s.d.length;
+      if (totalPathChars > LOGO_LIMITS.maxTotalPathChars) return fail("Logo zu gross.");
       const commands = parsePathData(s.d);
       if (commands === null) return fail("Ungültiger Pfad.");
       if (commands.length > LOGO_LIMITS.maxPathCommands) return fail("Pfad zu komplex.");
@@ -193,28 +194,26 @@ export function validateLogoSpec(value: unknown): LogoCheck {
   return { ok: true, spec: { version: LOGO_SPEC_VERSION, viewBox, shapes } };
 }
 
-// ------------------------------------------------------------------ lengths (outline drawing)
+// ------------------------------------------------------------------ outlines as points (length, bounds)
+
+type Point = [number, number];
 
 function dist(ax: number, ay: number, bx: number, by: number): number {
   return Math.hypot(bx - ax, by - ay);
 }
 
-function curveLength(points: (t: number) => [number, number], steps = 16): number {
-  let total = 0;
-  let [px, py] = points(0);
-  for (let i = 1; i <= steps; i += 1) {
-    const [x, y] = points(i / steps);
-    total += dist(px, py, x, y);
-    px = x;
-    py = y;
-  }
-  return total;
+function sample(points: Point[], at: (t: number) => Point, steps: number): void {
+  for (let i = 1; i <= steps; i += 1) points.push(at(i / steps));
 }
 
-function arcLength(x1: number, y1: number, rxIn: number, ryIn: number, angle: number, large: boolean, sweep: boolean, x2: number, y2: number): number {
+/** Points along an SVG arc (endpoint parameterization -> centre, as in the SVG spec). */
+function sampleArc(points: Point[], x1: number, y1: number, rxIn: number, ryIn: number, angle: number, large: boolean, sweep: boolean, x2: number, y2: number): void {
   let rx = Math.abs(rxIn);
   let ry = Math.abs(ryIn);
-  if (rx === 0 || ry === 0) return dist(x1, y1, x2, y2);
+  if (rx === 0 || ry === 0 || (x1 === x2 && y1 === y2)) {
+    points.push([x2, y2]);
+    return;
+  }
   const phi = (angle * Math.PI) / 180;
   const cos = Math.cos(phi);
   const sin = Math.sin(phi);
@@ -232,25 +231,34 @@ function arcLength(x1: number, y1: number, rxIn: number, ryIn: number, angle: nu
   const factor = (large === sweep ? -1 : 1) * Math.sqrt(Math.max(0, num / (den || 1)));
   const cxp = (factor * rx * y1p) / ry;
   const cyp = (-factor * ry * x1p) / rx;
-  const angleOf = (ux: number, uy: number, vx: number, vy: number) => {
-    const a = Math.atan2(ux * vy - uy * vx, ux * vx + uy * vy);
-    return a;
-  };
+  const cx = cos * cxp - sin * cyp + (x1 + x2) / 2;
+  const cy = sin * cxp + cos * cyp + (y1 + y2) / 2;
+  const angleOf = (ux: number, uy: number, vx: number, vy: number) => Math.atan2(ux * vy - uy * vx, ux * vx + uy * vy);
   const theta = angleOf(1, 0, (x1p - cxp) / rx, (y1p - cyp) / ry);
   let delta = angleOf((x1p - cxp) / rx, (y1p - cyp) / ry, (-x1p - cxp) / rx, (-y1p - cyp) / ry);
   if (!sweep && delta > 0) delta -= 2 * Math.PI;
   if (sweep && delta < 0) delta += 2 * Math.PI;
-  return curveLength((t) => {
-    const a = theta + delta * t;
-    return [rx * Math.cos(a), ry * Math.sin(a)];
-  }, 24);
+  sample(
+    points,
+    (t) => {
+      const a = theta + delta * t;
+      const ex = rx * Math.cos(a);
+      const ey = ry * Math.sin(a);
+      return [cos * ex - sin * ey + cx, sin * ex + cos * ey + cy];
+    },
+    24,
+  );
 }
 
-/** Approximate length of path data (flattened curves), in its own units. */
-export function pathLength(d: string): number {
+/**
+ * Path data as point lists, one per sub-path (curves sampled, closed sub-paths end at their
+ * start). In the path's own units, without transform.
+ */
+export function flattenPath(d: string): Point[][] {
   const commands = parsePathData(d);
-  if (commands === null) return 0;
-  let total = 0;
+  if (commands === null) return [];
+  const subpaths: Point[][] = [];
+  let points: Point[] = [];
   let x = 0;
   let y = 0;
   let startX = 0;
@@ -258,6 +266,10 @@ export function pathLength(d: string): number {
   let lastCtrlX = 0;
   let lastCtrlY = 0;
   let lastCmd = "";
+  const begin = () => {
+    if (points.length > 1) subpaths.push(points);
+    points = [[x, y]];
+  };
   for (const { command, values } of commands) {
     const lower = command.toLowerCase();
     const rel = command === lower;
@@ -268,88 +280,185 @@ export function pathLength(d: string): number {
       const ox = rel ? x : 0;
       const oy = rel ? y : 0;
       const at = (i: number) => v[i] ?? 0;
+      const sx = x;
+      const sy = y;
       if (lower === "m") {
         // Pairs after the first are an implicit line-to.
-        const nx = ox + at(0);
-        const ny = oy + at(1);
+        x = ox + at(0);
+        y = oy + at(1);
         if (g === 0) {
-          startX = nx;
-          startY = ny;
-        } else total += dist(x, y, nx, ny);
-        x = nx;
-        y = ny;
-      } else if (lower === "l" || lower === "t") {
-        const nx = ox + at(0);
-        const ny = oy + at(1);
-        total += dist(x, y, nx, ny);
-        x = nx;
-        y = ny;
+          startX = x;
+          startY = y;
+          begin();
+        } else points.push([x, y]);
+      } else if (lower === "l") {
+        x = ox + at(0);
+        y = oy + at(1);
+        points.push([x, y]);
       } else if (lower === "h") {
-        const nx = ox + at(0);
-        total += Math.abs(nx - x);
-        x = nx;
+        x = ox + at(0);
+        points.push([x, y]);
       } else if (lower === "v") {
-        const ny = oy + at(0);
-        total += Math.abs(ny - y);
-        y = ny;
+        y = oy + at(0);
+        points.push([x, y]);
       } else if (lower === "c" || lower === "s") {
-        let c1x: number;
-        let c1y: number;
+        let c1x = x;
+        let c1y = y;
         let k = 0;
         if (lower === "c") {
           c1x = ox + at(0);
           c1y = oy + at(1);
           k = 2;
-        } else {
-          const prev = lastCmd === "c" || lastCmd === "s";
-          c1x = prev ? 2 * x - lastCtrlX : x;
-          c1y = prev ? 2 * y - lastCtrlY : y;
+        } else if (lastCmd === "c" || lastCmd === "s") {
+          c1x = 2 * x - lastCtrlX;
+          c1y = 2 * y - lastCtrlY;
         }
         const c2x = ox + at(k);
         const c2y = oy + at(k + 1);
-        const ex = ox + at(k + 2);
-        const ey = oy + at(k + 3);
-        const sx = x;
-        const sy = y;
-        total += curveLength((t) => {
-          const u = 1 - t;
-          return [
-            u * u * u * sx + 3 * u * u * t * c1x + 3 * u * t * t * c2x + t * t * t * ex,
-            u * u * u * sy + 3 * u * u * t * c1y + 3 * u * t * t * c2y + t * t * t * ey,
-          ];
-        });
+        x = ox + at(k + 2);
+        y = oy + at(k + 3);
+        const ex = x;
+        const ey = y;
+        sample(
+          points,
+          (t) => {
+            const u = 1 - t;
+            return [
+              u * u * u * sx + 3 * u * u * t * c1x + 3 * u * t * t * c2x + t * t * t * ex,
+              u * u * u * sy + 3 * u * u * t * c1y + 3 * u * t * t * c2y + t * t * t * ey,
+            ];
+          },
+          16,
+        );
         lastCtrlX = c2x;
         lastCtrlY = c2y;
-        x = ex;
-        y = ey;
-      } else if (lower === "q") {
-        const cx = ox + at(0);
-        const cy = oy + at(1);
-        const ex = ox + at(2);
-        const ey = oy + at(3);
-        const sx = x;
-        const sy = y;
-        total += curveLength((t) => {
-          const u = 1 - t;
-          return [u * u * sx + 2 * u * t * cx + t * t * ex, u * u * sy + 2 * u * t * cy + t * t * ey];
-        });
-        x = ex;
-        y = ey;
+      } else if (lower === "q" || lower === "t") {
+        let cx: number;
+        let cy: number;
+        if (lower === "q") {
+          cx = ox + at(0);
+          cy = oy + at(1);
+          x = ox + at(2);
+          y = oy + at(3);
+        } else {
+          const prev = lastCmd === "q" || lastCmd === "t";
+          cx = prev ? 2 * x - lastCtrlX : x;
+          cy = prev ? 2 * y - lastCtrlY : y;
+          x = ox + at(0);
+          y = oy + at(1);
+        }
+        const ex = x;
+        const ey = y;
+        sample(
+          points,
+          (t) => {
+            const u = 1 - t;
+            return [u * u * sx + 2 * u * t * cx + t * t * ex, u * u * sy + 2 * u * t * cy + t * t * ey];
+          },
+          16,
+        );
+        lastCtrlX = cx;
+        lastCtrlY = cy;
       } else if (lower === "a") {
-        const ex = ox + at(5);
-        const ey = oy + at(6);
-        total += arcLength(x, y, at(0), at(1), at(2), at(3) !== 0, at(4) !== 0, ex, ey);
-        x = ex;
-        y = ey;
+        x = ox + at(5);
+        y = oy + at(6);
+        sampleArc(points, sx, sy, at(0), at(1), at(2), at(3) !== 0, at(4) !== 0, x, y);
       } else if (lower === "z") {
-        total += dist(x, y, startX, startY);
         x = startX;
         y = startY;
+        points.push([x, y]);
+        begin();
       }
       lastCmd = lower;
     }
   }
+  if (points.length > 1) subpaths.push(points);
+  return subpaths;
+}
+
+/** Approximate length of path data (flattened curves), in its own units. */
+export function pathLength(d: string): number {
+  let total = 0;
+  for (const points of flattenPath(d)) {
+    for (let i = 1; i < points.length; i += 1) {
+      const a = points[i - 1] ?? [0, 0];
+      const b = points[i] ?? [0, 0];
+      total += dist(a[0], a[1], b[0], b[1]);
+    }
+  }
   return total;
+}
+
+export type Bounds = { minX: number; minY: number; maxX: number; maxY: number };
+
+/** Outline points of a shape in logo units (transform applied). */
+export function shapePoints(shape: LogoShape): Point[] {
+  let local: Point[];
+  switch (shape.type) {
+    case "path":
+      local = flattenPath(shape.d).flat();
+      break;
+    case "circle":
+    case "ellipse": {
+      const rx = shape.type === "circle" ? shape.r : shape.rx;
+      const ry = shape.type === "circle" ? shape.r : shape.ry;
+      local = Array.from({ length: 32 }, (_, i): Point => {
+        const a = (i / 32) * 2 * Math.PI;
+        return [shape.cx + rx * Math.cos(a), shape.cy + ry * Math.sin(a)];
+      });
+      break;
+    }
+    case "rect":
+      local = [
+        [shape.x, shape.y],
+        [shape.x + shape.width, shape.y],
+        [shape.x + shape.width, shape.y + shape.height],
+        [shape.x, shape.y + shape.height],
+      ];
+      break;
+    case "line":
+      local = [
+        [shape.x1, shape.y1],
+        [shape.x2, shape.y2],
+      ];
+      break;
+    default:
+      local = [];
+      for (let i = 0; i + 1 < shape.points.length; i += 2) local.push([shape.points[i] ?? 0, shape.points[i + 1] ?? 0]);
+  }
+  const [a, b, c, d, e, f] = shape.transform;
+  return local.map(([px, py]): Point => [a * px + c * py + e, b * px + d * py + f]);
+}
+
+/** Bounding box of shapes (logo units), or null without points. */
+export function shapesBounds(shapes: readonly LogoShape[]): Bounds | null {
+  let bounds: Bounds | null = null;
+  for (const shape of shapes) {
+    const pad = shape.role === "stroke" ? (shape.strokeWidth ?? 1) / 2 : 0;
+    for (const [px, py] of shapePoints(shape)) {
+      bounds =
+        bounds === null
+          ? { minX: px - pad, minY: py - pad, maxX: px + pad, maxY: py + pad }
+          : {
+              minX: Math.min(bounds.minX, px - pad),
+              minY: Math.min(bounds.minY, py - pad),
+              maxX: Math.max(bounds.maxX, px + pad),
+              maxY: Math.max(bounds.maxY, py + pad),
+            };
+    }
+  }
+  return bounds;
+}
+
+/** "Auto-Zentrierung und Rand": a viewBox around the visible shapes with `margin` (share of the size) on every side. */
+export function fitViewBox(shapes: readonly LogoShape[], margin: number): readonly [number, number, number, number] | null {
+  const bounds = shapesBounds(shapes.filter((s) => s.role !== "cutout"));
+  if (bounds === null) return null;
+  const width = Math.max(bounds.maxX - bounds.minX, 1e-3);
+  const height = Math.max(bounds.maxY - bounds.minY, 1e-3);
+  const pad = Math.max(width, height) * Math.min(Math.max(margin, 0), 0.5);
+  const round = (n: number) => Math.round(n * 1000) / 1000;
+  return [round(bounds.minX - pad), round(bounds.minY - pad), round(width + 2 * pad), round(height + 2 * pad)];
 }
 
 /**
@@ -401,6 +510,38 @@ export function matrixAttribute(m: Matrix): string {
 
 export function isIdentity(m: Matrix): boolean {
   return m[0] === 1 && m[1] === 0 && m[2] === 0 && m[3] === 1 && m[4] === 0 && m[5] === 0;
+}
+
+// ------------------------------------------------------------------ roles for imported logos
+
+export type RoleSuggestion = { role: ShapeRole; omit: boolean; reason: string | null };
+
+function inside(inner: Bounds, outer: Bounds): boolean {
+  return inner.minX >= outer.minX && inner.minY >= outer.minY && inner.maxX <= outer.maxX && inner.maxY <= outer.maxY;
+}
+
+/**
+ * Suggestions for step 2 of the upload, from the shapes and the colour each had in the file
+ * (colours are not stored): a shape covering (nearly) the whole viewBox first is the icon
+ * background and is left out; a shape lying completely inside an earlier filled shape, in another
+ * colour, is cut out of it (like the inner circle of the lens). Outlines stay outlines.
+ */
+export function suggestShapeRoles(spec: LogoSpec, fills: readonly (string | null)[]): RoleSuggestion[] {
+  const [vx, vy, vw, vh] = spec.viewBox;
+  const kept: { bounds: Bounds; fill: string | null }[] = [];
+  return spec.shapes.map((shape, i) => {
+    const bounds = shapesBounds([shape]);
+    const fill = fills[i] ?? null;
+    if (shape.role === "stroke" || bounds === null) return { role: shape.role, omit: false, reason: null };
+    const area = (bounds.maxX - bounds.minX) * (bounds.maxY - bounds.minY);
+    if (i === 0 && spec.shapes.length > 1 && area >= vw * vh * 0.98 && bounds.minX <= vx + vw * 0.01 && bounds.minY <= vy + vh * 0.01) {
+      return { role: "fill", omit: true, reason: "Hintergrundfläche" };
+    }
+    const host = kept.find((k) => inside(bounds, k.bounds) && k.fill !== fill);
+    kept.push({ bounds, fill });
+    if (host !== undefined) return { role: "cutout", omit: false, reason: "Liegt in einer anderen Form und hat eine andere Farbe" };
+    return { role: shape.role, omit: false, reason: shape.fillRule === "evenodd" ? "Löcher über die Füllregel evenodd" : null };
+  });
 }
 
 // ------------------------------------------------------------------ built-in logos

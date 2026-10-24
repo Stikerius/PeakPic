@@ -10242,3 +10242,434 @@ revoke all on function public.get_public_design_config() from public;
 grant execute on function public.get_public_design_config() to anon, authenticated;
 revoke all on function public.set_app_design_config(text, text, text) from public, anon;
 grant execute on function public.set_app_design_config(text, text, text) to authenticated;
+
+
+-- ---------------------------------------------------------------- logo library (phase 2)
+-- The same rules as validateLogoSpec (shared/brand/logoSpec.ts), checked on every save, also when
+-- the structure comes from the browser. A test compares both on manipulated structures.
+create or replace function public.brand_logo_spec_valid(p jsonb)
+returns boolean
+language plpgsql immutable set search_path = ''
+as $$
+declare
+  shape jsonb;
+  t text;
+  keys text[];
+  m jsonb;
+  d text;
+  seg text[];
+  arg_count integer;
+  value_count integer;
+  commands integer;
+  total_commands integer := 0;
+  total_path_chars integer := 0;
+  n jsonb;
+begin
+  if p is null or jsonb_typeof(p) <> 'object' then return false; end if;
+  if exists (select 1 from jsonb_object_keys(p) k where k not in ('version', 'viewBox', 'shapes')) then return false; end if;
+  if (p -> 'version') is distinct from '1'::jsonb then return false; end if;
+  if jsonb_typeof(p -> 'viewBox') <> 'array' or jsonb_array_length(p -> 'viewBox') <> 4 then return false; end if;
+  for n in select value from jsonb_array_elements(p -> 'viewBox') loop
+    if not public.brand_number_between(n, -100000, 100000) then return false; end if;
+  end loop;
+  if (p -> 'viewBox' ->> 2)::numeric <= 0 or (p -> 'viewBox' ->> 3)::numeric <= 0 then return false; end if;
+  if jsonb_typeof(p -> 'shapes') <> 'array' or jsonb_array_length(p -> 'shapes') = 0
+    or jsonb_array_length(p -> 'shapes') > 100 then
+    return false;
+  end if;
+  if not exists (
+    select 1 from jsonb_array_elements(p -> 'shapes') s
+    where jsonb_typeof(s.value) = 'object' and (s.value -> 'role') is distinct from '"cutout"'::jsonb
+  ) then
+    return false;
+  end if;
+
+  for shape in select value from jsonb_array_elements(p -> 'shapes') loop
+    if jsonb_typeof(shape) <> 'object' then return false; end if;
+    t := shape ->> 'type';
+    if jsonb_typeof(shape -> 'type') is distinct from 'string' then return false; end if;
+    keys := case t
+      when 'path' then array['d']
+      when 'circle' then array['cx', 'cy', 'r']
+      when 'ellipse' then array['cx', 'cy', 'rx', 'ry']
+      when 'rect' then array['x', 'y', 'width', 'height', 'rx', 'ry']
+      when 'line' then array['x1', 'y1', 'x2', 'y2']
+      when 'polygon' then array['points']
+      when 'polyline' then array['points']
+    end;
+    if keys is null then return false; end if;
+    if exists (
+      select 1 from jsonb_object_keys(shape) k
+      where k not in ('type', 'role', 'transform', 'strokeWidth', 'fillRule') and not (k = any (keys))
+    ) then
+      return false;
+    end if;
+    if jsonb_typeof(shape -> 'role') is distinct from 'string' or shape ->> 'role' not in ('fill', 'cutout', 'stroke') then return false; end if;
+    m := shape -> 'transform';
+    if jsonb_typeof(m) is distinct from 'array' or jsonb_array_length(m) <> 6
+      or not public.brand_number_between(m -> 0, -1000, 1000) or not public.brand_number_between(m -> 1, -1000, 1000)
+      or not public.brand_number_between(m -> 2, -1000, 1000) or not public.brand_number_between(m -> 3, -1000, 1000)
+      or not public.brand_number_between(m -> 4, -100000, 100000) or not public.brand_number_between(m -> 5, -100000, 100000)
+      or abs((m ->> 0)::numeric * (m ->> 3)::numeric - (m ->> 1)::numeric * (m ->> 2)::numeric) < 0.000000001 then
+      return false;
+    end if;
+    if shape ? 'strokeWidth' and not public.brand_number_between(shape -> 'strokeWidth', 0.01, 1000) then return false; end if;
+    if shape ? 'fillRule' and (jsonb_typeof(shape -> 'fillRule') <> 'string' or shape ->> 'fillRule' not in ('nonzero', 'evenodd')) then
+      return false;
+    end if;
+
+    if t = 'path' then
+      if jsonb_typeof(shape -> 'd') <> 'string' then return false; end if;
+      d := shape ->> 'd';
+      total_path_chars := total_path_chars + char_length(d);
+      if total_path_chars > 100000 then return false; end if;
+      if char_length(d) = 0 or char_length(d) > 20000 or d !~ '^[MmLlHhVvCcSsQqTtAaZz0-9 \t\n\r,.eE-]*$' then return false; end if;
+      -- Every character belongs to a command letter, a number or a separator (as the tokenizer).
+      if regexp_replace(d, '[MmLlHhVvCcSsQqTtAaZz]|-?([0-9]+\.?[0-9]*|\.[0-9]+)([eE]-?[0-9]+)?|[ \t\n\r,]+', '', 'g') <> '' then
+        return false;
+      end if;
+      if d !~ '^[ \t\n\r,]*[Mm]' then return false; end if;
+      if exists (
+        select 1 from regexp_matches(d, '-?([0-9]+\.?[0-9]*|\.[0-9]+)([eE]-?[0-9]+)?', 'g') x
+        where abs((x[1] || coalesce(x[2], ''))::numeric) > 100000
+      ) then
+        return false;
+      end if;
+      commands := 0;
+      for seg in select regexp_matches(d, '([MmLlHhVvCcSsQqTtAaZz])([^MmLlHhVvCcSsQqTtAaZz]*)', 'g') loop
+        commands := commands + 1;
+        arg_count := case lower(seg[1]) when 'm' then 2 when 'l' then 2 when 'h' then 1 when 'v' then 1 when 'c' then 6
+                                       when 's' then 4 when 'q' then 4 when 't' then 2 when 'a' then 7 else 0 end;
+        select count(*) into value_count from regexp_matches(seg[2], '-?([0-9]+\.?[0-9]*|\.[0-9]+)([eE]-?[0-9]+)?', 'g');
+        if arg_count = 0 then
+          if value_count <> 0 then return false; end if;
+        elsif value_count = 0 or value_count % arg_count <> 0 then
+          return false;
+        end if;
+      end loop;
+      if commands > 4000 then return false; end if;
+      total_commands := total_commands + commands;
+    elsif t in ('polygon', 'polyline') then
+      if jsonb_typeof(shape -> 'points') is distinct from 'array' then return false; end if;
+      value_count := jsonb_array_length(shape -> 'points');
+      if value_count < 4 or value_count % 2 <> 0 or value_count > 4000 then return false; end if;
+      for n in select value from jsonb_array_elements(shape -> 'points') loop
+        if not public.brand_number_between(n, -100000, 100000) then return false; end if;
+      end loop;
+      total_commands := total_commands + value_count / 2;
+    else
+      for i in 1 .. cardinality(keys) loop
+        if not public.brand_number_between(shape -> keys[i], -100000, 100000) then return false; end if;
+      end loop;
+      if t = 'circle' and (shape ->> 'r')::numeric <= 0 then return false; end if;
+      if t = 'ellipse' and ((shape ->> 'rx')::numeric <= 0 or (shape ->> 'ry')::numeric <= 0) then return false; end if;
+      if t = 'rect' and ((shape ->> 'width')::numeric <= 0 or (shape ->> 'height')::numeric <= 0
+                         or (shape ->> 'rx')::numeric < 0 or (shape ->> 'ry')::numeric < 0) then
+        return false;
+      end if;
+    end if;
+    if total_commands > 8000 then return false; end if;
+  end loop;
+  return true;
+exception when others then
+  return false;
+end;
+$$;
+
+-- Every stored logo has a valid structure (also the built-in ones, also direct inserts).
+alter table public.logo_library drop constraint if exists logo_library_spec_check;
+alter table public.logo_library add constraint logo_library_spec_check
+  check (jsonb_typeof(spec) = 'object' and octet_length(spec::text) <= 250000 and public.brand_logo_spec_valid(spec));
+
+-- Calls of the Edge Function logo_import (at most 10 per admin and hour). No client access.
+create table if not exists public.logo_import_calls (
+  admin_id   uuid not null references public.profiles (id) on delete cascade,
+  created_at timestamptz not null default now()
+);
+create index if not exists logo_import_calls_admin_idx on public.logo_import_calls (admin_id, created_at desc);
+alter table public.logo_import_calls enable row level security;
+revoke all on public.logo_import_calls from public, anon, authenticated;
+
+-- One import slot for the caller (logo_import calls it first with the admin's session).
+create or replace function public.admin_logo_import_slot()
+returns void
+language plpgsql security definer set search_path = ''
+as $$
+begin
+  perform public.require_admin();
+  delete from public.logo_import_calls where created_at < now() - interval '1 day';
+  if (select count(*) from public.logo_import_calls c where c.admin_id = auth.uid() and c.created_at > now() - interval '1 hour') >= 10 then
+    raise exception 'rate_limited';
+  end if;
+  insert into public.logo_import_calls (admin_id) values (auth.uid());
+end;
+$$;
+
+-- For everybody, also signed out (dashboard login page, loading screen): the active logo of the
+-- dashboard and its preset. Nothing else.
+create or replace function public.get_dashboard_logo()
+returns jsonb
+language sql stable security definer set search_path = ''
+as $$
+  select jsonb_build_object('logo', l.spec, 'preset', p.params)
+  from public.design_assignments a
+  join public.logo_library l on l.id = a.logo_id
+  join public.animation_presets p on p.id = l.preset_id
+  where a.target = 'dashboard';
+$$;
+
+-- All logos with preset, targets where they are active, author and date. Admin.
+create or replace function public.admin_logo_list()
+returns jsonb
+language plpgsql stable security definer set search_path = ''
+as $$
+begin
+  perform public.require_admin();
+  return coalesce((
+    select jsonb_agg(jsonb_build_object(
+      'id', l.id, 'name', l.name, 'kind', l.kind, 'spec', l.spec, 'preset_id', l.preset_id, 'preset_name', p.name,
+      'created_at', l.created_at, 'uploaded_by', u.username, 'rights_confirmed_at', l.rights_confirmed_at,
+      'targets', coalesce((select jsonb_agg(a.target order by a.target) from public.design_assignments a where a.logo_id = l.id), '[]'::jsonb)
+    ) order by l.kind, l.created_at)
+    from public.logo_library l
+    join public.animation_presets p on p.id = l.preset_id
+    left join public.profiles u on u.id = l.uploaded_by
+  ), '[]'::jsonb);
+end;
+$$;
+
+-- Creates (p_id null) or changes a logo. The structure is checked again here. New uploads need the
+-- confirmed rights (time stored), at most 30. Built-in logos: only the preset can change.
+-- Logged with the file's hash and its cleaned name (never the file).
+create or replace function public.admin_logo_save(
+  p_id uuid, p_name text, p_spec jsonb, p_preset_id uuid, p_source_hash text, p_file_name text, p_rights_confirmed boolean
+)
+returns uuid
+language plpgsql security definer set search_path = ''
+as $$
+declare
+  existing public.logo_library%rowtype;
+  saved uuid;
+  file_name text := left(regexp_replace(coalesce(p_file_name, ''), '[^A-Za-z0-9._ -]+', '_', 'g'), 100);
+begin
+  perform public.require_admin();
+  if p_name is null or char_length(btrim(p_name)) not between 1 and 40 then
+    raise exception 'invalid_name';
+  end if;
+  if not exists (select 1 from public.animation_presets pr where pr.id = p_preset_id) then
+    raise exception 'preset_not_found';
+  end if;
+  if p_source_hash is not null and p_source_hash !~ '^[0-9a-f]{64}$' then
+    raise exception 'invalid_hash';
+  end if;
+
+  if p_id is null then
+    if not public.brand_logo_spec_valid(p_spec) or octet_length(p_spec::text) > 250000 then
+      raise exception 'invalid_logo';
+    end if;
+    if not coalesce(p_rights_confirmed, false) then
+      raise exception 'rights_required';
+    end if;
+    if (select count(*) from public.logo_library l where l.kind = 'uploaded') >= 30 then
+      raise exception 'too_many_logos';
+    end if;
+    insert into public.logo_library (name, kind, spec, preset_id, source_hash, uploaded_by, rights_confirmed_at)
+    values (btrim(p_name), 'uploaded', p_spec, p_preset_id, p_source_hash, auth.uid(), now())
+    returning id into saved;
+    perform public.log_moderation_action(
+      'logo_create', 'logo', saved, null, null, 'Logo in die Bibliothek aufgenommen', null,
+      jsonb_build_object('name', btrim(p_name), 'source_hash', p_source_hash, 'file_name', nullif(file_name, ''),
+                         'preset_id', p_preset_id, 'shapes', jsonb_array_length(p_spec -> 'shapes'))
+    );
+    return saved;
+  end if;
+
+  select * into existing from public.logo_library l where l.id = p_id for update;
+  if not found then
+    raise exception 'logo_not_found';
+  end if;
+  if existing.kind = 'builtin' then
+    if p_spec is not null and p_spec is distinct from existing.spec then
+      raise exception 'builtin_logo';
+    end if;
+    update public.logo_library set preset_id = p_preset_id where id = p_id;
+  else
+    if not public.brand_logo_spec_valid(p_spec) or octet_length(p_spec::text) > 250000 then
+      raise exception 'invalid_logo';
+    end if;
+    update public.logo_library set name = btrim(p_name), spec = p_spec, preset_id = p_preset_id where id = p_id;
+  end if;
+  perform public.log_moderation_action(
+    'logo_update', 'logo', p_id, null, null, 'Logo in der Bibliothek geändert', null,
+    jsonb_build_object(
+      'before', jsonb_build_object('name', existing.name, 'preset_id', existing.preset_id, 'shapes', jsonb_array_length(existing.spec -> 'shapes')),
+      'after', jsonb_build_object('name', case when existing.kind = 'builtin' then existing.name else btrim(p_name) end,
+                                  'preset_id', p_preset_id,
+                                  'shapes', jsonb_array_length(coalesce(p_spec, existing.spec) -> 'shapes')),
+      'spec_changed', existing.kind <> 'builtin' and p_spec is distinct from existing.spec
+    )
+  );
+  return p_id;
+end;
+$$;
+
+-- Deletes an uploaded logo that is not active anywhere. Built-in logos stay.
+create or replace function public.admin_logo_delete(p_id uuid)
+returns void
+language plpgsql security definer set search_path = ''
+as $$
+declare
+  existing public.logo_library%rowtype;
+begin
+  perform public.require_admin();
+  select * into existing from public.logo_library l where l.id = p_id for update;
+  if not found then
+    raise exception 'logo_not_found';
+  end if;
+  if existing.kind = 'builtin' then
+    raise exception 'builtin_logo';
+  end if;
+  if exists (select 1 from public.design_assignments a where a.logo_id = p_id) then
+    raise exception 'logo_active';
+  end if;
+  delete from public.logo_library where id = p_id;
+  perform public.log_moderation_action(
+    'logo_delete', 'logo', p_id, null, null, 'Logo aus der Bibliothek gelöscht', null,
+    jsonb_build_object('name', existing.name, 'source_hash', existing.source_hash)
+  );
+end;
+$$;
+
+-- Makes a logo the active one of the given targets ('app_login', 'dashboard'). Logged with the
+-- logo that was active before on each target.
+create or replace function public.admin_logo_activate(p_logo_id uuid, p_targets text[])
+returns void
+language plpgsql security definer set search_path = ''
+as $$
+declare
+  targets text[] := array(select distinct x from unnest(coalesce(p_targets, '{}')) x order by x);
+  before jsonb;
+begin
+  perform public.require_admin();
+  if cardinality(targets) = 0 or exists (select 1 from unnest(targets) x where x not in ('app_login', 'dashboard')) then
+    raise exception 'invalid_targets';
+  end if;
+  if not exists (select 1 from public.logo_library l where l.id = p_logo_id) then
+    raise exception 'logo_not_found';
+  end if;
+  select coalesce(jsonb_object_agg(a.target, a.logo_id), '{}'::jsonb) into before
+  from public.design_assignments a where a.target = any (targets);
+  insert into public.design_assignments (target, logo_id, updated_at, updated_by)
+  select x, p_logo_id, now(), auth.uid() from unnest(targets) x
+  on conflict (target) do update set logo_id = excluded.logo_id, updated_at = excluded.updated_at, updated_by = excluded.updated_by;
+  perform public.log_moderation_action(
+    'logo_activate', 'logo', p_logo_id, null, null, 'Logo aktiviert', null,
+    jsonb_build_object('targets', to_jsonb(targets), 'before', before,
+                       'after', (select jsonb_object_agg(x, p_logo_id) from unnest(targets) x))
+  );
+end;
+$$;
+
+-- Presets with how many logos use them. Admin.
+create or replace function public.admin_preset_list()
+returns jsonb
+language plpgsql stable security definer set search_path = ''
+as $$
+begin
+  perform public.require_admin();
+  return coalesce((
+    select jsonb_agg(jsonb_build_object(
+      'id', p.id, 'name', p.name, 'kind', p.kind, 'params', p.params, 'updated_at', p.updated_at,
+      'used_by', (select count(*) from public.logo_library l where l.preset_id = p.id)
+    ) order by p.kind, p.name)
+    from public.animation_presets p
+  ), '[]'::jsonb);
+end;
+$$;
+
+-- Creates (p_id null: also "Duplizieren") or changes a custom preset (name and parameters, ranges
+-- checked). Built-in presets never change. At most 50 custom presets.
+create or replace function public.admin_preset_save(p_id uuid, p_name text, p_params jsonb)
+returns uuid
+language plpgsql security definer set search_path = ''
+as $$
+declare
+  existing public.animation_presets%rowtype;
+  saved uuid;
+begin
+  perform public.require_admin();
+  if p_name is null or char_length(btrim(p_name)) not between 1 and 40 then
+    raise exception 'invalid_name';
+  end if;
+  if not public.brand_preset_params_valid(p_params) then
+    raise exception 'invalid_params';
+  end if;
+  if p_id is null then
+    if (select count(*) from public.animation_presets p where p.kind = 'custom') >= 50 then
+      raise exception 'too_many_presets';
+    end if;
+    insert into public.animation_presets (name, kind, params, created_by)
+    values (btrim(p_name), 'custom', p_params, auth.uid())
+    returning id into saved;
+    perform public.log_moderation_action('preset_create', 'animation_preset', saved, null, null, 'Animations-Preset angelegt', null,
+      jsonb_build_object('name', btrim(p_name), 'params', p_params));
+    return saved;
+  end if;
+  select * into existing from public.animation_presets p where p.id = p_id for update;
+  if not found then
+    raise exception 'preset_not_found';
+  end if;
+  if existing.kind = 'builtin' then
+    raise exception 'builtin_preset';
+  end if;
+  update public.animation_presets set name = btrim(p_name), params = p_params, updated_at = now() where id = p_id;
+  perform public.log_moderation_action('preset_update', 'animation_preset', p_id, null, null, 'Animations-Preset geändert', null,
+    jsonb_build_object('before', jsonb_build_object('name', existing.name, 'params', existing.params),
+                       'after', jsonb_build_object('name', btrim(p_name), 'params', p_params)));
+  return p_id;
+end;
+$$;
+
+-- Deletes a custom preset no logo uses.
+create or replace function public.admin_preset_delete(p_id uuid)
+returns void
+language plpgsql security definer set search_path = ''
+as $$
+declare
+  existing public.animation_presets%rowtype;
+begin
+  perform public.require_admin();
+  select * into existing from public.animation_presets p where p.id = p_id for update;
+  if not found then
+    raise exception 'preset_not_found';
+  end if;
+  if existing.kind = 'builtin' then
+    raise exception 'builtin_preset';
+  end if;
+  if exists (select 1 from public.logo_library l where l.preset_id = p_id) then
+    raise exception 'preset_in_use';
+  end if;
+  delete from public.animation_presets where id = p_id;
+  perform public.log_moderation_action('preset_delete', 'animation_preset', p_id, null, null, 'Animations-Preset gelöscht', null,
+    jsonb_build_object('name', existing.name));
+end;
+$$;
+
+revoke all on function public.brand_logo_spec_valid(jsonb) from public, anon, authenticated;
+revoke all on function public.get_dashboard_logo() from public;
+grant execute on function public.get_dashboard_logo() to anon, authenticated;
+do $$
+declare
+  f text;
+begin
+  foreach f in array array[
+    'public.admin_logo_import_slot()', 'public.admin_logo_list()',
+    'public.admin_logo_save(uuid, text, jsonb, uuid, text, text, boolean)', 'public.admin_logo_delete(uuid)',
+    'public.admin_logo_activate(uuid, text[])', 'public.admin_preset_list()',
+    'public.admin_preset_save(uuid, text, jsonb)', 'public.admin_preset_delete(uuid)'
+  ] loop
+    execute format('revoke all on function %s from public, anon', f);
+    execute format('grant execute on function %s to authenticated', f);
+  end loop;
+end;
+$$;

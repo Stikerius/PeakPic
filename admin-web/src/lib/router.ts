@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 
 /**
  * Tiny hash router: #/queue, #/reports/<id>, #/users, #/users/<id>, #/audit, #/legal,
- * #/legal/<id>, #/pending, #/usage, #/reset, #/reset/<id>, #/mail, #/mail/<id>, #/ (overview).
+ * #/legal/<id>, #/pending, #/usage, #/reset, #/reset/<id>, #/mail, #/mail/<id>, #/logos, #/ (overview).
  */
 export type Route =
   | { page: "overview" }
@@ -18,7 +18,8 @@ export type Route =
   | { page: "reset" }
   | { page: "reset-job"; id: string }
   | { page: "mail" }
-  | { page: "mail-campaign"; id: string };
+  | { page: "mail-campaign"; id: string }
+  | { page: "logos" };
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -38,6 +39,7 @@ export function parseRoute(hash: string): Route {
   if (first === "reset") return { page: "reset" };
   if (first === "mail" && second !== undefined && UUID.test(second)) return { page: "mail-campaign", id: second };
   if (first === "mail") return { page: "mail" };
+  if (first === "logos") return { page: "logos" };
   return { page: "overview" };
 }
 
@@ -71,6 +73,8 @@ export function href(route: Route): string {
       return "#/mail";
     case "mail-campaign":
       return `#/mail/${route.id}`;
+    case "logos":
+      return "#/logos";
   }
 }
 

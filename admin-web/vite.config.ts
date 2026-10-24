@@ -1,4 +1,6 @@
-import { defineConfig, loadEnv, type Plugin } from "vite";
+import { fileURLToPath } from "node:url";
+
+import { defineConfig, loadEnv, searchForWorkspaceRoot, type Plugin } from "vite";
 
 /**
  * Writes the Content-Security-Policy into index.html. Only the Supabase project may be contacted;
@@ -45,7 +47,13 @@ export default defineConfig(({ mode }) => {
     plugins: [contentSecurityPolicy(env.VITE_SUPABASE_URL ?? "")],
     // JSX through Vite's own transform (no React plugin: its dev preamble would be an inline script).
     oxc: { jsx: { runtime: "automatic" } },
-    server: { port: 5174, strictPort: true },
+    server: {
+      port: 5174,
+      strictPort: true,
+      // The shared brand logic lives next to admin-web (shared/brand, also used by the app). Only
+      // the dev server needs this; the build bundles it. The CSP is not affected.
+      fs: { allow: [searchForWorkspaceRoot(process.cwd()), fileURLToPath(new URL("../shared/brand", import.meta.url))] },
+    },
     build: { sourcemap: false },
   };
 });
