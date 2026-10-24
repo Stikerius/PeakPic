@@ -928,3 +928,241 @@ export async function verifyTotpAgain(code: string): Promise<void> {
   const { error: verifyError } = await supabase.auth.mfa.challengeAndVerify({ factorId: factor.id, code: digits });
   if (verifyError) throw new ApiError("Code ungültig oder abgelaufen.");
 }
+
+// ------------------------------------------------------------------ e-mail notices (admins)
+
+const MAIL_FUNCTION = "send_admin_mail";
+const MAIL_BUCKET = "mail-attachments";
+
+const MAIL_ERRORS: Record<string, string> = {
+  unauthorized: "Nicht angemeldet.",
+  forbidden: "Nur Admins mit Zwei-Faktor-Anmeldung.",
+  not_authorized: "Nur Admins mit Zwei-Faktor-Anmeldung.",
+  email_not_configured: "Kein Mail-Dienst eingerichtet (Secrets EMAIL_API_KEY und EMAIL_FROM).",
+  invalid_category: "Bitte eine Kategorie wählen.",
+  invalid_subject: "Betreff fehlt, ist länger als 150 Zeichen oder enthält einen Zeilenumbruch.",
+  invalid_body: "Text fehlt oder ist länger als 10 000 Zeichen.",
+  invalid_attachments: "Ungültiger Anhang.",
+  too_many_attachments: "Höchstens 3 Anhänge.",
+  attachments_too_large: "Anhänge zusammen höchstens 5 MB.",
+  attachment_missing: "Ein Anhang fehlt (älter als 24 Stunden?). Bitte neu hochladen.",
+  attachment_type_not_allowed: "Ein Anhang ist keine echte PDF-, PNG-, JPG- oder Textdatei.",
+  no_own_address: "Dein Konto hat keine E-Mail-Adresse für die Testmail.",
+  send_failed: "Die Testmail konnte nicht gesendet werden.",
+  test_required: "Zuerst eine Testmail mit genau diesem Inhalt senden (gilt 60 Minuten).",
+  invalid_audience: "Ungültige Empfängerauswahl.",
+  invalid_recipients: "Ungültige Empfängerauswahl.",
+  recipient_not_allowed: "Gesperrte, gebannte oder gelöschte Konten können keine Mitteilung bekommen. Bitte die Auswahl prüfen.",
+  no_recipients: "Niemand ausgewählt.",
+  too_many_recipients: "Höchstens 500 Empfänger pro Sendung.",
+  confirm_count_mismatch: "Die eingegebene Anzahl stimmt nicht mit der Empfängerzahl überein.",
+  service_only_required: "Beim Senden an alle muss bestätigt werden, dass es eine Servicemitteilung ist.",
+  template_not_found: "Vorlage nicht gefunden.",
+  invalid_template_name: "Name der Vorlage fehlt oder ist zu lang.",
+  too_many_templates: "Höchstens 100 Vorlagen.",
+  campaign_not_open: "Diese Sendung ist bereits abgeschlossen.",
+  campaign_not_found: "Sendung nicht gefunden.",
+};
+
+async function mailRpc(name: string, args: Record<string, unknown>): Promise<unknown> {
+  const { data, error } = await supabase.rpc(name, args);
+  if (error) throw new ApiError(MAIL_ERRORS[error.message] ?? ERROR_TEXTS[error.message] ?? `Fehler: ${error.message}`);
+  return data;
+}
+
+async function invokeMail(body: Record<string, unknown>): Promise<Json> {
+  const { data, error } = await supabase.functions.invoke(MAIL_FUNCTION, { body });
+  if (error) {
+    const context: unknown = (error as { context?: unknown }).context;
+    let code = "";
+    let message = "";
+    if (context instanceof Response) {
+      try {
+        const r = asRecord(await context.json());
+        code = str(r.error);
+        message = str(r.message);
+      } catch {
+        code = "";
+      }
+    }
+    const text = MAIL_ERRORS[code] ?? "Fehler beim Senden. Ist die Edge Function send_admin_mail deployt?";
+    throw new ApiError(message !== "" ? `${text} ${message}` : text);
+  }
+  return asRecord(data);
+}
+
+export type MailSettings = { activeAccounts: number; maxRecipients: number; confirmCountAbove: number };
+
+export async function fetchMailSettings(): Promise<MailSettings> {
+  const r = asRecord(await mailRpc("admin_mail_settings", {}));
+  return { activeAccounts: num(r.active_accounts), maxRecipients: num(r.max_recipients), confirmCountAbove: num(r.confirm_count_above) };
+}
+
+export async function fetchMailStatus(): Promise<{ configured: boolean; reason: string | null }> {
+  const { data, error } = await supabase.functions.invoke(MAIL_FUNCTION, { body: { action: "status" } });
+  if (error) return { configured: false, reason: "Edge Function send_admin_mail ist nicht erreichbar (nicht deployt?)." };
+  const r = asRecord(data);
+  return { configured: bool(r.configured), reason: strOrNull(r.reason) };
+}
+
+export type MailCandidate = { userId: string; username: string; displayName: string };
+
+export async function fetchMailCandidates(query: string): Promise<MailCandidate[]> {
+  return asArray(await mailRpc("admin_mail_candidates", { p_query: query.trim() })).map((value) => {
+    const r = asRecord(value);
+    return { userId: str(r.user_id), username: str(r.username), displayName: str(r.display_name) };
+  });
+}
+
+export type MailTemplate = { id: string; name: string; category: string; subject: string; body: string; updatedAt: string };
+
+export async function fetchMailTemplates(): Promise<MailTemplate[]> {
+  return asArray(await mailRpc("admin_mail_templates", {})).map((value) => {
+    const r = asRecord(value);
+    return { id: str(r.id), name: str(r.name), category: str(r.category), subject: str(r.subject), body: str(r.body), updatedAt: str(r.updated_at) };
+  });
+}
+
+export async function saveMailTemplate(id: string | null, name: string, category: string, subject: string, body: string): Promise<string> {
+  return str(await mailRpc("admin_mail_save_template", { p_id: id, p_name: name, p_category: category, p_subject: subject, p_body: body }));
+}
+
+export async function deleteMailTemplate(id: string): Promise<void> {
+  await mailRpc("admin_mail_delete_template", { p_id: id });
+}
+
+export type MailCounts = { sent: number; failed: number; pending: number; skipped: number };
+
+function mailCounts(value: unknown): MailCounts {
+  const r = asRecord(value);
+  return { sent: num(r.sent), failed: num(r.failed), pending: num(r.pending), skipped: num(r.skipped) };
+}
+
+export type MailCampaignRow = {
+  id: string;
+  createdAt: string;
+  finishedAt: string | null;
+  category: string;
+  audience: string;
+  subject: string;
+  recipientCount: number;
+  attachmentCount: number;
+  status: string;
+  stopReason: string | null;
+  counts: MailCounts;
+  createdBy: string | null;
+};
+
+function campaignRowOf(r: Json): Omit<MailCampaignRow, "createdBy"> {
+  return {
+    id: str(r.id),
+    createdAt: str(r.created_at),
+    finishedAt: strOrNull(r.finished_at),
+    category: str(r.category),
+    audience: str(r.audience),
+    subject: str(r.subject),
+    recipientCount: num(r.recipient_count),
+    attachmentCount: num(r.attachment_count),
+    status: str(r.status),
+    stopReason: strOrNull(r.stop_reason),
+    counts: mailCounts(r.counts),
+  };
+}
+
+export async function fetchMailCampaigns(): Promise<MailCampaignRow[]> {
+  return asArray(await mailRpc("admin_mail_campaigns", { p_limit: 100, p_offset: 0 })).map((value) => {
+    const r = asRecord(value);
+    return { ...campaignRowOf(r), createdBy: strOrNull(r.created_by_username) };
+  });
+}
+
+export type MailRecipientRow = { username: string | null; displayName: string | null; status: string; error: string | null; sentAt: string | null };
+export type MailCampaign = Omit<MailCampaignRow, "createdBy"> & { bodyHash: string; recipients: MailRecipientRow[] };
+
+export async function fetchMailCampaign(id: string): Promise<MailCampaign> {
+  const r = asRecord(await mailRpc("admin_mail_campaign", { p_campaign_id: id }));
+  return {
+    ...campaignRowOf(r),
+    bodyHash: str(r.body_hash),
+    recipients: asArray(r.recipients).map((value) => {
+      const x = asRecord(value);
+      return { username: strOrNull(x.username), displayName: strOrNull(x.display_name), status: str(x.status), error: strOrNull(x.error), sentAt: strOrNull(x.sent_at) };
+    }),
+  };
+}
+
+/** Uploads one attachment into the admin's own folder of the private bucket; returns its path. */
+export async function uploadMailAttachment(file: File, draftId: string, name: string, contentType: string): Promise<string> {
+  const { data: session } = await supabase.auth.getSession();
+  const userId = session.session?.user.id;
+  if (userId === undefined) throw new ApiError("Nicht angemeldet.");
+  const path = `${userId}/${draftId}/${name}`;
+  const { error } = await supabase.storage.from(MAIL_BUCKET).upload(path, file, { contentType, upsert: false });
+  if (error) throw new ApiError("Anhang konnte nicht hochgeladen werden (Typ oder Grösse nicht erlaubt?).");
+  return path;
+}
+
+export async function removeMailAttachment(path: string): Promise<void> {
+  await supabase.storage.from(MAIL_BUCKET).remove([path]);
+}
+
+export type MailContentInput = { category: string; subject: string; body: string; attachments: string[] };
+export type MailAttachmentInfo = { name: string; size: number; type: string };
+
+/** Test mail to the own address; afterwards the same content may be sent (for 60 minutes). */
+export async function sendTestMail(input: MailContentInput): Promise<MailAttachmentInfo[]> {
+  const r = await invokeMail({ action: "test", ...input });
+  return asArray(r.attachments).map((value) => {
+    const a = asRecord(value);
+    return { name: str(a.name), size: num(a.size), type: str(a.type) };
+  });
+}
+
+export type MailRun = {
+  campaignId: string | null;
+  campaigns: (MailCounts & { id: string; status: string })[];
+  more: boolean;
+  message: string | null;
+};
+
+function noticeRunOf(r: Json): MailRun {
+  return {
+    campaignId: strOrNull(r.campaign_id),
+    campaigns: asArray(r.campaigns).map((value) => {
+      const c = asRecord(value);
+      return { id: str(c.id), status: str(c.status), ...mailCounts(c) };
+    }),
+    more: bool(r.more),
+    message: strOrNull(r.message),
+  };
+}
+
+export type MailSendInput = MailContentInput & {
+  audience: "single" | "selected" | "all";
+  userIds: string[];
+  confirmCount: number | null;
+  serviceOnly: boolean;
+  templateId: string | null;
+};
+
+export async function sendMailCampaign(input: MailSendInput): Promise<MailRun> {
+  return noticeRunOf(
+    await invokeMail({
+      action: "send",
+      category: input.category,
+      subject: input.subject,
+      body: input.body,
+      attachments: input.attachments,
+      audience: input.audience,
+      user_ids: input.userIds,
+      confirm_count: input.confirmCount,
+      service_only: input.serviceOnly,
+      template_id: input.templateId,
+    }),
+  );
+}
+
+/** Sends more of one open campaign (time limit of the function), or every waiting one ("Rest senden"). */
+export async function continueMail(campaignId: string | null): Promise<MailRun> {
+  return noticeRunOf(await invokeMail(campaignId === null ? { action: "send_pending" } : { action: "continue", campaign_id: campaignId }));
+}

@@ -113,6 +113,10 @@
 --                   written only by confirm_legal_documents() (server time, type and hash) and
 --                   never changed or deleted, except together with the account. Admins
 --                   publish, remind and suspend through admin_legal_* functions (aal2, logged).
+--   * mail notices  admins send service notices by e-mail (mail_campaigns, mail_recipients,
+--                   mail_templates, mail_tests; bucket mail-attachments). Addresses are read only
+--                   by the Edge Function send_admin_mail at sending time and never stored; the
+--                   text only while mails wait, permanently only its hash. See the section at the end.
 --   * storage       bucket "photos" (private), objects live under {user_id}/{kind}/...;
 --                   a photo is readable exactly when its post/story is (avatars: everyone)
 -- =============================================================================
@@ -9369,6 +9373,672 @@ begin
   foreach f in array array[
     'public.reset_purge_emails()', 'public.reset_mail_claim(uuid, integer)', 'public.reset_mail_result(uuid, text)',
     'public.reset_mail_not_configured(uuid)'
+  ] loop
+    execute format('revoke all on function %s from public, anon, authenticated', f);
+    execute format('grant execute on function %s to service_role', f);
+  end loop;
+end;
+$$;
+
+
+-- ================================================================ e-mail notices ("Mitteilungen")
+-- Admins send service notices by e-mail from the dashboard: to one person, to several or to all
+-- active accounts. Only categories for service notices exist (no advertising). Flow:
+--   test mail to the admin's own address (mail_record_test) -> admin_mail_create (same content as
+--   the test, at most 60 minutes old; recipients resolved and checked here) -> the Edge Function
+--   send_admin_mail sends in batches and records each recipient's outcome. A reached quota stops
+--   the rest ('waiting'); "Rest senden" continues later, single messages first.
+--   * Addresses are never stored: the Edge Function reads them at the moment of sending
+--     (mail_claim, service role only) and they never reach the dashboard.
+--   * The text is kept only while mails wait (at most keep_days), permanently only its hash;
+--     templates only when the admin saves one (mail_templates).
+--   * Attachments live in the private bucket mail-attachments (admins only, own folder); they are
+--     removed when the campaign is done and at the latest after 24 hours (mail_purge).
+--   * Suspended, banned and deleting accounts are never recipients (also not when they became so
+--     after the campaign was created: mail_claim skips them).
+--   * Every campaign, test and resume is logged in moderation_actions (purpose, count, subject,
+--     hash of the text; never addresses). Admins with aal2 only; no client table rights.
+
+create table if not exists public.mail_templates (
+  id         uuid primary key default gen_random_uuid(),
+  created_by uuid references public.profiles (id) on delete set null,
+  name       text not null check (char_length(btrim(name)) between 1 and 80),
+  category   text not null check (category in ('account', 'legal', 'operations', 'personal')),
+  subject    text not null check (char_length(subject) between 1 and 150 and subject !~ '[\r\n]'),
+  body       text not null check (char_length(body) between 1 and 10000),
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+alter table public.mail_templates enable row level security;
+revoke all on public.mail_templates from public, anon, authenticated;
+
+create table if not exists public.mail_campaigns (
+  id               uuid primary key default gen_random_uuid(),
+  created_by       uuid references public.profiles (id) on delete set null,
+  category         text not null check (category in ('account', 'legal', 'operations', 'personal')),
+  audience         text not null check (audience in ('single', 'selected', 'all')),
+  subject          text not null check (char_length(subject) between 1 and 150 and subject !~ '[\r\n]'),
+  body_hash        text not null check (body_hash ~ '^[0-9a-f]{64}$'),
+  -- Only while mails wait; null once the campaign is done (at most keep_days).
+  body             text check (char_length(body) <= 10000),
+  template_id      uuid references public.mail_templates (id) on delete set null,
+  -- [{path, name, size, type}] while mails wait; emptied when done, at the latest after 24 hours.
+  attachments      jsonb not null default '[]',
+  attachment_count integer not null default 0 check (attachment_count between 0 and 3),
+  recipient_count  integer not null check (recipient_count between 1 and 500),
+  status           text not null default 'sending' check (status in ('sending', 'waiting', 'done')),
+  stop_reason      text check (stop_reason ~ '^[a-z_]{1,40}$'),
+  created_at       timestamptz not null default now(),
+  finished_at      timestamptz
+);
+create index if not exists mail_campaigns_created_idx on public.mail_campaigns (created_at desc);
+alter table public.mail_campaigns enable row level security;
+revoke all on public.mail_campaigns from public, anon, authenticated;
+
+-- One row per recipient: status only, never the address.
+create table if not exists public.mail_recipients (
+  id          uuid primary key default gen_random_uuid(),
+  campaign_id uuid not null references public.mail_campaigns (id) on delete cascade,
+  user_id     uuid references public.profiles (id) on delete set null,
+  status      text not null default 'pending' check (status in ('pending', 'claimed', 'sent', 'failed', 'skipped')),
+  error       text check (error ~ '^[a-z_]{1,40}$'),
+  claimed_at  timestamptz,
+  sent_at     timestamptz,
+  unique (campaign_id, user_id)
+);
+create index if not exists mail_recipients_campaign_idx on public.mail_recipients (campaign_id, status);
+create index if not exists mail_recipients_user_idx on public.mail_recipients (user_id);
+alter table public.mail_recipients enable row level security;
+revoke all on public.mail_recipients from public, anon, authenticated;
+
+-- Test mails an admin sent to themself (content hash only); a campaign needs one with the same
+-- content. Removed when used and after a day.
+create table if not exists public.mail_tests (
+  admin_id     uuid not null references public.profiles (id) on delete cascade,
+  content_hash text not null check (content_hash ~ '^[0-9a-f]{64}$'),
+  created_at   timestamptz not null default now(),
+  primary key (admin_id, content_hash)
+);
+alter table public.mail_tests enable row level security;
+revoke all on public.mail_tests from public, anon, authenticated;
+
+-- Private bucket for attachments: admins only, each in their own folder ({admin_id}/...).
+insert into storage.buckets (id, name, public, file_size_limit, allowed_mime_types)
+values ('mail-attachments', 'mail-attachments', false, 5242880, array['application/pdf', 'image/png', 'image/jpeg', 'text/plain'])
+on conflict (id) do update
+  set public = false,
+      file_size_limit = excluded.file_size_limit,
+      allowed_mime_types = excluded.allowed_mime_types;
+
+drop policy if exists "mail-attachments: admins read own" on storage.objects;
+create policy "mail-attachments: admins read own" on storage.objects
+  for select to authenticated
+  using (bucket_id = 'mail-attachments' and public.is_admin() and (storage.foldername(name))[1] = (select auth.uid())::text);
+
+drop policy if exists "mail-attachments: admins upload own" on storage.objects;
+create policy "mail-attachments: admins upload own" on storage.objects
+  for insert to authenticated
+  with check (bucket_id = 'mail-attachments' and public.is_admin() and (storage.foldername(name))[1] = (select auth.uid())::text);
+
+drop policy if exists "mail-attachments: admins delete own" on storage.objects;
+create policy "mail-attachments: admins delete own" on storage.objects
+  for delete to authenticated
+  using (bucket_id = 'mail-attachments' and public.is_admin() and (storage.foldername(name))[1] = (select auth.uid())::text);
+
+-- Limits, also used by the dashboard and the Edge Function (_shared/adminMail.ts has the same).
+create or replace function public.mail_limits()
+returns jsonb
+language sql immutable set search_path = ''
+as $$
+  select jsonb_build_object(
+    'max_recipients', 500, 'confirm_count_above', 5, 'subject_max', 150, 'body_max', 10000,
+    'max_files', 3, 'max_total_bytes', 5242880, 'attachment_hours', 24, 'keep_days', 7, 'test_valid_minutes', 60,
+    'categories', jsonb_build_array('account', 'legal', 'operations', 'personal')
+  );
+$$;
+
+create or replace function public.mail_category_label(p_key text)
+returns text
+language sql immutable set search_path = ''
+as $$
+  select case p_key
+    when 'account' then 'Konto und Sicherheit' when 'legal' then 'Rechtliches'
+    when 'operations' then 'Betrieb und Wartung' when 'personal' then 'Persönliche Nachricht'
+  end;
+$$;
+
+-- Category, subject and text are valid (the same rules as in the Edge Function). Internal.
+create or replace function public.mail_check_content(p_category text, p_subject text, p_body text)
+returns void
+language plpgsql immutable set search_path = ''
+as $$
+begin
+  if p_category is null or public.mail_category_label(p_category) is null then
+    raise exception 'invalid_category';
+  end if;
+  if p_subject is null or char_length(btrim(p_subject)) = 0 or char_length(p_subject) > 150 or p_subject ~ '[\r\n]' then
+    raise exception 'invalid_subject';
+  end if;
+  if p_body is null or char_length(btrim(p_body)) = 0 or char_length(p_body) > 10000 then
+    raise exception 'invalid_body';
+  end if;
+end;
+$$;
+
+-- Checks attachment metadata ([{path, name, size, type}]): at most 3, together at most 5 MB, only
+-- pdf/png/jpg/txt, clean names, all in the admin's own folder. The Edge Function checks the bytes
+-- (file signature) itself before it sends anything. Internal.
+create or replace function public.mail_check_attachments(p_admin uuid, p_attachments jsonb)
+returns void
+language plpgsql immutable set search_path = ''
+as $$
+declare
+  item jsonb;
+  total bigint := 0;
+begin
+  if p_attachments is null or jsonb_typeof(p_attachments) <> 'array' then
+    raise exception 'invalid_attachments';
+  end if;
+  if jsonb_array_length(p_attachments) > 3 then
+    raise exception 'too_many_attachments';
+  end if;
+  for item in select value from jsonb_array_elements(p_attachments) loop
+    if jsonb_typeof(item) <> 'object'
+      or coalesce(item ->> 'path', '') !~ ('^' || p_admin::text || '/[0-9a-f-]{36}/[A-Za-z0-9][A-Za-z0-9._-]{0,99}$')
+      or coalesce(item ->> 'name', '') !~ '^[A-Za-z0-9][A-Za-z0-9._-]{0,99}\.(pdf|png|jpg|txt)$'
+      or coalesce(item ->> 'type', '') not in ('application/pdf', 'image/png', 'image/jpeg', 'text/plain')
+      or coalesce(item ->> 'size', '') !~ '^[0-9]{1,8}$' or (item ->> 'size')::bigint < 1 then
+      raise exception 'invalid_attachments';
+    end if;
+    total := total + (item ->> 'size')::bigint;
+  end loop;
+  if total > 5242880 then
+    raise exception 'attachments_too_large';
+  end if;
+end;
+$$;
+
+-- Hash of everything a recipient gets (category, subject, text, attachments). Internal.
+create or replace function public.mail_content_hash(p_category text, p_subject text, p_body text, p_attachments jsonb)
+returns text
+language sql immutable set search_path = ''
+as $$
+  select public.legal_hash(
+    coalesce(p_category, '') || E'\n--\n' || coalesce(p_subject, '') || E'\n--\n' || coalesce(p_body, '') || E'\n--\n'
+    || coalesce((
+      select string_agg((a ->> 'path') || ':' || (a ->> 'size'), '|' order by a ->> 'path')
+      from jsonb_array_elements(case when jsonb_typeof(p_attachments) = 'array' then p_attachments else '[]'::jsonb end) a
+    ), '')
+  );
+$$;
+
+-- ---------------------------------------------------------------- dashboard (admins)
+create or replace function public.admin_mail_settings()
+returns jsonb
+language plpgsql stable security definer set search_path = ''
+as $$
+begin
+  perform public.require_admin();
+  return public.mail_limits() || jsonb_build_object(
+    'active_accounts', (select count(*) from public.profiles p where public.account_is_active(p.id))
+  );
+end;
+$$;
+
+-- Accounts that can receive a notice (active only), by username or display name.
+create or replace function public.admin_mail_candidates(p_query text)
+returns table (user_id uuid, username text, display_name text)
+language plpgsql stable security definer set search_path = ''
+as $$
+#variable_conflict use_column
+declare
+  q text := btrim(coalesce(p_query, ''));
+  pattern text := '%' || replace(replace(replace(btrim(coalesce(p_query, '')), '\', '\\'), '%', '\%'), '_', '\_') || '%';
+begin
+  perform public.require_admin();
+  if char_length(q) < 2 then
+    return;
+  end if;
+  return query
+  select p.id, p.username, p.display_name
+  from public.profiles p
+  where (p.username ilike pattern or p.display_name ilike pattern) and public.account_is_active(p.id)
+  order by (p.username = lower(q)) desc, p.username
+  limit 50;
+end;
+$$;
+
+-- Creates a campaign and its recipients. Needs a test mail of exactly this content by the same
+-- admin (at most test_valid_minutes old, used up here). single: exactly one person; selected: a
+-- list; all: every active account (only with p_service_only, "nur Servicemitteilungen"). At most
+-- 500; above 5 the typed count must match. Every chosen person must be able to receive it.
+create or replace function public.admin_mail_create(
+  p_category text, p_subject text, p_body text, p_audience text, p_user_ids uuid[], p_attachments jsonb,
+  p_confirm_count integer, p_service_only boolean, p_template_id uuid default null
+)
+returns uuid
+language plpgsql security definer set search_path = ''
+as $$
+declare
+  me uuid := auth.uid();
+  ids uuid[];
+  n integer;
+  files jsonb := coalesce(p_attachments, '[]'::jsonb);
+  wanted_hash text;
+  campaign uuid;
+begin
+  perform public.require_admin();
+  perform public.mail_check_content(p_category, p_subject, p_body);
+  perform public.mail_check_attachments(me, files);
+  if p_audience is null or p_audience not in ('single', 'selected', 'all') then
+    raise exception 'invalid_audience';
+  end if;
+  wanted_hash := public.mail_content_hash(p_category, btrim(p_subject), p_body, files);
+  if not exists (
+    select 1 from public.mail_tests t
+    where t.admin_id = me and t.content_hash = wanted_hash
+      and t.created_at > now() - make_interval(mins => (public.mail_limits() ->> 'test_valid_minutes')::integer)
+  ) then
+    raise exception 'test_required';
+  end if;
+
+  if p_audience = 'all' then
+    if not coalesce(p_service_only, false) then
+      raise exception 'service_only_required';
+    end if;
+    ids := array(select p.id from public.profiles p where public.account_is_active(p.id) order by p.id);
+  else
+    ids := array(select distinct x from unnest(coalesce(p_user_ids, '{}')) x where x is not null);
+    if p_audience = 'single' and cardinality(ids) <> 1 then
+      raise exception 'invalid_audience';
+    end if;
+    if exists (select 1 from unnest(ids) x where not public.account_is_active(x)) then
+      raise exception 'recipient_not_allowed';
+    end if;
+  end if;
+  n := cardinality(ids);
+  if n = 0 then
+    raise exception 'no_recipients';
+  end if;
+  if n > (public.mail_limits() ->> 'max_recipients')::integer then
+    raise exception 'too_many_recipients' using hint = n::text;
+  end if;
+  if n > (public.mail_limits() ->> 'confirm_count_above')::integer and p_confirm_count is distinct from n then
+    raise exception 'confirm_count_mismatch' using hint = n::text;
+  end if;
+  if p_template_id is not null and not exists (select 1 from public.mail_templates t where t.id = p_template_id) then
+    raise exception 'template_not_found';
+  end if;
+
+  insert into public.mail_campaigns
+    (created_by, category, audience, subject, body_hash, body, template_id, attachments, attachment_count, recipient_count)
+  values (me, p_category, p_audience, btrim(p_subject), public.legal_hash(p_body), p_body, p_template_id,
+          files, jsonb_array_length(files), n)
+  returning id into campaign;
+  insert into public.mail_recipients (campaign_id, user_id) select campaign, x from unnest(ids) x;
+  delete from public.mail_tests t where t.admin_id = me and t.content_hash = wanted_hash;
+
+  perform public.log_moderation_action(
+    'mail_send', 'mail_campaign', campaign, case when p_audience = 'single' then ids[1] end, null,
+    'E-Mail-Mitteilung: ' || public.mail_category_label(p_category), null,
+    jsonb_build_object('category', p_category, 'audience', p_audience, 'recipients', n, 'subject', btrim(p_subject),
+                       'text_hash', public.legal_hash(p_body), 'attachments', jsonb_array_length(files),
+                       'template_id', p_template_id)
+  );
+  return campaign;
+end;
+$$;
+
+-- Campaigns to (continue to) send: one, or every unfinished one (p_campaign_id null), single
+-- messages first, then the oldest. Waiting ones (quota) go back to 'sending'; that is logged.
+create or replace function public.admin_mail_resume(p_campaign_id uuid)
+returns table (campaign_id uuid)
+language plpgsql security definer set search_path = ''
+as $$
+#variable_conflict use_column
+declare
+  resumed integer;
+begin
+  perform public.require_admin();
+  if p_campaign_id is not null and not exists (
+    select 1 from public.mail_campaigns c where c.id = p_campaign_id and c.status in ('sending', 'waiting')
+  ) then
+    raise exception 'campaign_not_open';
+  end if;
+  update public.mail_campaigns c set status = 'sending', stop_reason = null
+  where c.status = 'waiting' and (p_campaign_id is null or c.id = p_campaign_id);
+  get diagnostics resumed = row_count;
+  if resumed > 0 then
+    perform public.log_moderation_action(
+      'mail_resume', 'mail_campaign', p_campaign_id, null, null, 'Wartende E-Mail-Mitteilungen weiter senden', null,
+      jsonb_build_object('campaigns', resumed)
+    );
+  end if;
+  return query
+  select c.id from public.mail_campaigns c
+  where c.status = 'sending' and (p_campaign_id is null or c.id = p_campaign_id)
+  order by (c.audience = 'single') desc, c.created_at;
+end;
+$$;
+
+-- Counts of one campaign's recipients. Internal.
+create or replace function public.mail_campaign_counts(p_campaign uuid)
+returns jsonb
+language sql stable security definer set search_path = ''
+as $$
+  select jsonb_build_object(
+    'sent', count(*) filter (where r.status = 'sent'),
+    'failed', count(*) filter (where r.status = 'failed'),
+    'pending', count(*) filter (where r.status in ('pending', 'claimed')),
+    'skipped', count(*) filter (where r.status = 'skipped')
+  )
+  from public.mail_recipients r where r.campaign_id = p_campaign;
+$$;
+
+-- History: newest first, with counts. No text, no addresses.
+create or replace function public.admin_mail_campaigns(p_limit integer default 50, p_offset integer default 0)
+returns table (
+  id uuid, created_at timestamptz, finished_at timestamptz, category text, audience text, subject text,
+  recipient_count integer, attachment_count integer, status text, stop_reason text, counts jsonb, created_by_username text
+)
+language plpgsql stable security definer set search_path = ''
+as $$
+#variable_conflict use_column
+begin
+  perform public.require_admin();
+  return query
+  select c.id, c.created_at, c.finished_at, c.category, c.audience, c.subject, c.recipient_count, c.attachment_count,
+         c.status, c.stop_reason, public.mail_campaign_counts(c.id), p.username
+  from public.mail_campaigns c left join public.profiles p on p.id = c.created_by
+  order by c.created_at desc
+  limit least(greatest(coalesce(p_limit, 50), 1), 200) offset greatest(coalesce(p_offset, 0), 0);
+end;
+$$;
+
+-- One campaign with the status of each recipient (username, never the address).
+create or replace function public.admin_mail_campaign(p_campaign_id uuid)
+returns jsonb
+language plpgsql stable security definer set search_path = ''
+as $$
+declare
+  result jsonb;
+begin
+  perform public.require_admin();
+  select jsonb_build_object(
+    'id', c.id, 'created_at', c.created_at, 'finished_at', c.finished_at, 'category', c.category,
+    'audience', c.audience, 'subject', c.subject, 'body_hash', c.body_hash, 'recipient_count', c.recipient_count,
+    'attachment_count', c.attachment_count, 'status', c.status, 'stop_reason', c.stop_reason,
+    'counts', public.mail_campaign_counts(c.id),
+    'recipients', coalesce((
+      select jsonb_agg(jsonb_build_object('username', p.username, 'display_name', p.display_name,
+                                          'status', r.status, 'error', r.error, 'sent_at', r.sent_at)
+                       order by r.status, p.username nulls last)
+      from public.mail_recipients r left join public.profiles p on p.id = r.user_id
+      where r.campaign_id = c.id
+    ), '[]'::jsonb)
+  ) into result
+  from public.mail_campaigns c where c.id = p_campaign_id;
+  if result is null then
+    raise exception 'campaign_not_found';
+  end if;
+  return result;
+end;
+$$;
+
+-- Templates: saved only when the admin asks for it.
+create or replace function public.admin_mail_templates()
+returns table (id uuid, name text, category text, subject text, body text, updated_at timestamptz)
+language plpgsql stable security definer set search_path = ''
+as $$
+#variable_conflict use_column
+begin
+  perform public.require_admin();
+  return query select t.id, t.name, t.category, t.subject, t.body, t.updated_at from public.mail_templates t order by t.name;
+end;
+$$;
+
+create or replace function public.admin_mail_save_template(p_id uuid, p_name text, p_category text, p_subject text, p_body text)
+returns uuid
+language plpgsql security definer set search_path = ''
+as $$
+declare
+  saved uuid;
+begin
+  perform public.require_admin();
+  perform public.mail_check_content(p_category, p_subject, p_body);
+  if p_name is null or char_length(btrim(p_name)) not between 1 and 80 then
+    raise exception 'invalid_template_name';
+  end if;
+  if p_id is null and (select count(*) from public.mail_templates) >= 100 then
+    raise exception 'too_many_templates';
+  end if;
+  if p_id is null then
+    insert into public.mail_templates (created_by, name, category, subject, body)
+    values (auth.uid(), btrim(p_name), p_category, btrim(p_subject), p_body)
+    returning id into saved;
+  else
+    update public.mail_templates
+    set name = btrim(p_name), category = p_category, subject = btrim(p_subject), body = p_body, updated_at = now()
+    where id = p_id
+    returning id into saved;
+    if saved is null then
+      raise exception 'template_not_found';
+    end if;
+  end if;
+  return saved;
+end;
+$$;
+
+create or replace function public.admin_mail_delete_template(p_id uuid)
+returns void
+language plpgsql security definer set search_path = ''
+as $$
+begin
+  perform public.require_admin();
+  delete from public.mail_templates where id = p_id;
+end;
+$$;
+
+-- ---------------------------------------------------------------- Edge Function (service role)
+-- A test mail went out to the admin's own address: remember its content hash and log it.
+create or replace function public.mail_record_test(
+  p_admin uuid, p_category text, p_subject text, p_body text, p_attachments jsonb
+)
+returns void
+language plpgsql security definer set search_path = ''
+as $$
+begin
+  perform public.mail_check_content(p_category, p_subject, p_body);
+  perform public.mail_check_attachments(p_admin, coalesce(p_attachments, '[]'::jsonb));
+  if not exists (select 1 from public.admin_roles r where r.user_id = p_admin and r.role = 'admin') then
+    raise exception 'not_authorized';
+  end if;
+  insert into public.mail_tests (admin_id, content_hash)
+  values (p_admin, public.mail_content_hash(p_category, btrim(p_subject), p_body, coalesce(p_attachments, '[]'::jsonb)))
+  on conflict (admin_id, content_hash) do update set created_at = now();
+  insert into public.moderation_actions (actor_id, action, target_type, target_id, reason, details)
+  values (p_admin, 'mail_test', 'mail_campaign', null, 'Testmail an die eigene Adresse',
+          jsonb_build_object('category', p_category, 'subject', btrim(p_subject), 'text_hash', public.legal_hash(p_body),
+                             'attachments', jsonb_array_length(coalesce(p_attachments, '[]'::jsonb))));
+end;
+$$;
+
+-- What to send for one campaign (text and attachments only while it isn't done).
+create or replace function public.mail_campaign_for_send(p_campaign uuid)
+returns jsonb
+language sql stable security definer set search_path = ''
+as $$
+  select jsonb_build_object('status', c.status, 'category', c.category, 'subject', c.subject, 'body', c.body,
+                            'attachments', c.attachments, 'created_by', c.created_by)
+  from public.mail_campaigns c where c.id = p_campaign;
+$$;
+
+-- The next recipients of a campaign with their address, read now from auth.users (at most
+-- p_limit, max 100). Recipients whose account isn't active any more, is gone or has no address
+-- are skipped. Claims older than 10 minutes (interrupted call) are handed out again.
+create or replace function public.mail_claim(p_campaign uuid, p_limit integer)
+returns table (recipient_id uuid, email text)
+language plpgsql security definer set search_path = ''
+as $$
+#variable_conflict use_column
+begin
+  update public.mail_recipients r
+  set status = 'skipped', error = case when r.user_id is null then 'account_deleted' else 'not_active' end, claimed_at = null
+  where r.campaign_id = p_campaign and r.status = 'pending'
+    and (r.user_id is null or not public.account_is_active(r.user_id));
+  update public.mail_recipients r
+  set status = 'skipped', error = 'no_address', claimed_at = null
+  where r.campaign_id = p_campaign and r.status = 'pending'
+    and not exists (select 1 from auth.users u where u.id = r.user_id and coalesce(u.email, '') <> '');
+  return query
+  with picked as (
+    select r.id from public.mail_recipients r
+    where r.campaign_id = p_campaign
+      and (r.status = 'pending' or (r.status = 'claimed' and r.claimed_at < now() - interval '10 minutes'))
+    order by r.id
+    limit least(greatest(coalesce(p_limit, 0), 0), 100)
+    for update skip locked
+  ), claimed as (
+    update public.mail_recipients r set status = 'claimed', claimed_at = now()
+    from picked where r.id = picked.id
+    returning r.id, r.user_id
+  )
+  select claimed.id, u.email::text from claimed join auth.users u on u.id = claimed.user_id;
+end;
+$$;
+
+-- Outcome for claimed recipients: 'sent', 'failed' (with an error code) or 'pending' (back into
+-- the queue, e.g. quota reached).
+create or replace function public.mail_result(p_recipient_ids uuid[], p_status text, p_error text)
+returns void
+language plpgsql security definer set search_path = ''
+as $$
+begin
+  if p_status not in ('sent', 'failed', 'pending') then
+    raise exception 'invalid_status';
+  end if;
+  update public.mail_recipients r
+  set status = p_status, claimed_at = null,
+      sent_at = case when p_status = 'sent' then now() end,
+      error = case when p_status = 'failed' then (case when p_error ~ '^[a-z_]{1,40}$' then p_error else 'send_failed' end) end
+  where r.id = any (coalesce(p_recipient_ids, '{}')) and r.status = 'claimed';
+end;
+$$;
+
+-- After a call: p_fail ends every open recipient with that error (e.g. attachments gone);
+-- p_stop (quota, provider) puts the open ones back and sets the campaign 'waiting'. With nobody
+-- open the campaign is done: text and attachment list are removed, the files to delete returned.
+create or replace function public.mail_campaign_refresh(p_campaign uuid, p_stop text, p_fail text)
+returns jsonb
+language plpgsql security definer set search_path = ''
+as $$
+declare
+  c public.mail_campaigns%rowtype;
+  open_count integer;
+  files jsonb := '[]';
+begin
+  select * into c from public.mail_campaigns x where x.id = p_campaign for update;
+  if not found then
+    raise exception 'campaign_not_found';
+  end if;
+  if p_fail is not null then
+    update public.mail_recipients
+    set status = 'failed', claimed_at = null, error = case when p_fail ~ '^[a-z_]{1,40}$' then p_fail else 'send_failed' end
+    where campaign_id = p_campaign and status in ('pending', 'claimed');
+  elsif p_stop is not null then
+    update public.mail_recipients set status = 'pending', claimed_at = null
+    where campaign_id = p_campaign and status = 'claimed';
+  end if;
+  select count(*) into open_count from public.mail_recipients r
+  where r.campaign_id = p_campaign and r.status in ('pending', 'claimed');
+  if open_count = 0 then
+    files := coalesce((select jsonb_agg(a -> 'path') from jsonb_array_elements(c.attachments) a), '[]');
+    update public.mail_campaigns
+    set status = 'done', finished_at = coalesce(finished_at, now()), body = null, attachments = '[]', stop_reason = null
+    where id = p_campaign;
+  elsif p_stop is not null then
+    update public.mail_campaigns
+    set status = 'waiting', stop_reason = case when p_stop ~ '^[a-z_]{1,40}$' then p_stop else 'stopped' end
+    where id = p_campaign;
+  end if;
+  return public.mail_campaign_counts(p_campaign)
+    || jsonb_build_object('status', case when open_count = 0 then 'done' when p_stop is not null then 'waiting' else 'sending' end,
+                          'files', files);
+end;
+$$;
+
+-- Clean-up at every call of the Edge Function: attachments of campaigns older than 24 hours go
+-- (their open recipients fail with attachments_expired), texts older than keep_days go (open
+-- recipients fail with expired), uploads older than 24 hours go, old test marks go. Returns the
+-- storage paths to delete.
+create or replace function public.mail_purge()
+returns text[]
+language plpgsql security definer set search_path = ''
+as $$
+declare
+  files text[] := '{}';
+  c record;
+begin
+  for c in
+    select x.id, x.attachments from public.mail_campaigns x
+    where jsonb_array_length(x.attachments) > 0
+      and x.created_at < now() - make_interval(hours => (public.mail_limits() ->> 'attachment_hours')::integer)
+    for update
+  loop
+    files := files || array(select a ->> 'path' from jsonb_array_elements(c.attachments) a);
+    update public.mail_recipients set status = 'failed', error = 'attachments_expired', claimed_at = null
+    where campaign_id = c.id and status in ('pending', 'claimed');
+    update public.mail_campaigns
+    set attachments = '[]', body = null, status = 'done', finished_at = coalesce(finished_at, now()), stop_reason = null
+    where id = c.id;
+  end loop;
+  for c in
+    select x.id from public.mail_campaigns x
+    where x.body is not null and x.created_at < now() - make_interval(days => (public.mail_limits() ->> 'keep_days')::integer)
+    for update
+  loop
+    update public.mail_recipients set status = 'failed', error = 'expired', claimed_at = null
+    where campaign_id = c.id and status in ('pending', 'claimed');
+    update public.mail_campaigns
+    set body = null, status = 'done', finished_at = coalesce(finished_at, now()), stop_reason = null
+    where id = c.id;
+  end loop;
+  files := files || array(
+    select o.name from storage.objects o
+    where o.bucket_id = 'mail-attachments'
+      and o.created_at < now() - make_interval(hours => (public.mail_limits() ->> 'attachment_hours')::integer)
+  );
+  delete from public.mail_tests where created_at < now() - interval '1 day';
+  return array(select distinct f from unnest(files) f where f is not null);
+end;
+$$;
+
+do $$
+declare
+  f text;
+begin
+  foreach f in array array[
+    'public.mail_category_label(text)', 'public.mail_check_content(text, text, text)',
+    'public.mail_check_attachments(uuid, jsonb)', 'public.mail_content_hash(text, text, text, jsonb)',
+    'public.mail_campaign_counts(uuid)'
+  ] loop
+    execute format('revoke all on function %s from public, anon, authenticated', f);
+  end loop;
+  foreach f in array array[
+    'public.mail_limits()', 'public.admin_mail_settings()', 'public.admin_mail_candidates(text)',
+    'public.admin_mail_create(text, text, text, text, uuid[], jsonb, integer, boolean, uuid)',
+    'public.admin_mail_resume(uuid)', 'public.admin_mail_campaigns(integer, integer)', 'public.admin_mail_campaign(uuid)',
+    'public.admin_mail_templates()', 'public.admin_mail_save_template(uuid, text, text, text, text)',
+    'public.admin_mail_delete_template(uuid)'
+  ] loop
+    execute format('revoke all on function %s from public, anon', f);
+    execute format('grant execute on function %s to authenticated', f);
+  end loop;
+  -- Addresses and the queue: only the Edge Function with the service role.
+  foreach f in array array[
+    'public.mail_record_test(uuid, text, text, text, jsonb)', 'public.mail_campaign_for_send(uuid)',
+    'public.mail_claim(uuid, integer)', 'public.mail_result(uuid[], text, text)',
+    'public.mail_campaign_refresh(uuid, text, text)', 'public.mail_purge()'
   ] loop
     execute format('revoke all on function %s from public, anon, authenticated', f);
     execute format('grant execute on function %s to service_role', f);

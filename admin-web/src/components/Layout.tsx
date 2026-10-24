@@ -18,6 +18,7 @@ export function Layout({ route, children, theme, onToggleTheme }: LayoutProps) {
           { route: { page: "legal" } as Route, label: "Rechtstexte", active: route.page === "legal" || route.page === "legal-edit" },
           { route: { page: "pending" } as Route, label: "Offene Bestätigungen", active: route.page === "pending" },
           { route: { page: "reset" } as Route, label: "Bereinigung", active: route.page === "reset" || route.page === "reset-job" },
+          { route: { page: "mail" } as Route, label: "Mitteilungen", active: route.page === "mail" || route.page === "mail-campaign" },
           { route: { page: "audit" } as Route, label: "Audit-Log", active: route.page === "audit" },
         ]
       : []),

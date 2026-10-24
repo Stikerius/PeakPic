@@ -1,4 +1,5 @@
--- PeakPic: read-only checks for the data reset ("App-Neustart"). NOT part of schema.sql; run by
+-- PeakPic: read-only checks for the data reset ("App-Neustart") and the e-mail notices
+-- ("Mitteilungen"). NOT part of schema.sql; run by
 -- hand in the Supabase SQL editor. Changes nothing. Every row with ok = false needs a look.
 
 select * from (
@@ -9,7 +10,8 @@ select * from (
       or has_table_privilege('authenticated', 'public.' || t, 'update')
       or has_table_privilege('authenticated', 'public.' || t, 'delete')
       or has_table_privilege('anon', 'public.' || t, 'select')) as ok
-  from unnest(array['app_settings', 'protected_accounts', 'reset_jobs', 'reset_job_targets', 'seed_markers']) t
+  from unnest(array['app_settings', 'protected_accounts', 'reset_jobs', 'reset_job_targets', 'seed_markers',
+                     'mail_campaigns', 'mail_recipients', 'mail_templates', 'mail_tests']) t
 
   union all
   -- RLS on, and no policies at all (access only through the functions).
@@ -17,7 +19,8 @@ select * from (
     c.relrowsecurity and not exists (select 1 from pg_policies p where p.schemaname = 'public' and p.tablename = c.relname)
   from pg_class c join pg_namespace n on n.oid = c.relnamespace
   where n.nspname = 'public'
-    and c.relname in ('app_settings', 'protected_accounts', 'reset_jobs', 'reset_job_targets', 'seed_markers')
+    and c.relname in ('app_settings', 'protected_accounts', 'reset_jobs', 'reset_job_targets', 'seed_markers',
+                      'mail_campaigns', 'mail_recipients', 'mail_templates', 'mail_tests')
 
   union all
   -- Every reset function: security definer with a fixed search_path.
@@ -40,6 +43,42 @@ select * from (
   select 'not for anon: ' || p.proname, not has_function_privilege('anon', p.oid, 'execute')
   from pg_proc p join pg_namespace n on n.oid = p.pronamespace
   where n.nspname = 'public' and p.proname like 'admin_reset_%'
+
+  union all
+  -- Mail functions: security definer with a fixed search_path (pure helpers excepted).
+  select 'definer + search_path: ' || p.proname,
+    p.prosecdef and coalesce(array_to_string(p.proconfig, ','), '') like '%search_path=%'
+  from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+  where n.nspname = 'public' and (p.proname like 'admin_mail_%' or p.proname like 'mail_%')
+    and p.proname not in ('mail_limits', 'mail_category_label', 'mail_check_content', 'mail_check_attachments',
+                          'mail_content_hash')
+
+  union all
+  -- Addresses and the queue: only the service role (never clients, never the admin's session).
+  select 'service role only: ' || p.proname,
+    not has_function_privilege('authenticated', p.oid, 'execute') and not has_function_privilege('anon', p.oid, 'execute')
+  from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+  where n.nspname = 'public'
+    and p.proname in ('mail_claim', 'mail_result', 'mail_campaign_refresh', 'mail_record_test', 'mail_purge',
+                      'mail_campaign_for_send')
+
+  union all
+  -- The attachment bucket is private.
+  select 'bucket mail-attachments private',
+    exists (select 1 from storage.buckets b where b.id = 'mail-attachments' and not b.public)
+
+  union all
+  -- Texts are not kept once a campaign is done.
+  select 'no text kept in finished campaigns',
+    not exists (select 1 from public.mail_campaigns c where c.status = 'done' and c.body is not null)
+
+  union all
+  -- Every campaign is in the log.
+  select 'every mail campaign is logged',
+    not exists (
+      select 1 from public.mail_campaigns c
+      where not exists (select 1 from public.moderation_actions m where m.action = 'mail_send' and m.target_id = c.id)
+    )
 
   union all
   -- No protected or staff account in a job that hasn't finished.

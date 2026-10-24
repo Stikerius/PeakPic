@@ -7,6 +7,7 @@ import { AuditPage } from "./pages/AuditPage";
 import { LegalEditPage } from "./pages/LegalEditPage";
 import { LegalPage } from "./pages/LegalPage";
 import { LoginPage } from "./pages/LoginPage";
+import { MailPage } from "./pages/MailPage";
 import { OverviewPage } from "./pages/OverviewPage";
 import { PendingPage } from "./pages/PendingPage";
 import { UsagePage } from "./pages/UsagePage";
@@ -67,6 +68,8 @@ export function App() {
       {route.page === "usage" && isAdmin && <UsagePage />}
       {route.page === "reset" && isAdmin && <ResetPage jobId={null} />}
       {route.page === "reset-job" && isAdmin && <ResetPage key={route.id} jobId={route.id} />}
+      {route.page === "mail" && isAdmin && <MailPage campaignId={null} />}
+      {route.page === "mail-campaign" && isAdmin && <MailPage key={route.id} campaignId={route.id} />}
     </Layout>
   );
 }

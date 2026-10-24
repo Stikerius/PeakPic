@@ -27,9 +27,47 @@ export type SendResult = { ok: true } | { ok: false; failure: MailFailure; statu
 export interface MailProvider {
   readonly name: string;
   send(from: string, message: MailMessage): Promise<SendResult>;
+  /** Several mails in one request (no attachments); all or none are accepted. Optional. */
+  sendBatch?(from: string, messages: readonly MailMessage[], idempotencyKey: string): Promise<SendResult>;
 }
 
-/** Resend (https://resend.com/docs/api-reference/emails/send-email). */
+async function failureOf(response: Response): Promise<SendResult> {
+  let name: string | null = null;
+  try {
+    const body: unknown = await response.json();
+    if (typeof body === "object" && body !== null && typeof (body as Record<string, unknown>).name === "string") {
+      name = (body as Record<string, string>).name;
+    }
+  } catch {
+    name = null;
+  }
+  return { ok: false, failure: classifyMailError(response.status, name), status: response.status, code: name ?? "unknown" };
+}
+
+function resendBody(from: string, message: MailMessage): Record<string, unknown> {
+  return {
+    from,
+    to: [message.to],
+    subject: message.subject,
+    text: message.text,
+    ...(message.html !== undefined ? { html: message.html } : {}),
+    ...(message.replyTo !== undefined ? { reply_to: message.replyTo } : {}),
+    ...(message.attachments !== undefined && message.attachments.length > 0
+      ? {
+          attachments: message.attachments.map((a) => ({
+            filename: a.filename,
+            content: a.content,
+            ...(a.contentType !== undefined ? { content_type: a.contentType } : {}),
+          })),
+        }
+      : {}),
+  };
+}
+
+/**
+ * Resend (https://resend.com/docs/api-reference/emails/send-email). Batch: /emails/batch, at most
+ * 100 mails per request and no attachments (send-batch-emails).
+ */
 export function resendProvider(apiKey: string, url = "https://api.resend.com/emails"): MailProvider {
   return {
     name: "resend",
@@ -38,41 +76,31 @@ export function resendProvider(apiKey: string, url = "https://api.resend.com/ema
       if (message.idempotencyKey !== undefined) headers["Idempotency-Key"] = message.idempotencyKey.slice(0, 256);
       let response: Response;
       try {
-        response = await fetch(url, {
+        response = await fetch(url, { method: "POST", headers, body: JSON.stringify(resendBody(from, message)) });
+      } catch {
+        return { ok: false, failure: "unavailable", status: 0, code: "network" };
+      }
+      return response.ok ? { ok: true } : await failureOf(response);
+    },
+    async sendBatch(from, messages, idempotencyKey) {
+      if (messages.some((m) => m.attachments !== undefined && m.attachments.length > 0)) {
+        return { ok: false, failure: "rejected", status: 0, code: "batch_attachments" };
+      }
+      let response: Response;
+      try {
+        response = await fetch(`${url}/batch`, {
           method: "POST",
-          headers,
-          body: JSON.stringify({
-            from,
-            to: [message.to],
-            subject: message.subject,
-            text: message.text,
-            ...(message.html !== undefined ? { html: message.html } : {}),
-            ...(message.replyTo !== undefined ? { reply_to: message.replyTo } : {}),
-            ...(message.attachments !== undefined && message.attachments.length > 0
-              ? {
-                  attachments: message.attachments.map((a) => ({
-                    filename: a.filename,
-                    content: a.content,
-                    ...(a.contentType !== undefined ? { content_type: a.contentType } : {}),
-                  })),
-                }
-              : {}),
-          }),
+          headers: {
+            Authorization: `Bearer ${apiKey}`,
+            "Content-Type": "application/json",
+            "Idempotency-Key": idempotencyKey.slice(0, 256),
+          },
+          body: JSON.stringify(messages.map((m) => resendBody(from, m))),
         });
       } catch {
         return { ok: false, failure: "unavailable", status: 0, code: "network" };
       }
-      if (response.ok) return { ok: true };
-      let name: string | null = null;
-      try {
-        const body: unknown = await response.json();
-        if (typeof body === "object" && body !== null && typeof (body as Record<string, unknown>).name === "string") {
-          name = (body as Record<string, string>).name;
-        }
-      } catch {
-        name = null;
-      }
-      return { ok: false, failure: classifyMailError(response.status, name), status: response.status, code: name ?? "unknown" };
+      return response.ok ? { ok: true } : await failureOf(response);
     },
   };
 }
@@ -86,8 +114,9 @@ const PROVIDERS: Record<string, (env: Env) => MailProvider | null> = {
   },
 };
 
-// Resend allows a few requests per second; stay below it.
-const MIN_INTERVAL_MS = 600;
+// Resend allows 10 requests per second per team (api-reference/introduction); stay well below it.
+const MIN_INTERVAL_MS = 250;
+export const BATCH_MAX = 100;
 
 /** Sends through one provider, from EMAIL_FROM, with SUPPORT_EMAIL as reply-to by default. */
 export class Mailer {
@@ -130,6 +159,25 @@ export class Mailer {
       await new Promise((resolve) => setTimeout(resolve, 1500));
       this.last = Date.now();
       result = await this.provider.send(this.from, message);
+    }
+    return result;
+  }
+
+  /**
+   * Up to BATCH_MAX mails without attachments in one request (reply-to as in send()). A rejected
+   * batch (e.g. one invalid address) is "rejected": the caller sends those one by one.
+   */
+  async sendBatch(messages: readonly Omit<MailMessage, "replyTo">[], idempotencyKey: string): Promise<SendResult> {
+    if (this.provider.sendBatch === undefined || messages.length === 0 || messages.length > BATCH_MAX) {
+      return { ok: false, failure: "rejected", status: 0, code: "batch_unsupported" };
+    }
+    const full = messages.map((m) => ({ ...m, replyTo: this.supportEmail ?? undefined }));
+    await this.pace();
+    let result = await this.provider.sendBatch(this.from, full, idempotencyKey);
+    if (!result.ok && result.failure === "rate_limit") {
+      await new Promise((resolve) => setTimeout(resolve, 1500));
+      this.last = Date.now();
+      result = await this.provider.sendBatch(this.from, full, idempotencyKey);
     }
     return result;
   }
