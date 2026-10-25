@@ -39,6 +39,7 @@ const mockRepo = {
 };
 jest.mock("@/lib/surveyRepo", () => mockRepo);
 jest.mock("@/lib/usage", () => ({ track: jest.fn(), isUsageEnabled: () => true }));
+jest.mock("@/lib/session", () => ({ requireUserId: () => Promise.resolve("me") }));
 
 // Imported after the mocks.
 const { OfficialProfileView } = require("@/components/surveys/official-profile") as typeof import("@/components/surveys/official-profile");
@@ -144,11 +145,45 @@ describe("taking part", () => {
     expect(mockRepo.submitSurvey).toHaveBeenCalledTimes(1);
   });
 
-  it("success: thanks", async () => {
+  it("success: thanks; opened again it shows one's own answers from this device", async () => {
     mockRepo.submitSurvey.mockImplementation(() => Promise.resolve());
     const tree = await open();
     await press(tree, "Abschicken");
     await flush();
     expect(allText(tree)).toContain("Danke für deine Teilnahme!");
+    await act(async () => tree.unmount());
+
+    mockRepo.fetchSurvey.mockImplementation(() => Promise.resolve({ ...survey, answered: true }));
+    let again!: ReactTestRenderer;
+    await act(async () => {
+      again = create(
+        <ThemeProvider>
+          <SurveyScreen />
+        </ThemeProvider>,
+      );
+    });
+    await flush();
+    const text = allText(again);
+    expect(text).toContain("Deine Antworten");
+    expect(text).toContain("Gefällt dir die App?");
+    expect(text).toContain("Ja");
+    expect(text).not.toContain("Los geht's");
+  });
+
+  it("answered on another device: no copy here, a plain note", async () => {
+    const storageModule = require("@react-native-async-storage/async-storage") as { default?: { clear: () => Promise<void> }; clear?: () => Promise<void> };
+    const storage = storageModule.default ?? (storageModule as { clear: () => Promise<void> });
+    await storage.clear();
+    mockRepo.fetchSurvey.mockImplementation(() => Promise.resolve({ ...survey, answered: true }));
+    let tree!: ReactTestRenderer;
+    await act(async () => {
+      tree = create(
+        <ThemeProvider>
+          <SurveyScreen />
+        </ThemeProvider>,
+      );
+    });
+    await flush();
+    expect(allText(tree)).toContain("Auf diesem Gerät sind keine vorhanden.");
   });
 });

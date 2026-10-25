@@ -14,7 +14,9 @@ import { EmptyState, ErrorState } from "@/components/ui/empty-state";
 import { Skeleton } from "@/components/ui/skeleton";
 import { radius, spacing, typography } from "@/constants/theme";
 import { emitAppEvent } from "@/lib/events";
-import { answersToSend, canContinue, classifySubmitError, isDirty, progressText, type Answers } from "@/lib/surveyFlow";
+import { loadOwnAnswers, saveOwnAnswers, type OwnAnswers } from "@/lib/myAnswers";
+import { requireUserId } from "@/lib/session";
+import { answersToSend, canContinue, classifySubmitError, formatOwnAnswer, isDirty, progressText, type Answers } from "@/lib/surveyFlow";
 import { fetchSurvey, submitSurvey, trackSurveyEvent } from "@/lib/surveyRepo";
 import { makeStyles, useTheme } from "@/lib/theme";
 import { track } from "@/lib/usage";
@@ -33,6 +35,8 @@ type Phase =
  * sending only after a confirmation, then "Danke". Leaving loses the answers (a confirmation
  * first; swiping down closes only while nothing is entered). If the survey ended meanwhile,
  * nothing is sent; on a network error the answers stay for "Erneut versuchen".
+ * Opened again after taking part (e.g. from "Einstellungen → Umfragen"), it shows one's own
+ * answers from the copy on this device (the server keeps none linked to the account).
  */
 export default function SurveyScreen() {
   const { surveyId } = useLocalSearchParams<{ surveyId: string }>();
@@ -45,6 +49,8 @@ export default function SurveyScreen() {
   const [phase, setPhase] = useState<Phase>({ kind: "intro" });
   const [answers, setAnswers] = useState<Answers>({});
   const [sendError, setSendError] = useState<string | null>(null);
+  // Own answers from this device: undefined while loading, null when there are none here.
+  const [own, setOwn] = useState<OwnAnswers | null | undefined>(undefined);
 
   useEffect(() => {
     let active = true;
@@ -61,6 +67,23 @@ export default function SurveyScreen() {
       active = false;
     };
   }, [surveyId, reloadKey]);
+
+  const answeredBefore = survey?.answered === true;
+  useEffect(() => {
+    if (!answeredBefore) return;
+    let active = true;
+    requireUserId()
+      .then((userId) => loadOwnAnswers(userId, surveyId))
+      .then((result) => {
+        if (active) setOwn(result);
+      })
+      .catch(() => {
+        if (active) setOwn(null);
+      });
+    return () => {
+      active = false;
+    };
+  }, [answeredBefore, surveyId]);
 
   useEffect(() => {
     track("survey_card_opened");
@@ -104,6 +127,9 @@ export default function SurveyScreen() {
     setPhase({ kind: "sending" });
     try {
       await submitSurvey(survey.surveyId, payload);
+      await requireUserId()
+        .then((userId) => saveOwnAnswers(userId, survey.surveyId, payload))
+        .catch(() => undefined);
       emitAppEvent("surveyAnswered", { surveyId: survey.surveyId });
       setAnswers({});
       setPhase({ kind: "thanks" });
@@ -162,7 +188,37 @@ export default function SurveyScreen() {
       />
     );
   } else if (survey.answered && phase.kind === "intro") {
-    body = <EmptyState fill icon="checkmark-circle-outline" title="Du hast schon teilgenommen" message="Danke! Antworten lassen sich nachträglich nicht ändern." action={{ label: "Schliessen", onPress: () => router.back() }} />;
+    body =
+      own === undefined ? null : (
+        <ScrollView contentContainerStyle={[styles.content, { paddingBottom: insets.bottom + spacing.lg }]}>
+          <OfficialBadge />
+          <Text style={styles.title} accessibilityRole="header">
+            {survey.title}
+          </Text>
+          <Text style={styles.meta}>Du hast teilgenommen · {remainingText(survey.endsAt, new Date())}</Text>
+          {own === null ? (
+            <Text style={styles.body}>
+              Deine Antworten sind nur auf dem Gerät gespeichert, auf dem du teilgenommen hast. Auf diesem Gerät sind keine vorhanden.
+            </Text>
+          ) : (
+            <View style={styles.ownList}>
+              <Text style={styles.sectionTitle} accessibilityRole="header">
+                Deine Antworten
+              </Text>
+              {questions.map((q, i) => (
+                <View key={q.id} style={[styles.ownRow, i > 0 && styles.ownDivider]}>
+                  <Text style={styles.meta}>{q.prompt}</Text>
+                  <Text style={styles.body}>{formatOwnAnswer(q, own.answers[q.id])}</Text>
+                </View>
+              ))}
+            </View>
+          )}
+          <Text style={styles.meta}>
+            Diese Ansicht kommt aus einer Kopie auf deinem Gerät. Auf dem Server sind deine Antworten ohne Bezug zu deinem Konto gespeichert und lassen
+            sich nicht mehr ändern.
+          </Text>
+        </ScrollView>
+      );
   } else if (phase.kind === "already") {
     body = <EmptyState fill icon="checkmark-circle-outline" title="Du hast schon teilgenommen" message="Deine früheren Antworten bleiben gültig." action={{ label: "Schliessen", onPress: () => router.back() }} />;
   } else if (phase.kind === "thanks") {
@@ -278,6 +334,27 @@ const useStyles = makeStyles(({ colors }) =>
     meta: {
       ...typography.caption,
       color: colors.textSecondary,
+    },
+    sectionTitle: {
+      ...typography.heading,
+      color: colors.text,
+    },
+    ownList: {
+      borderRadius: radius.md,
+      borderWidth: StyleSheet.hairlineWidth,
+      borderColor: colors.border,
+      backgroundColor: colors.surface,
+      paddingHorizontal: spacing.md,
+      paddingVertical: spacing.sm,
+      gap: spacing.sm,
+    },
+    ownRow: {
+      gap: spacing.xs,
+      paddingVertical: spacing.sm,
+    },
+    ownDivider: {
+      borderTopWidth: StyleSheet.hairlineWidth,
+      borderTopColor: colors.divider,
     },
     required: {
       ...typography.label,

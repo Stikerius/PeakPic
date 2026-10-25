@@ -1,4 +1,4 @@
-import { describe, expect, it } from "@jest/globals";
+import { describe, expect, it, jest } from "@jest/globals";
 
 import {
   parseOfficialItem,
@@ -9,8 +9,12 @@ import {
   type SurveyQuestion,
 } from "../../../shared/surveys";
 import { mergeFeed, surveyRowSubtitle, withAnswered, withSeen, withoutItem, type OfficialFeed } from "@/lib/surveyFeed";
-import { answersToSend, canContinue, classifySubmitError, isDirty, progressText, toggleChoice } from "@/lib/surveyFlow";
+import { OWN_ANSWERS_LIMIT, parseOwnAnswersStore, withOwnAnswers } from "@/lib/myAnswers";
+import { answersToSend, canContinue, classifySubmitError, formatOwnAnswer, isDirty, progressText, toggleChoice } from "@/lib/surveyFlow";
 import type { FeedPost } from "@/types/social";
+
+// eslint-disable-next-line @typescript-eslint/no-require-imports -- jest mock factory
+jest.mock("@react-native-async-storage/async-storage", () => require("@react-native-async-storage/async-storage/jest/async-storage-mock"));
 
 const ID = (n: number) => `00000000-0000-4000-8000-${String(n).padStart(12, "0")}`;
 
@@ -79,11 +83,11 @@ describe("feed: official cards", () => {
     expect(withSeen(after, pinned.itemId).top.map((i) => i.itemId)).toEqual([pinned.itemId]);
   });
 
-  it("answered: leaves the top and shows 'Teilgenommen'", () => {
+  it("answered: the survey card leaves the feed at once, other cards stay", () => {
     const pinned = item(4, { pin_until_answered: true });
-    const after = withAnswered({ top: [pinned], items: [] }, pinned.surveyId);
-    expect(after.top).toEqual([]);
-    expect(after.items[0]).toMatchObject({ answered: true });
+    const other = item(5);
+    const after = withAnswered({ top: [pinned], items: [other] }, pinned.surveyId);
+    expect(after).toEqual({ top: [], items: [other] });
   });
 
   it("dismissed: gone everywhere", () => {
@@ -203,5 +207,43 @@ describe("taking part", () => {
     expect(classifySubmitError(new TypeError("Network request failed"))).toBe("network");
     expect(classifySubmitError(undefined)).toBe("network");
     expect(progressText(1, 5)).toBe("Frage 2 von 5");
+  });
+});
+
+describe("own answers (only on this device)", () => {
+  const q = (kind: SurveyQuestion["kind"], change: Partial<SurveyQuestion> = {}): SurveyQuestion => ({
+    id: kind,
+    kind,
+    prompt: "Frage?",
+    required: false,
+    options: kind === "single" || kind === "multiple" ? ["Selten", "Oft", "Täglich"] : null,
+    maxChoices: kind === "multiple" ? 2 : null,
+    scaleMin: kind === "scale" ? 0 : null,
+    scaleMax: kind === "scale" ? 10 : null,
+    textMax: kind === "text" ? 200 : null,
+    ...change,
+  });
+
+  it("formats every kind, and skipped questions", () => {
+    expect(formatOwnAnswer(q("single"), 1)).toBe("Oft");
+    expect(formatOwnAnswer(q("multiple"), [0, 2])).toBe("Selten, Täglich");
+    expect(formatOwnAnswer(q("scale"), 7)).toBe("7 (Skala 0 bis 10)");
+    expect(formatOwnAnswer(q("yes_no"), false)).toBe("Nein");
+    expect(formatOwnAnswer(q("text"), "Mehr Pläne")).toBe("Mehr Pläne");
+    expect(formatOwnAnswer(q("text"), undefined)).toBe("Nicht beantwortet");
+    expect(formatOwnAnswer(q("multiple"), [])).toBe("Nicht beantwortet");
+  });
+
+  it("stores per survey, keeps the newest, survives broken data", () => {
+    let store = parseOwnAnswersStore(null);
+    for (let i = 0; i < OWN_ANSWERS_LIMIT + 3; i += 1) {
+      store = withOwnAnswers(store, `s${i}`, { q: i }, new Date(Date.UTC(2026, 0, 1, 0, i)).toISOString());
+    }
+    expect(Object.keys(store)).toHaveLength(OWN_ANSWERS_LIMIT);
+    expect(store.s0).toBeUndefined();
+    expect(store[`s${OWN_ANSWERS_LIMIT + 2}`]?.answers).toEqual({ q: OWN_ANSWERS_LIMIT + 2 });
+    expect(parseOwnAnswersStore(JSON.stringify(store))).toEqual(store);
+    expect(parseOwnAnswersStore("{kaputt")).toEqual({});
+    expect(parseOwnAnswersStore(JSON.stringify({ a: { savedAt: 1, answers: {} }, b: { savedAt: "x", answers: [] } }))).toEqual({});
   });
 });

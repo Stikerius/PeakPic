@@ -61,3 +61,20 @@ export function classifySubmitError(error: unknown): SubmitFailure {
 export function progressText(index: number, total: number): string {
   return `Frage ${index + 1} von ${total}`;
 }
+
+/** One's own answer as text ("Nicht beantwortet" when skipped). */
+export function formatOwnAnswer(question: SurveyQuestion, value: unknown): string {
+  if (!hasAnswer(question, value)) return "Nicht beantwortet";
+  switch (question.kind) {
+    case "single":
+      return typeof value === "number" ? (question.options?.[value] ?? "–") : "–";
+    case "multiple":
+      return Array.isArray(value) ? value.map((i) => (typeof i === "number" ? (question.options?.[i] ?? "–") : "–")).join(", ") : "–";
+    case "scale":
+      return typeof value === "number" ? `${value} (Skala ${question.scaleMin ?? "–"} bis ${question.scaleMax ?? "–"})` : "–";
+    case "yes_no":
+      return value === true ? "Ja" : value === false ? "Nein" : "–";
+    case "text":
+      return typeof value === "string" ? value : "–";
+  }
+}

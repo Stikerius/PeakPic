@@ -36,16 +36,12 @@ export function withoutItem(feed: OfficialFeed, itemId: string): OfficialFeed {
 }
 
 /**
- * After taking part: the card shows "Teilgenommen" and leaves the top (it takes its normal place
- * by date, like after the next load).
+ * After taking part: the survey card leaves the feed at once (the server doesn't send it again).
+ * It stays under "Einstellungen → Umfragen" with one's own answers. Results cards stay.
  */
 export function withAnswered(feed: OfficialFeed, surveyId: string): OfficialFeed {
-  const mark = (i: OfficialItem) => (i.kind === "survey" && i.surveyId === surveyId ? { ...i, answered: true, seen: true } : i);
-  const moved = feed.top.filter((i) => i.kind === "survey" && i.surveyId === surveyId).map(mark);
-  return {
-    top: feed.top.filter((i) => !(i.kind === "survey" && i.surveyId === surveyId)),
-    items: [...feed.items.map(mark), ...moved],
-  };
+  const answered = (i: OfficialItem) => i.kind === "survey" && i.surveyId === surveyId;
+  return { top: feed.top.filter((i) => !answered(i)), items: feed.items.filter((i) => !answered(i)) };
 }
 
 /** "Später" (or seen for a second): the card leaves the top and takes its place by date. */

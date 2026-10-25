@@ -1,9 +1,24 @@
 import { useState } from "react";
 
+import { SegmentedChoice } from "../ui";
 import { newQuestion, type DraftQuestion, type ScaleChoice } from "../../lib/surveyAdmin";
-import { QUESTION_KIND_LABELS, SURVEY_LIMITS, type QuestionKind } from "../../lib/surveys";
+import { SURVEY_LIMITS, type QuestionKind } from "../../lib/surveys";
 
-const KINDS = Object.entries(QUESTION_KIND_LABELS) as [QuestionKind, string][];
+/** The question types as the editor names them (the app shows them as radio buttons, boxes, a scale, two buttons or a text field). */
+const KINDS: readonly (readonly [QuestionKind, string])[] = [
+  ["single", "Eine Auswahl"],
+  ["multiple", "Mehrfachauswahl"],
+  ["scale", "Skala"],
+  ["yes_no", "Ja/Nein"],
+  ["text", "Textfeld"],
+];
+const KIND_HINTS: Record<QuestionKind, string> = {
+  single: "Genau eine Antwort aus 2 bis 10 Möglichkeiten.",
+  multiple: "Mehrere Antworten ankreuzbar, mit einer Obergrenze.",
+  scale: "Eine Zahl auf einer Skala (1–5, 1–10 oder 0–10 mit NPS).",
+  yes_no: "Zwei Knöpfe: Ja oder Nein.",
+  text: "Ein Feld zum Schreiben (20 bis 280 Zeichen). Schaltet Freitext für diese Umfrage ein.",
+};
 const SCALES: [ScaleChoice, string][] = [
   ["1-5", "1 bis 5"],
   ["1-10", "1 bis 10"],
@@ -13,15 +28,19 @@ const SCALES: [ScaleChoice, string][] = [
 type Props = {
   questions: DraftQuestion[];
   allowText: boolean;
+  /** Whether choosing "Textfeld" may switch free text on (not once the survey is published). */
+  canEnableText: boolean;
   disabled: boolean;
-  onChange: (questions: DraftQuestion[]) => void;
+  /** `enableText`: a question became a text field, free text is switched on with it. */
+  onChange: (questions: DraftQuestion[], enableText?: boolean) => void;
 };
 
 /**
  * The questions of a survey: type, required, text, answers, scale, free text length. Order by
  * dragging a question or with "↑"/"↓" (keyboard). At most 10 questions, 2 to 10 answers each.
  */
-export function QuestionEditor({ questions, allowText, disabled, onChange }: Props) {
+export function QuestionEditor({ questions, allowText, canEnableText, disabled, onChange }: Props) {
+  const kinds = allowText || canEnableText ? KINDS : KINDS.filter(([kind]) => kind !== "text");
   const [dragging, setDragging] = useState<number | null>(null);
   const update = (index: number, change: Partial<DraftQuestion>) => onChange(questions.map((q, i) => (i === index ? { ...q, ...change } : q)));
   const move = (from: number, to: number) => {
@@ -62,24 +81,18 @@ export function QuestionEditor({ questions, allowText, disabled, onChange }: Pro
             </span>{" "}
             Frage {i + 1}
           </legend>
+          <SegmentedChoice<QuestionKind>
+            label={`Fragetyp von Frage ${i + 1}`}
+            value={q.kind}
+            options={kinds}
+            onChange={(kind) => {
+              const options = kind === "single" || kind === "multiple" ? (q.options.length >= 2 ? q.options : ["", ""]) : q.options;
+              const next = questions.map((x, j) => (j === i ? { ...x, kind, options } : x));
+              onChange(next, kind === "text" && !allowText ? true : undefined);
+            }}
+          />
+          <p className="muted">{KIND_HINTS[q.kind]}</p>
           <div className="filters">
-            <label>
-              Fragetyp
-              <select
-                value={q.kind}
-                onChange={(e) => {
-                  const kind = e.target.value as QuestionKind;
-                  update(i, { kind, options: kind === "single" || kind === "multiple" ? (q.options.length >= 2 ? q.options : ["", ""]) : q.options });
-                }}
-              >
-                {KINDS.map(([value, label]) => (
-                  <option key={value} value={value} disabled={value === "text" && !allowText}>
-                    {label}
-                    {value === "text" && !allowText ? " (erst erlauben)" : ""}
-                  </option>
-                ))}
-              </select>
-            </label>
             <label className="choice">
               <input type="checkbox" checked={q.required} onChange={(e) => update(i, { required: e.target.checked })} />
               Pflichtfrage

@@ -11954,6 +11954,8 @@ begin
     where i.status = 'visible' and i.published_at <= now() and now() < i.feed_until
       and (i.kind = 'results' or s.cancelled_at is null)
       and v.dismissed_at is null
+      -- Answered surveys leave the feed (they stay under "Einstellungen → Umfragen").
+      and not (i.kind = 'survey' and exists (select 1 from public.survey_participation p where p.survey_id = i.survey_id and p.user_id = me))
   ), wanted as (
     select c.*, case
       when c.kind = 'survey' and (c.answered or c.state <> 'active') then false

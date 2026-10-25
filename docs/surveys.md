@@ -136,8 +136,10 @@ Das Protokoll enthält Titel, Zeiten und Prüfwerte (Hash) von Thema, Fragen und
   Duplizieren, Verlängern, Abbrechen mit Begründung und „behalten“/„verwerfen“, Löschen nur für
   Entwürfe, Auswertung).
 - **Editor** in Schritten: Grunddaten (Titel, Thema, Start, Ende, Dauer), Medien (Bilder werden im
-  Browser verkleinert, Logos aus der Bibliothek, Alternativtext, Reihenfolge), Fragen (alle Typen,
-  Ziehen oder ↑↓, Pflicht, Optionen), Anzeige (oben anheften, Tage im Feed und Profil), Vorschau wie
+  Browser verkleinert, Logos aus der Bibliothek, Alternativtext, Reihenfolge), Fragen (Fragetyp als
+  sichtbare Auswahl: Eine Auswahl, Mehrfachauswahl, Skala, Ja/Nein, Textfeld; „Textfeld“ schaltet
+  Freitext für die Umfrage ein, solange sie nicht veröffentlicht ist; Ziehen oder ↑↓, Pflicht,
+  Optionen), Anzeige (oben anheften, Tage im Feed und Profil), Vorschau wie
   in der App (Karte und Fragen, eine Annäherung) und Veröffentlichen mit Bestätigungswort und
   Zwei-Faktor-Code. „Weiter“ speichert den Entwurf und bleibt aus, solange Pflichtangaben fehlen.
   Ab der ersten Antwort sind die Fragen gesperrt (Hinweis im Editor).
@@ -193,9 +195,16 @@ Das Protokoll enthält Titel, Zeiten und Prüfwerte (Hash) von Thema, Fragen und
   nach unten schliesst nur, solange nichts eingegeben ist; sonst „Schliessen“ mit dem Hinweis, dass
   die Eingaben verloren gehen. Ist die Umfrage inzwischen beendet oder abgebrochen, wird nichts
   gesendet; bei einem Netzfehler bleiben die Eingaben für „Erneut senden“.
+- **Nach der Teilnahme** verschwindet die Umfragekarte sofort aus dem Feed (App: `withAnswered`;
+  Server: `get_official_feed_items` liefert beantwortete Umfragen nicht mehr). Auswertungskarten
+  bleiben davon unberührt.
 - **Einstellungen → Umfragen** (`/surveys`): laufende Umfragen (offen oder teilgenommen, Restzeit,
   auch ausgeblendete) und Auswertungen der letzten 30 Tage; der Eintrag zeigt die Zahl offener
-  Umfragen.
+  Umfragen. Eine beantwortete Umfrage öffnet die eigenen Antworten.
+- **Eigene Antworten:** Der Server speichert Antworten ohne Bezug zum Konto und kann sie darum nicht
+  zurückgeben. Die App legt beim Absenden eine Kopie **nur auf dem Gerät** ab (`src/lib/myAnswers.ts`,
+  AsyncStorage je Konto, höchstens 50 Umfragen). Auf einem anderen Gerät steht ein sachlicher Hinweis
+  statt der Antworten. Das Löschen des Kontos leert den lokalen Speicher (`clearLocalData`).
 - **Offizielles Profil:** eigene Ansicht (Name, Bild, Beschreibung, Abzeichen, Tabs „Umfragen“ und
   „Auswertungen“), erreichbar über das Abzeichen einer Karte und über die Suche (Abzeichen in der
   Liste). Ohne E-Mail, Follower-Listen, Aktivitäten, Statistik, Pläne und Chat-Knopf. Normale

@@ -206,7 +206,13 @@ export function SurveyEditorPage({ id: initialId }: { id: string | null }) {
                   </p>
                 )}
               </fieldset>
-              <QuestionEditor questions={draft.questions} allowText={draft.allowText} disabled={readOnly} onChange={(questions) => change({ questions })} />
+              <QuestionEditor
+                questions={draft.questions}
+                allowText={draft.allowText}
+                canEnableText={!readOnly && !published}
+                disabled={readOnly}
+                onChange={(questions, enableText) => change(enableText === true ? { questions, allowText: true } : { questions })}
+              />
             </>
           )}
 

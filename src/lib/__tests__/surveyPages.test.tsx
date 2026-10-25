@@ -145,11 +145,22 @@ describe("survey editor", () => {
     expect(unnamed(container)).toEqual([]);
     // The default question has empty answers: "Weiter" stays off until they are filled in.
     expect(weiter().disabled).toBe(true);
-    const kind = container.querySelector(".question select") as HTMLSelectElement;
-    await act(async () => {
-      kind.value = "yes_no";
-      kind.dispatchEvent(new Event("change", { bubbles: true }));
-    });
+    // Every question type is a visible choice; "Textfeld" switches free text on by itself.
+    const typeRadio = (label: string) =>
+      Array.from(container.querySelectorAll(".question .segment")).find((l) => l.textContent === label)?.querySelector("input") as HTMLInputElement;
+    expect(Array.from(container.querySelectorAll(".question .segment")).map((l) => l.textContent)).toEqual([
+      "Eine Auswahl",
+      "Mehrfachauswahl",
+      "Skala",
+      "Ja/Nein",
+      "Textfeld",
+    ]);
+    await act(async () => typeRadio("Textfeld").click());
+    expect(text(container)).toContain("Datenschutz: Freitext kann Personen erkennbar machen");
+    expect(text(container)).toContain("Höchstlänge der Antwort");
+    await act(async () => typeRadio("Mehrfachauswahl").click());
+    expect(text(container)).toContain("Höchstens ankreuzbar");
+    await act(async () => typeRadio("Ja/Nein").click());
     await act(async () => type(container.querySelector(".question input:not([type])"), "Gefällt dir die App?"));
     expect(weiter().disabled).toBe(false);
     await act(async () => weiter().click()); // questions -> display
