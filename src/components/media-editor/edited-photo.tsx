@@ -7,10 +7,10 @@ import {
   drawAsImage,
   matchFont,
 } from "@shopify/react-native-skia";
-import { File, Paths } from "expo-file-system";
 import { Platform } from "react-native";
 
 import { OverlayDrawing, type MediaOverlay, type OverlayFonts } from "@/components/media-editor/overlay";
+import { writeTempJpeg } from "@/lib/localFiles";
 import { fromPhotoEdits, type CanvasSize, type PhotoEdits } from "@/lib/photoEdits";
 import { STORY_FILTERS } from "@/lib/storyFilters";
 
@@ -89,8 +89,5 @@ export async function renderEditedPhoto(
     { width: Math.round(size.width * scale), height: Math.round(size.height * scale) },
   );
   if (snapshot === null) throw new Error("Bild konnte nicht erzeugt werden.");
-  const file = new File(Paths.cache, `edited-${photo.key}-${Date.now()}.jpg`);
-  file.create({ overwrite: true });
-  file.write(snapshot.encodeToBytes(ImageFormat.JPEG, EXPORT_JPEG_QUALITY));
-  return file.uri;
+  return writeTempJpeg(snapshot.encodeToBytes(ImageFormat.JPEG, EXPORT_JPEG_QUALITY), `edited-${photo.key}-${Date.now()}.jpg`);
 }

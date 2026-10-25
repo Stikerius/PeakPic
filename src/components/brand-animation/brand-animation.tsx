@@ -1,6 +1,6 @@
 import { useIsFocused } from "expo-router";
 import { useEffect, useMemo, useState, type ReactNode } from "react";
-import { AccessibilityInfo, AppState, StyleSheet } from "react-native";
+import { AccessibilityInfo, AppState, Platform, StyleSheet } from "react-native";
 import Animated, {
   Easing,
   ReduceMotion,
@@ -113,6 +113,17 @@ function wipeRect(vb: readonly [number, number, number, number], wipe: number, r
  * a still image. If the device can't keep up, it steps down to lighter levels (fewer sparks and
  * waves, no shine, wider dots) without changing the course of the animation.
  */
+/**
+ * Height of the software keyboard. The browser has none (Reanimated warns there), so the web
+ * build uses a constant 0; the choice is fixed per platform, the hook order never changes.
+ */
+const useKeyboardHeight: () => { height: SharedValue<number> } =
+  Platform.OS === "web"
+    ? function useNoKeyboard() {
+        return { height: useSharedValue(0) };
+      }
+    : useAnimatedKeyboard;
+
 export function BrandAnimation({ config, scheme, background, width, height, logoSize, logoCenterY }: BrandAnimationProps) {
   // Checked again before drawing; anything wrong falls back to the built-in logo / standard.
   const spec: LogoSpec = useMemo(() => {
@@ -204,7 +215,7 @@ export function BrandAnimation({ config, scheme, background, width, height, logo
   const vb = spec.viewBox;
 
   // Keyboard open: the whole animation dims, the loop keeps running.
-  const keyboard = useAnimatedKeyboard();
+  const keyboard = useKeyboardHeight();
   const rootStyle = useAnimatedStyle(() => ({
     opacity: interpolate(keyboard.height.get(), [0, 120], [1, KEYBOARD_OPACITY], "clamp"),
   }));

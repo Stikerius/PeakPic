@@ -21,6 +21,18 @@ Probe lief in einer Kopie im Scratchpad. Das Repository enthält nur dieses Doku
 - Die vorgegebene Sicherheitsarchitektur (a–f) ist umsetzbar. Abweichungen und Ergänzungen stehen
   unten.
 
+## Entscheidung (nach Phase 7)
+
+- **Weg C**: die echte App als Web-Build für alle Nutzerfunktionen; Verwaltung nur auf den
+  Dashboard-Seiten (Zwei-Faktor).
+- **Einbettung** im Dashboard, mit der freigegebenen `frame-src`-Ausnahme für genau den Ursprung
+  der Web-App (Phase 9).
+- **Skia bei Bedarf** (CanvasKit erst beim Öffnen des Foto-Editors, `'wasm-unsafe-eval'` nur in der
+  CSP der Web-App). Der Story-Ring ist im Web ein SVG (gleiches Aussehen, ohne CanvasKit).
+- **Port 8088** für die Web-App.
+- **Genau eine Nachricht mit Daten** von der Web-App ans Dashboard: `{type: "account", username}`
+  (Phase 9).
+
 ## Die drei Wege
 
 | | A: Web-Build der App | B: Nachbau in React DOM | C: Mischform (Empfehlung) |
@@ -185,7 +197,7 @@ Für Kamera und Mikrofon (nur Kamera wird gebraucht) eine `Permissions-Policy`. 
 | 9 | Dashboard-Seite „App-Ansicht“ (Rahmen 360/390/430/frei, Hoch/Quer), Seitenleiste mit Schnellaktionen und Meldungszähler, `postMessage` (2 Nachrichten), Ankündigungen (Datenmodell, Server, Dashboard-Reiter, App-Karte, Profil-Tab), Nutzungsereignisse, Tests | gross |
 | 10 | Sicherheitsprüfung mit Nachweisen (CSP vorher/nachher, Sandbox, Nachrichtentests, Admin-Funktion mit Web-Sitzung abgelehnt, keine Tokens in URLs/Logs, grep, `frame-ancestors`), Barrierefreiheit, Leistung (Sichtbarkeit: Animationen und Realtime pausieren), Dokumentation, Testcheckliste | mittel |
 
-## Offene Fragen (deine Entscheidung)
+## Offene Fragen aus Phase 7 (beantwortet, siehe „Entscheidung“)
 
 1. **Weg:** A, B oder C? Empfehlung: **C**.
 2. **Einbettung oder neuer Tab?** Empfehlung: **Einbettung**. Sie braucht die Freigabe einer
@@ -204,3 +216,94 @@ Für Kamera und Mikrofon (nur Kamera wird gebraucht) eine `Permissions-Policy`. 
    „eigenes Login in der App-Ansicht“. Bitte bestätigen.
 6. **Spätere Domain:** Dashboard und Web-App unter derselben Hauptdomain (Speicher-
    partitionierung, siehe b)?
+
+## Phase 8: die App im Browser
+
+### Befehle und Ports
+
+| Was | Befehl | Port |
+|---|---|---|
+| Expo-Dev-Server für Expo Go (unverändert) | `npx expo start` | 8081 |
+| Web-App bauen (nach `dist-web/`, mit Prüfung) | `npm run web:build` | – |
+| Web-App ausliefern | `npm run web:serve` | 8088 |
+| Dashboard (Entwicklung) | `cd admin-web && npm run dev` | 5174 |
+
+`web:build` ruft `npx expo export --platform web --output-dir dist-web` auf (Single-Page-App,
+`web.output: "single"` in `app.json`), kopiert `canvaskit.wasm` dazu und prüft danach: keine
+geheimen Schlüssel im Bundle und im Quellcode (`service_role`, JWTs mit dieser Rolle,
+`sb_secret_…`), keine Inline-Skripte, -Stile oder -Handler in `index.html`. Ein Fund bricht den Build
+ab. Im Bundle stehen nur die öffentliche Projekt-URL und der Publishable Key aus `.env`.
+
+`web:serve` (`scripts/serve-web.mjs`, ohne Adminrechte, ohne globales Paket) bindet nur an
+localhost (IPv4 und IPv6), beantwortet nur GET und HEAD, liefert nur Dateien aus `dist-web/`
+(kein `..`, keine versteckten Dateien, Symlinks geprüft), jeden App-Pfad mit `index.html`,
+komprimiert mit gzip und protokolliert nur Methode, Pfad ohne Query und Status. Einstellungen per
+Umgebung: `EXPO_PUBLIC_SUPABASE_URL` (aus `.env`), `WEB_APP_FRAME_ANCESTORS` (Standard
+`http://localhost:5174 http://127.0.0.1:5174`), `WEB_APP_PORT` (Standard 8088).
+
+### Header (auch für späteres Hosting übernehmen)
+
+Alle Werte stehen in `shared/webBuild.ts` (getestet in `src/lib/__tests__/webBuild.test.ts`).
+
+| Header | Wert |
+|---|---|
+| Content-Security-Policy | `default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self' 'sha256-47DEQpj8HBSa+/TImW+5JCeuQeRkm5NMpJWZG3hSuFU='; img-src 'self' data: blob: https://<projekt>.supabase.co; media-src 'self' blob:; connect-src 'self' https://<projekt>.supabase.co wss://<projekt>.supabase.co blob: data:; font-src 'self'; worker-src 'self'; manifest-src 'self'; object-src 'none'; base-uri 'none'; form-action 'self'; frame-src 'none'; frame-ancestors <Dashboard-Ursprung>` |
+| X-Content-Type-Options | `nosniff` |
+| Referrer-Policy | `no-referrer` |
+| Cross-Origin-Opener-Policy | `same-origin` |
+| Cross-Origin-Resource-Policy | `same-origin` |
+| Permissions-Policy | `camera=(self), microphone=(), geolocation=(), payment=(), usb=(), interest-cohort=()` |
+| Cache-Control | `_expo/static/*` und `assets/*`: ein Jahr, `immutable`; alles andere `no-cache` |
+
+- `frame-ancestors` muss ein **HTTP-Header** sein (in `<meta>` wirkt er nicht).
+- Der Hash erlaubt nur ein **leeres** `<style>`-Element (react-native-web füllt es über das CSSOM).
+  Der frühere Inline-Reset steht in `public/web-reset.css`, die Vorlage ist `public/index.html`.
+- Die Icon-Schrift registriert die App im Web über das CSSOM (`src/lib/webFonts.web.ts`), weil
+  expo-font sie sonst als Inline-Style einfügen würde.
+- `connect-src blob: data:` braucht der Upload: Bilder sind im Browser blob:- oder data:-URLs.
+- Später mit HTTPS zusätzlich `Strict-Transport-Security`. Die Kamera geht nur in einem sicheren
+  Kontext (HTTPS oder localhost).
+
+### Plattformweichen (iOS und Android unverändert)
+
+| Datei | Web | Native |
+|---|---|---|
+| `src/components/web-dialog-host.web.tsx` | `Alert.alert` und Aktionsmenüs als Dialog (react-native-web hat dafür nur eine leere Funktion) | `web-dialog-host.tsx`: nichts |
+| `src/lib/localFiles.web.ts` | Bilder lesen per `fetch`, schreiben als blob:-URL | `localFiles.ts`: expo-file-system wie bisher |
+| `src/lib/chatBackground.web.ts` | Chat-Hintergrund im Browser-Speicher (data:-URL, max. 1080 px) | `chatBackground.ts` unverändert |
+| `src/components/stories/story-ring.web.tsx` | Ring als SVG | Skia wie bisher |
+| `src/components/media-editor/skia-gate.web.tsx` | lädt CanvasKit vor dem Editor | `skia-gate.tsx`: zeigt den Editor direkt |
+| `src/hooks/use-web-keys.web.ts` | Pfeiltasten, Leertaste, Escape im Story-Viewer | `use-web-keys.ts`: nichts |
+| `src/hooks/use-context-menu.web.ts` | Rechtsklick auf eine Chat-Nachricht öffnet das Menü | `use-context-menu.ts`: nichts |
+| `src/lib/webFonts.web.ts` | Icon-Schrift über das CSSOM | `webFonts.ts`: nichts |
+| `Platform.OS`-Weichen | `theme.tsx` (kein `Appearance.setColorScheme`), `settings.tsx` (kein App-Icon), `camera-permission-prompt.tsx` (Hinweis auf die Browser-Einstellungen), `brand-animation.tsx` (keine Tastaturhöhe) | unverändert |
+| `src/lib/pressState.ts` | Hover-Zustand für `Button` und `ListItem` | nie gesetzt (kein Hover auf iOS) |
+
+### Lücken
+
+| Funktion | iOS | Web | Grund |
+|---|---|---|---|
+| App-Icon wählen | Einstellungen → App-Icon | ausgeblendet | Ein Browser hat kein Homescreen-Icon der App |
+| Kamera | Kamera der App | Kamera per Browser-Erlaubnis, sonst Dateiauswahl | Nur in sicherem Kontext; eingebettet zusätzlich `allow="camera"` |
+| „Einstellungen öffnen“ bei verweigertem Zugriff | öffnet die iOS-Einstellungen | Hinweis auf die Website-Einstellungen | Browser haben keine solche Schnittstelle |
+| Chat-Hintergrund | Datei auf dem Gerät, bis 1600 px | im Browser-Speicher, bis 1080 px, ca. 1,5 MB | Browser-Speicher ist klein; nie hochgeladen |
+| Haptik | leichte Vibration beim Doppeltippen | nichts | Browser ohne Haptik |
+| Bildschirm wach halten (Training) | ja | Screen Wake Lock, wo der Browser es kann | Browser-Funktion |
+| Tastatur-Ausweichen der Logo-Animation | dimmt bei offener Tastatur | nichts | keine Bildschirmtastatur |
+| Wischgesten (Story, Chat) | Finger | Maus ziehen; dazu Pfeiltasten, Escape, Rechtsklick | Bedienung mit Maus und Tastatur |
+| Fotobearbeitung | sofort | lädt beim ersten Öffnen CanvasKit (2,9 MB gzip) | Skia läuft im Browser als WebAssembly |
+
+### Smoke-Tests (von Hand, mit dem eigenen Konto)
+
+1. `npm run web:build`, dann `npm run web:serve`, im Browser `http://localhost:8088`.
+2. **Anmelden** mit E-Mail oder Benutzername; Hell und Dunkel über Einstellungen → Darstellung.
+3. **Beitrag**: Kamera-Knopf → „Aus Galerie wählen“ → Bild vom Rechner, im Editor Filter und
+   Text, veröffentlichen. Erscheint im Feed und auf dem iPhone.
+4. **Story**: erstellen; im Viewer Pfeiltasten, Leertaste (Pause), Escape.
+5. **Chat**: Nachricht senden; Rechtsklick auf eine Nachricht (Menü), Antworten, Reaktion,
+   „Für mich löschen“ (Dialog bestätigen), Hintergrund wählen und zurücksetzen.
+6. **Profil**: Tabs wechseln, Profil bearbeiten.
+7. **Plan und Training**: Plan anlegen, Training starten, Satz eintragen, beenden.
+8. **Umfrage**: Karte im Feed, teilnehmen, danach unter Einstellungen → Umfragen ansehen.
+9. Nur mit der Tastatur: Tab-Reihenfolge, sichtbarer Fokusring, Enter oder Leertaste auf Knöpfen.
+10. Browser-Konsole: keine Meldung „Content Security Policy“.

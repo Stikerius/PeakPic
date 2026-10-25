@@ -31,6 +31,7 @@ import { MentionPicker } from "@/components/media-editor/mention-picker";
 import type { MediaOverlay } from "@/components/media-editor/overlay";
 import { sameEdits, toPhotoEdits, type PhotoEdits } from "@/lib/photoEdits";
 import { TextOverlayEditor, type TextOverlayValue } from "@/components/media-editor/text-overlay-editor";
+import { SkiaGate } from "@/components/media-editor/skia-gate";
 import { fontSize, onPhoto, photoTextColors, radius, spacing } from "@/constants/theme";
 import { describeError } from "@/lib/errors";
 import { filterTaggable } from "@/lib/inboxRepo";
@@ -149,8 +150,19 @@ function createId(): string {
   return `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 }
 
-/** Filters, text, tags and (for posts) several photos; shared by stories and posts. */
-export function MediaEditor({
+/**
+ * Filters, text, tags and (for posts) several photos; shared by stories and posts. In the browser
+ * Skia (WebAssembly) is loaded first (SkiaGate; on iOS and Android it renders the editor directly).
+ */
+export function MediaEditor(props: MediaEditorProps) {
+  return (
+    <SkiaGate>
+      <MediaEditorScreen {...props} />
+    </SkiaGate>
+  );
+}
+
+function MediaEditorScreen({
   variant,
   initialUris = [],
   initialPhotos = [],

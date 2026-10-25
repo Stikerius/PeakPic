@@ -24,6 +24,7 @@ import { StoryActivitySheet } from "@/components/stories/story-activity-sheet";
 import { Avatar } from "@/components/ui/avatar";
 import { useOpenProfile } from "@/hooks/use-open-profile";
 import { useSwipeToDismiss } from "@/hooks/use-swipe-to-dismiss";
+import { useWebKeys } from "@/hooks/use-web-keys";
 import { fontSize, onPhoto, radius, spacing, typography } from "@/constants/theme";
 import { describeError } from "@/lib/errors";
 import { emitAppEvent } from "@/lib/events";
@@ -261,6 +262,12 @@ function StoryViewerScreenContent() {
     else if (groupIndex > 0) slideToGroup(groupIndex - 1);
     else progress.value = 0; // restart the first story
   }
+
+  // Browser: arrows switch stories, Space pauses, Escape closes (no effect on iOS/Android).
+  useWebKeys(
+    { ArrowRight: goNext, ArrowLeft: goPrev, Escape: close, " ": () => setPaused((p) => !p) },
+    !activityOpen && !highlightPickerOpen && !reportOpen,
+  );
 
   // Keep the row aligned with the current person (also if the width changes).
   useEffect(() => {

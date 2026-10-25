@@ -6,6 +6,13 @@
 
 **Design, Logos und Animationen:** Tokens, Stile, Logo-Bibliothek, Upload-Regeln und Hintergrundanimationen stehen in [docs/design.md](docs/design.md).
 
+**App im Browser (App-Ansicht):** Die App läuft auch als Web-App auf eigenem Port, getrennt vom Expo-Dev-Server für Expo Go. Details in [docs/app-ansicht.md](docs/app-ansicht.md).
+
+```bash
+npm run web:build   # baut die Web-App nach dist-web/ und prüft das Bundle (keine geheimen Schlüssel, kein Inline-Code)
+npm run web:serve   # liefert sie mit CSP und Headern auf http://localhost:8088 aus
+```
+
 ---
 
 # Welcome to your Expo app 👋

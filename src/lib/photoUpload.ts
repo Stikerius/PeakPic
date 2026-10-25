@@ -1,7 +1,7 @@
-import { File } from "expo-file-system";
 import { ImageManipulator, SaveFormat } from "expo-image-manipulator";
 
 import { step } from "@/lib/errors";
+import { readFileBytes } from "@/lib/localFiles";
 import { PHOTO_BUCKET, SIGNED_URL_TTL, supabase } from "@/lib/supabase";
 
 /** Longest edge of uploaded photos in px. */
@@ -41,7 +41,7 @@ export async function uploadPhoto(
   const preparedUri = await step("Bild verarbeiten", () => preparePhoto(sourceUri));
   // Pass the Uint8Array itself: File.arrayBuffer() returns `bytes.buffer`, which may be
   // larger than the file if the native side hands out a view into a bigger buffer.
-  const bytes = await step("Bild lesen", () => new File(preparedUri).bytes());
+  const bytes = await step("Bild lesen", () => readFileBytes(preparedUri));
   const path = `${userId}/${kind}/${createFileName()}`;
   await step("Hochladen", async () => {
     const { error } = await supabase.storage

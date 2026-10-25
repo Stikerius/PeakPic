@@ -2,7 +2,7 @@ import Ionicons from "@expo/vector-icons/Ionicons";
 import { router, useFocusEffect } from "expo-router";
 import type { ComponentProps } from "react";
 import { useCallback, useState } from "react";
-import { Alert, Pressable, ScrollView, StyleSheet, Switch, Text, View } from "react-native";
+import { Alert, Platform, Pressable, ScrollView, StyleSheet, Switch, Text, View } from "react-native";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -411,13 +411,18 @@ export default function SettingsScreen() {
           value={preference}
           onChange={setPreference}
         />
-        <View style={styles.separator} />
-        <SettingsRow
-          icon="apps-outline"
-          title="App-Icon"
-          subtitle={appIconLabel ?? "…"}
-          onPress={() => router.push("/app-icon")}
-        />
+        {/* The home screen icon exists only on iOS and Android, not in the browser. */}
+        {Platform.OS !== "web" && (
+          <>
+            <View style={styles.separator} />
+            <SettingsRow
+              icon="apps-outline"
+              title="App-Icon"
+              subtitle={appIconLabel ?? "…"}
+              onPress={() => router.push("/app-icon")}
+            />
+          </>
+        )}
         <View style={styles.separator} />
         <SettingsRow
           icon="information-circle-outline"

@@ -3,6 +3,7 @@ import type { ComponentProps, ReactNode } from "react";
 import { Pressable, StyleSheet, Text, View } from "react-native";
 
 import { spacing, typography } from "@/constants/theme";
+import { isHovered } from "@/lib/pressState";
 import { makeStyles, useTheme } from "@/lib/theme";
 
 type ListItemProps = {
@@ -68,7 +69,7 @@ export function ListItem({
       accessibilityRole="button"
       accessibilityLabel={accessibilityLabel ?? (subtitle !== undefined ? `${title}, ${subtitle}` : title)}
       accessibilityState={{ disabled }}
-      style={({ pressed }) => [styles.row, pressed && styles.pressed, disabled && styles.disabled]}
+      style={(state) => [styles.row, (state.pressed || (isHovered(state) && !disabled)) && styles.pressed, disabled && styles.disabled]}
     >
       {content}
     </Pressable>

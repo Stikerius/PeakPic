@@ -1,0 +1,20 @@
+/* The react-native-web reset (was an inline <style> in Expo's template; the CSP of the web app
+   forbids inline styles). Full height, the page itself doesn't scroll (ScrollViews do). */
+html,
+body {
+  height: 100%;
+}
+body {
+  overflow: hidden;
+}
+#root {
+  display: flex;
+  height: 100%;
+  flex: 1;
+}
+
+/* Keyboard focus: always clearly visible (system highlight colour, adapts to light and dark). */
+:focus-visible {
+  outline: 3px solid Highlight;
+  outline-offset: 2px;
+}

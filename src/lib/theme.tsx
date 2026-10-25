@@ -1,6 +1,6 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { createContext, use, useEffect, useMemo, useState, type ReactNode } from "react";
-import { Appearance, useColorScheme } from "react-native";
+import { Appearance, Platform, useColorScheme } from "react-native";
 
 import {
   fontSize,
@@ -57,7 +57,8 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
   }, []);
 
   useEffect(() => {
-    Appearance.setColorScheme(preference === "system" ? "unspecified" : preference);
+    // Native only: the browser has no such override (the app's own colours follow the choice).
+    if (Platform.OS !== "web") Appearance.setColorScheme(preference === "system" ? "unspecified" : preference);
   }, [preference]);
 
   function setPreference(next: ThemePreference) {

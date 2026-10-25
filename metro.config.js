@@ -4,7 +4,8 @@ const { getDefaultConfig } = require("expo/metro-config");
 const config = getDefaultConfig(__dirname);
 
 // The admin dashboard (admin-web/) and Edge Functions are separate projects: keep Metro out of
-// them (their own node_modules would otherwise be crawled and could clash with the app's).
-config.resolver.blockList = [/[\/]admin-web[\/].*/, /[\/]supabase[\/]functions[\/].*/];
+// them (their own node_modules would otherwise be crawled and could clash with the app's). The
+// web build output (dist-web/) is not source either.
+config.resolver.blockList = [/[\/]admin-web[\/].*/, /[\/]supabase[\/]functions[\/].*/, /[\/]dist-web[\/].*/];
 
 module.exports = config;

@@ -3,6 +3,7 @@ import type { ComponentProps } from "react";
 import { ActivityIndicator, Pressable, StyleSheet, Text, type StyleProp, type ViewStyle } from "react-native";
 
 import { radius, spacing, typography } from "@/constants/theme";
+import { isHovered } from "@/lib/pressState";
 import { makeStyles, useTheme } from "@/lib/theme";
 
 type ButtonVariant = "primary" | "secondary" | "ghost";
@@ -53,11 +54,12 @@ export function Button({
       onPress={onPress}
       disabled={isDisabled}
       hitSlop={size === "sm" ? SMALL_HIT_SLOP : undefined}
-      style={({ pressed }) => [
+      style={(state) => [
         styles.base,
         size === "sm" && styles.small,
         styles[variant],
-        pressed && styles.pressed,
+        isHovered(state) && !disabled && styles.hovered,
+        state.pressed && styles.pressed,
         disabled && !loading && styles.disabled,
         style,
       ]}
@@ -106,6 +108,10 @@ const useStyles = makeStyles(({ colors }) =>
     },
     ghost: {
       backgroundColor: "transparent",
+    },
+    // Mouse over (web only): slightly darker, like the press feedback but quieter.
+    hovered: {
+      opacity: 0.88,
     },
     pressed: {
       opacity: 0.75,

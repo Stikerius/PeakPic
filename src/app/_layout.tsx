@@ -6,6 +6,7 @@ import { ActivityIndicator, StyleSheet, View } from "react-native";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
 
 import { ReportProvider } from "@/components/moderation/report-provider";
+import { WebDialogHost } from "@/components/web-dialog-host";
 import { navigationThemeFor } from "@/constants/theme";
 import { AccountStatusProvider, useAccountStatus } from "@/lib/accountStatus";
 import { LegalGateProvider, useLegalGate } from "@/lib/legalGate";
@@ -13,9 +14,12 @@ import { OnboardingProvider, useOnboarding } from "@/lib/onboarding";
 import { SessionProvider, useSession } from "@/lib/session";
 import { ThemeProvider, makeStyles, useTheme } from "@/lib/theme";
 import { startUsageTracking } from "@/lib/usage";
+import { registerWebFonts } from "@/lib/webFonts";
 
 // Keep the splash screen up until the stored session has been restored.
 void SplashScreen.preventAutoHideAsync();
+// Browser only: icon font through the CSSOM (strict CSP); nothing on iOS/Android.
+registerWebFonts();
 // Anonymous usage counters: counted on the device, sent in batches (lib/usage.ts).
 startUsageTracking();
 
@@ -54,6 +58,8 @@ function ThemedRoot({ children }: { children: ReactNode }) {
       <NavigationThemeProvider value={navigationThemeFor(scheme)}>
         <StatusBar style={scheme === "dark" ? "light" : "dark"} />
         {children}
+        {/* Web only: Alert.alert and action menus as dialogs (renders nothing on iOS/Android). */}
+        <WebDialogHost />
       </NavigationThemeProvider>
     </GestureHandlerRootView>
   );

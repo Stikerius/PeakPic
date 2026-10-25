@@ -1,11 +1,12 @@
 import Ionicons from "@expo/vector-icons/Ionicons";
-import type { ReactElement } from "react";
+import { useRef, type ReactElement } from "react";
 import { StyleSheet, View } from "react-native";
 import { Gesture, GestureDetector } from "react-native-gesture-handler";
 import Animated, { interpolate, useAnimatedStyle, useSharedValue, withSpring } from "react-native-reanimated";
 import { scheduleOnRN } from "react-native-worklets";
 
 import { radius } from "@/constants/theme";
+import { useContextMenu } from "@/hooks/use-context-menu";
 import { makeStyles, useTheme } from "@/lib/theme";
 
 /** Drag distance (px) that triggers the action, and how far the message follows the finger. */
@@ -40,6 +41,9 @@ export function SwipeableMessage({ mine, pinned, onReply, onTogglePin, onLongPre
   const { colors } = useTheme();
   const styles = useStyles();
   const translateX = useSharedValue(0);
+  // Browser: a right click on the bubble opens the same menu as a long press.
+  const bubbleRef = useRef<View>(null);
+  useContextMenu(bubbleRef, onLongPress);
 
   const pan = Gesture.Pan()
     .activeOffsetX([-15, 15])
@@ -87,7 +91,7 @@ export function SwipeableMessage({ mine, pinned, onReply, onTogglePin, onLongPre
         <Animated.View style={contentStyle}>
           {/* Only as wide as the bubble: a long press beside it belongs to the chat background. */}
           <GestureDetector gesture={longPress}>
-            <View collapsable={false} style={[styles.bubbleSlot, mine ? styles.slotMine : styles.slotTheirs]}>
+            <View ref={bubbleRef} collapsable={false} style={[styles.bubbleSlot, mine ? styles.slotMine : styles.slotTheirs]}>
               {children}
             </View>
           </GestureDetector>
