@@ -6,6 +6,7 @@ import {
   chartRows,
   draftFromServer,
   draftToServer,
+  incompleteQuestions,
   duplicateDraft,
   durationInfo,
   editorReducer,
@@ -93,6 +94,17 @@ describe("editor: state machine", () => {
 });
 
 describe("conversion", () => {
+  it("a new draft saves without its unfinished first question (the server only stores valid ones)", () => {
+    const draft = filled({ questions: emptyDraft().questions });
+    expect(draft.questions).toHaveLength(1);
+    expect(incompleteQuestions(draft)).toBe(1);
+    expect(draftToServer(draft, true).questions).toEqual([]);
+    const done = filled({ questions: [{ ...newQuestion("yes_no"), prompt: "Gefällt dir die App?" }, newQuestion("single")] });
+    expect(incompleteQuestions(done)).toBe(1);
+    expect((draftToServer(done, true).questions as unknown[]).length).toBe(1);
+    // Published surveys send everything: the server refuses instead of silently dropping a question.
+    expect((draftToServer(done).questions as unknown[]).length).toBe(2);
+  });
   it("draft to server and back", () => {
     const draft = filled({
       allowText: true,

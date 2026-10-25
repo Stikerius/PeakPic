@@ -93,8 +93,36 @@ export function questionToServer(q: DraftQuestion): Record<string, unknown> {
   };
 }
 
-/** The draft as admin_survey_save takes it. */
-export function draftToServer(draft: SurveyDraft): Record<string, unknown> {
+/** The problem code of one question (as the server checks it), or null when it is complete. */
+export function questionCode(q: DraftQuestion, allowText: boolean): string | null {
+  const s = questionToServer(q);
+  return questionProblem(
+    {
+      kind: q.kind,
+      prompt: q.prompt,
+      required: q.required,
+      options: s.options as string[] | null,
+      maxChoices: s.max_choices as number | null,
+      scaleMin: s.scale_min as number | null,
+      scaleMax: s.scale_max as number | null,
+      textMax: s.text_max as number | null,
+    },
+    allowText,
+  );
+}
+
+/** How many questions of the draft are not complete yet. */
+export function incompleteQuestions(draft: SurveyDraft): number {
+  return draft.questions.filter((q) => questionCode(q, draft.allowText) !== null).length;
+}
+
+/**
+ * The draft as admin_survey_save takes it. An unpublished draft may hold questions that are not
+ * finished yet (a new draft starts with an empty one): with `onlyComplete` those stay in the editor
+ * and are left out of the save, the server only ever stores valid questions.
+ */
+export function draftToServer(draft: SurveyDraft, onlyComplete = false): Record<string, unknown> {
+  const questions = onlyComplete ? draft.questions.filter((q) => questionCode(q, draft.allowText) === null) : draft.questions;
   return {
     title: draft.title.trim(),
     topic: draft.topic.trim(),
@@ -104,7 +132,7 @@ export function draftToServer(draft: SurveyDraft): Record<string, unknown> {
     allow_text: draft.allowText,
     feed_days: draft.feedDays,
     profile_days: draft.profileDays,
-    questions: draft.questions.map(questionToServer),
+    questions: questions.map(questionToServer),
   };
 }
 
@@ -210,20 +238,7 @@ export function stepProblems(draft: SurveyDraft, step: EditorStep, now: Date, pu
     if (draft.questions.length === 0) problems.push("Mindestens eine Frage.");
     if (draft.questions.length > SURVEY_LIMITS.questions) problems.push("Höchstens 10 Fragen.");
     draft.questions.forEach((q, i) => {
-      const s = questionToServer(q);
-      const code = questionProblem(
-        {
-          kind: q.kind,
-          prompt: q.prompt,
-          required: q.required,
-          options: s.options as string[] | null,
-          maxChoices: s.max_choices as number | null,
-          scaleMin: s.scale_min as number | null,
-          scaleMax: s.scale_max as number | null,
-          textMax: s.text_max as number | null,
-        },
-        draft.allowText,
-      );
+      const code = questionCode(q, draft.allowText);
       if (code !== null) problems.push(`Frage ${i + 1}: ${QUESTION_TEXTS[code] ?? code}.`);
     });
   }

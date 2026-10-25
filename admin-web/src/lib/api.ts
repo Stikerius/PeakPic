@@ -1623,8 +1623,9 @@ export async function fetchSurveyDetail(id: string): Promise<SurveyDetail> {
   };
 }
 
-export async function saveSurvey(id: string | null, draft: SurveyDraft): Promise<string> {
-  return str(await surveyRpc("admin_survey_save", { p_id: id, p_survey: draftToServer(draft) }));
+/** Saves a survey. Unpublished drafts leave unfinished questions out (they stay in the editor). */
+export async function saveSurvey(id: string | null, draft: SurveyDraft, published = false): Promise<string> {
+  return str(await surveyRpc("admin_survey_save", { p_id: id, p_survey: draftToServer(draft, !published) }));
 }
 
 export async function publishSurvey(id: string): Promise<{ startsAt: string; eligible: number }> {

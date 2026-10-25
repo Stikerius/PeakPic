@@ -15,6 +15,7 @@ import {
   editorReducer,
   emptyDraft,
   fromLocalInput,
+  incompleteQuestions,
   stateLabel,
   stepProblems,
   type EditorAction,
@@ -77,7 +78,7 @@ export function SurveyEditorPage({ id: initialId }: { id: string | null }) {
     setBusy(true);
     setError(null);
     try {
-      const saved = await saveSurvey(id, draft);
+      const saved = await saveSurvey(id, draft, published);
       if (id === null) {
         setId(saved);
         // Stays on this page (no new mount): the address now names the draft.
@@ -300,7 +301,19 @@ export function SurveyEditorPage({ id: initialId }: { id: string | null }) {
               type="button"
               className="button"
               disabled={busy || (!dirty && id !== null)}
-              onClick={() => void save().then((saved) => saved !== null && setNotice(published ? "Änderungen gespeichert." : "Entwurf gespeichert."))}
+              onClick={() =>
+                void save().then(
+                  (saved) =>
+                    saved !== null &&
+                    setNotice(
+                      published
+                        ? "Änderungen gespeichert."
+                        : incompleteQuestions(draft) > 0
+                          ? "Entwurf gespeichert. Unfertige Fragen werden erst gespeichert, wenn sie vollständig sind."
+                          : "Entwurf gespeichert.",
+                    ),
+                )
+              }
             >
               {published ? "Änderungen speichern" : "Entwurf speichern"}
             </button>
