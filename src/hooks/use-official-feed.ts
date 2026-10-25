@@ -34,7 +34,11 @@ export function useOfficialFeed() {
       onAppEvent("surveyAnswered", ({ surveyId }) => setFeed((f) => withAnswered(f, surveyId))),
       onAppEvent("surveyItemDismissed", ({ itemId }) => setFeed((f) => withoutItem(f, itemId))),
     ];
-    return () => unsubscribers.forEach((unsubscribe) => unsubscribe());
+    return () => {
+      // A load still under way when the feed closes is dropped.
+      generation.current += 1;
+      unsubscribers.forEach((unsubscribe) => unsubscribe());
+    };
   }, []);
 
   /** Visible for at least a second (it stays where it is until the next load). */

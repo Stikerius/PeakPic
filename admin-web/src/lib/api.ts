@@ -1700,6 +1700,8 @@ export async function signSurveyImages(paths: string[]): Promise<Map<string, str
 export type SurveyResultsDetail = SurveyResults & {
   allowText: boolean;
   cancelKeepAnswers: boolean;
+  /** When the anonymous answers were deleted after the retention period, or null. */
+  answersPurgedAt: string | null;
   resultsItems: { id: string; status: "visible" | "withdrawn"; publishedAt: string; feedUntil: string; profileUntil: string | null }[];
 };
 
@@ -1713,6 +1715,7 @@ export async function fetchSurveyResults(id: string): Promise<SurveyResultsDetai
     state,
     allowText: bool(s.allow_text),
     cancelKeepAnswers: s.cancel_keep_answers === true,
+    answersPurgedAt: typeof s.answers_purged_at === "string" ? s.answers_purged_at : null,
     participants: num(r.participants),
     responses: num(r.responses),
     eligibleStart: n(r.eligible_start),

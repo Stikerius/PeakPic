@@ -23,9 +23,9 @@ export async function prepareSurveyImage(file: File): Promise<PreparedImage> {
   if (!ACCEPTED.includes(file.type)) throw new Error("Nur PNG, JPEG oder WebP (kein SVG).");
   if (file.size > 25 * 1024 * 1024) throw new Error("Die Datei ist zu gross (höchstens 25 MB vor dem Verkleinern).");
   const bitmap = await createImageBitmap(file);
+  const canvas = document.createElement("canvas");
   try {
     const { width, height } = resizeTarget(bitmap.width, bitmap.height);
-    const canvas = document.createElement("canvas");
     canvas.width = width;
     canvas.height = height;
     const context = canvas.getContext("2d");
@@ -40,5 +40,8 @@ export async function prepareSurveyImage(file: File): Promise<PreparedImage> {
     throw new Error("Das Bild bleibt auch verkleinert grösser als 2 MB.");
   } finally {
     bitmap.close();
+    // Frees the pixel memory right away (Safari keeps it until the canvas is collected).
+    canvas.width = 0;
+    canvas.height = 0;
   }
 }

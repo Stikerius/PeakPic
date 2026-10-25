@@ -216,6 +216,9 @@ Drei Texte: **Nutzungsbedingungen** (werden akzeptiert), **Datenschutzerklärung
 - Anonyme Nutzungsstatistik: Reicht „berechtigtes Interesse“ für das Zählen von Bildschirmaufrufen ohne Personenbezug, und braucht es dafür eine Einwilligung (Standard an, abschaltbar)? Supabase führt zusätzlich eigene technische Zugriffsprotokolle (API-Anfragen); deren Inhalt und Aufbewahrung klären.
 - Supabase führt eigene Auth-Protokolle (`auth.audit_log_entries`, mit Nutzer-ID und teils E-Mail). Aufbewahrung und Löschung dort klären.
 - Trainingsdaten (Gewichte, Wiederholungen, Dauer, Trainingshäufigkeit, Streak) können als Gesundheitsdaten beziehungsweise besonders schützenswerte Personendaten gelten (DSGVO Art. 9, DSG Art. 5 lit. c). Klären: Rechtsgrundlage (ausdrückliche Einwilligung nötig, wenn andere die Statistik sehen?), Hinweis in der Datenschutzerklärung, Datenschutz-Folgenabschätzung, und ob die Standardwerte „Nur ich“ für Aktivitäten und Statistik genügen.
+- Umfragen: Rechtsgrundlage (Einwilligung durch die freiwillige Teilnahme oder berechtigtes Interesse); ist die Aufbewahrung der anonymen Antworten von 12 Monaten nach dem Ende angemessen (Funktion `survey_purge_expired_answers`, manueller Lauf in `supabase/maintenance.sql`)? Gelten die Antworten bei sehr kleinen Gruppen oder mit Freitext trotz fehlender Verknüpfung als Personendaten (Wiedererkennbarkeit über Inhalt oder Schreibstil)? Reicht die Mindestzahl von 5 Antworten für Veröffentlichungen?
+- Zitate aus Freitexten in veröffentlichten Auswertungen: Braucht es eine ausdrückliche Zustimmung beim Schreiben („Darf zitiert werden“), und wie werden wörtliche Zitate gelöscht, wenn eine Person das verlangt (sie lässt sich nicht zuordnen)?
+- Unbegrenzt sichtbare Auswertungen im Profil des offiziellen Kontos: Höchstdauer festlegen?
 - Erwähnungen (@username) in Texten anderer bleiben stehen. Weil der Username frei wird, kann er später auf ein neues Konto zeigen.
 
 ## Spätere Phasen

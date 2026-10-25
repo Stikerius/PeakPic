@@ -88,6 +88,17 @@ async function render(page: unknown, props: Record<string, unknown>) {
 }
 
 const text = (c: Element) => c.textContent ?? "";
+/** Controls a screen reader can't name: fields without a label, buttons without text or aria-label. */
+function unnamed(root: Element): string[] {
+  const named = (el: Element) =>
+    (el.getAttribute("aria-label") ?? "").trim() !== "" ||
+    el.hasAttribute("aria-labelledby") ||
+    el.closest("label") !== null ||
+    (el.id !== "" && root.ownerDocument.querySelector(`label[for="${el.id}"]`) !== null);
+  const fields = Array.from(root.querySelectorAll("input, select, textarea")).filter((el) => (el as HTMLInputElement).type !== "hidden" && !named(el));
+  const buttons = Array.from(root.querySelectorAll("button")).filter((b) => (b.textContent ?? "").trim() === "" && !named(b));
+  return [...fields, ...buttons].map((el) => el.outerHTML.slice(0, 120));
+}
 const button = (c: Element, label: string) => Array.from(c.querySelectorAll("button, a")).find((b) => b.textContent?.trim() === label) as HTMLElement | undefined;
 function type(el: Element | null, value: string) {
   if (el === null) throw new Error("no field");
@@ -114,6 +125,7 @@ describe("survey editor", () => {
     const weiter = () => button(container, "Weiter") as HTMLButtonElement;
     expect(weiter().disabled).toBe(true);
     expect(text(container)).toContain("Titel mit 3 bis 120 Zeichen.");
+    expect(unnamed(container)).toEqual([]);
 
     const inputs = container.querySelectorAll("input, textarea");
     await act(async () => type(inputs[0] ?? null, "Wie gefällt dir PeakPic?"));
@@ -126,9 +138,11 @@ describe("survey editor", () => {
     await act(async () => new Promise((r) => setTimeout(r, 0)));
     expect(mockApi.saveSurvey).toHaveBeenCalledTimes(1);
     expect(text(container)).toContain("Bild hinzufügen");
+    expect(unnamed(container)).toEqual([]);
 
     await act(async () => weiter().click()); // media -> questions
     expect(text(container)).toContain("Frage 1");
+    expect(unnamed(container)).toEqual([]);
     // The default question has empty answers: "Weiter" stays off until they are filled in.
     expect(weiter().disabled).toBe(true);
     const kind = container.querySelector(".question select") as HTMLSelectElement;
@@ -143,6 +157,7 @@ describe("survey editor", () => {
     await act(async () => weiter().click()); // display -> preview
     await act(async () => new Promise((r) => setTimeout(r, 0)));
     expect(text(container)).toContain("Karte im Feed");
+    expect(unnamed(container)).toEqual([]);
     expect(text(container)).toContain("Teilnehmen");
     await act(async () => weiter().click()); // preview -> publish
     await act(async () => new Promise((r) => setTimeout(r, 0)));
@@ -150,6 +165,7 @@ describe("survey editor", () => {
     await act(async () => button(container, "Veröffentlichen …")?.click());
     expect(text(document.body)).toContain("Erreicht 42 aktive Konten");
     expect(text(document.body)).toContain("Zwei-Faktor-Code");
+    expect(unnamed(document.body)).toEqual([]);
     await act(async () => root.unmount());
     expect(errors).toEqual([]);
   });
@@ -166,6 +182,7 @@ describe("survey list", () => {
     const { container, root } = await render(SurveysPage, {});
     const rows = container.querySelectorAll("tbody tr");
     expect(rows).toHaveLength(2);
+    expect(unnamed(container)).toEqual([]);
     expect(rows[0]?.textContent).toContain("Fragen gesperrt");
     expect(rows[0]?.textContent).toContain("25 %");
     expect(rows[0]?.textContent).toContain("Verlängern");
@@ -189,6 +206,7 @@ describe("evaluation", () => {
       state: "closed",
       allowText: true,
       cancelKeepAnswers: false,
+      answersPurgedAt: null,
       participants: 4,
       responses: 4,
       eligibleStart: 10,
@@ -208,6 +226,7 @@ describe("evaluation", () => {
     mockApi.hideSurveyText.mockImplementation(() => Promise.resolve());
     const { container, root } = await render(SurveyResultsPage, { id: "s" });
     const all = text(container);
+    expect(unnamed(container)).toEqual([]);
     expect(all).toContain("Weniger als 5 Antworten");
     expect((button(container, "Auswertung veröffentlichen …") as HTMLButtonElement).disabled).toBe(true);
     expect(all).toContain("40 %"); // 4 of 10 at the start

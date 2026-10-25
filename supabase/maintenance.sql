@@ -15,3 +15,9 @@ where public.notification_expires_at(created_at, read_at) <= now();
 --   select cron.schedule('purge-expired-notifications', '15 3 * * *',
 --     $$delete from public.notifications where public.notification_expires_at(created_at, read_at) <= now()$$);
 -- Not set up.
+
+-- Retention of survey answers: deletes the anonymous answers, who took part and the seen/hidden
+-- marks of surveys that ended (or were cancelled with "behalten") more than 12 months ago. The
+-- surveys, their questions, the daily counters and published results stay. Logged in
+-- moderation_actions ('survey_answers_purged'). Returns how much was deleted.
+select public.survey_purge_expired_answers(12);

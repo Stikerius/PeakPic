@@ -51,8 +51,8 @@ export default defineConfig(({ mode }) => {
       port: 5174,
       strictPort: true,
       // The shared brand and survey logic lives next to admin-web (shared/brand, shared/surveys.ts,
-      // also used by the app). Only
-      // the dev server needs this; the build bundles it. The CSP is not affected.
+      // also used by the app). Only the dev server needs this; the build bundles it. The CSP is not
+      // affected.
       fs: { allow: [searchForWorkspaceRoot(process.cwd()), fileURLToPath(new URL("../shared/brand", import.meta.url)), fileURLToPath(new URL("../shared/surveys.ts", import.meta.url))] },
     },
     build: { sourcemap: false },

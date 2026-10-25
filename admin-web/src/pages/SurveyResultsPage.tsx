@@ -75,7 +75,13 @@ export function SurveyResultsPage({ id }: { id: string }) {
           {notice}
         </p>
       )}
-      {few && (
+      {results.answersPurgedAt !== null && (
+        <p className="notice" role="status">
+          Die anonymen Antworten wurden am {formatDateTime(results.answersPurgedAt)} nach Ablauf der Aufbewahrungsfrist gelöscht. Veröffentlichte
+          Auswertungen bleiben unverändert.
+        </p>
+      )}
+      {few && results.answersPurgedAt === null && (
         <p className="notice" role="alert">
           Weniger als {MIN_ANSWERS} Antworten ({results.responses}): Die Zahlen sind kaum aussagekräftig und könnten Rückschlüsse auf einzelne Personen
           erlauben. Veröffentlichen ist erst ab {MIN_ANSWERS} Antworten möglich.

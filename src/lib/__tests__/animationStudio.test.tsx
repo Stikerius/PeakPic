@@ -141,3 +141,45 @@ it("renders and edits without errors", async () => {
   await act(async () => root.unmount());
   expect(errors).toEqual([]);
 }, 30000); // heavy render: generous under parallel load
+
+it("stays usable at the limits: 16 tracks with 12 keyframes each", async () => {
+  // The largest animation the server accepts, built from the standard tracks.
+  const base = brand.migrateV1(brand.BUILTIN_PRESETS[0]!.params);
+  // One dot grid at most: repeat only the other kinds.
+  const repeatable = base.tracks.filter((t) => t.kind !== "dots" && t.kind !== "sparks");
+  const tracks = Array.from({ length: brand.ANIMATION_LIMITS.tracks }, (_, i) => {
+    const track = i < base.tracks.length ? base.tracks[i]! : repeatable[i % repeatable.length]!;
+    const first = track.keyframes[0]!;
+    const keyframes = Array.from({ length: brand.ANIMATION_LIMITS.keyframes }, (_, k) => ({ ...first, t: k / (brand.ANIMATION_LIMITS.keyframes - 1) }));
+    return { ...track, keyframes };
+  });
+  const check = brand.validateAnimationSpec({ ...base, tracks });
+  if (!check.ok) throw new Error(check.error);
+  const container = document.createElement("div");
+  document.body.append(container);
+  const root = createRoot(container);
+  const presets = [{ id: "max", name: "Maximum", kind: "custom" as const, animation: check.spec, params: brand.BUILTIN_PRESETS[0]!.params, usedBy: 0, versions: 0 }];
+  const started = Date.now();
+  await act(async () => {
+    root.render(
+      React.createElement(AppearanceProvider, null,
+        React.createElement(AnimationStudio, { spec: brand.APP_LOGO_SPEC, presets, presetId: "max", onSelect: () => undefined, onSaved: async () => undefined, onDirtyChange: () => undefined }),
+      ),
+    );
+  });
+  const renderMs = Date.now() - started;
+  expect(container.querySelectorAll(".timeline-lane")).toHaveLength(16);
+  expect(container.querySelectorAll(".timeline-lane .keyframe")).toHaveLength(16 * 12);
+  // Keyboard editing on the last lane still answers quickly.
+  const lanes = container.querySelectorAll(".timeline-lane");
+  const last = lanes[lanes.length - 1] as HTMLElement;
+  const editStart = Date.now();
+  await act(async () => fire(last, "keydown", { key: "]" }));
+  await act(async () => fire(last, "keydown", { key: "ArrowUp" }));
+  const editMs = Date.now() - editStart;
+  // Generous bounds (jsdom, parallel tests): they catch an accidental blow-up, not small changes.
+  expect(renderMs).toBeLessThan(8000);
+  expect(editMs).toBeLessThan(3000);
+  await act(async () => root.unmount());
+  expect(errors).toEqual([]);
+}, 30000);

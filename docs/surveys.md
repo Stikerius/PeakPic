@@ -153,6 +153,18 @@ Das Protokoll enthält Titel, Zeiten und Prüfwerte (Hash) von Thema, Fragen und
   Umfrage, Tageszeit.
 - Alles im Bundle (SVG-Diagramme, eigene Komponenten), die CSP bleibt unverändert.
 
+## Aufbewahrung
+
+- Anonyme Antworten (`survey_responses`, `survey_answers`), Teilnahmen (`survey_participation`) und
+  die Gesehen-/Ausgeblendet-Markierungen der Umfragekarte werden **12 Monate nach dem Ende** (bzw.
+  nach einem Abbruch mit „behalten“) gelöscht: `survey_purge_expired_answers(12)`, manueller Lauf
+  über `supabase/maintenance.sql` (später pg_cron möglich). Kein Client darf die Funktion aufrufen.
+- Danach bleiben: die Umfrage mit ihren Fragen, `survey_counters` (Tagessummen ohne Personen) und
+  veröffentlichte Auswertungen (der Snapshot ändert sich nie). `surveys.answers_purged_at` hält den
+  Zeitpunkt fest; die Auswertung im Dashboard zeigt dann einen Hinweis statt Zahlen.
+- Jeder Lauf schreibt je Umfrage `survey_answers_purged` in `moderation_actions` (ohne Inhalte).
+- Abbrechen mit „verwerfen“ löscht dieselben Daten sofort.
+
 ## Bilder
 
 - Privater Bucket `survey-media`, Pfade `survey/{survey_id}/{bereich}-{zufall}.{png|jpg|webp}`.
@@ -223,7 +235,11 @@ Das Protokoll enthält Titel, Zeiten und Prüfwerte (Hash) von Thema, Fragen und
 - Datenbanktest Auswertung (PGlite): Zahlen, Median und NPS, Stunden erst ab der Mindestzahl,
   Veröffentlichen erst nach dem Ende und ab 5 Antworten, Snapshot unveränderlich und unabhängig von
   späteren Antworten, verborgene Texte nicht zitierbar, Moderatoren und Nutzer ohne Zugriff, jeder
-  Aufruf protokolliert.
+  Aufruf protokolliert. Aufbewahrung: erst nach 12 Monaten, nur laufende Umfragen bleiben, Snapshot
+  unverändert, protokolliert, zweiter Lauf ohne Wirkung, weder Admins noch Nutzer können die Funktion
+  aufrufen.
+- Jsdom-Tests prüfen ausserdem, dass jedes Feld und jeder Knopf der Umfrage-Seiten einen Namen für
+  Bildschirmleser hat.
 - `supabase/reset-checks.sql`: Rechte, RLS, keine Personen- und Zeitspalten in den Antworten,
   Bucket privat, keine Schreib-Policies, jede Veröffentlichung protokolliert.
 

@@ -11402,6 +11402,8 @@ create table if not exists public.surveys (
 );
 alter table public.surveys enable row level security;
 revoke all on public.surveys from public, anon, authenticated;
+-- When the anonymous answers were deleted after the retention period (survey_purge_expired_answers).
+alter table public.surveys add column if not exists answers_purged_at timestamptz;
 
 -- Why a question can't be stored (a code), or null. The same rules as questionProblem() in
 -- shared/surveys.ts (a test compares both). The question as JSON with the column names.
@@ -12914,7 +12916,8 @@ begin
   return jsonb_build_object(
     'survey', jsonb_build_object('id', s.id, 'title', s.title, 'state', public.survey_state(s.published_at, s.starts_at, s.ends_at, s.cancelled_at, now()),
                                  'starts_at', s.starts_at, 'ends_at', s.ends_at, 'cancelled_at', s.cancelled_at,
-                                 'cancel_keep_answers', s.cancel_keep_answers, 'allow_text', s.allow_text),
+                                 'cancel_keep_answers', s.cancel_keep_answers, 'allow_text', s.allow_text,
+                                 'answers_purged_at', s.answers_purged_at),
     'participants', participants,
     'responses', responses,
     'eligible_start', s.eligible_count_at_start,
@@ -13190,3 +13193,50 @@ begin
   end loop;
 end;
 $$;
+
+-- =============================================================================
+-- Retention of survey answers (Phase 6)
+-- =============================================================================
+-- The anonymous answers of a survey are kept for 12 months after it ended (or was cancelled
+-- with "behalten"), then deleted together with who took part and the seen/hidden marks of its
+-- card. What stays: the survey with its questions, the daily counters without persons and the
+-- published results (their snapshot never changes). Only for a manual run in the SQL editor
+-- (supabase/maintenance.sql) or later pg_cron; no client may call it. Logged.
+create or replace function public.survey_purge_expired_answers(p_months integer default 12)
+returns jsonb
+language plpgsql security definer set search_path = ''
+as $$
+declare
+  s record;
+  v_surveys integer := 0;
+  v_responses integer := 0;
+  v_participations integer := 0;
+  n integer;
+begin
+  if p_months is null or p_months not between 1 and 120 then
+    raise exception 'invalid_months';
+  end if;
+  for s in
+    select x.id, x.title from public.surveys x
+    where x.answers_purged_at is null and x.published_at is not null
+      and coalesce(x.cancelled_at, x.ends_at) <= now() - make_interval(months => p_months)
+    for update
+  loop
+    delete from public.survey_responses r where r.survey_id = s.id;
+    get diagnostics n = row_count;
+    v_responses := v_responses + n;
+    delete from public.survey_participation p where p.survey_id = s.id;
+    get diagnostics n = row_count;
+    v_participations := v_participations + n;
+    delete from public.survey_item_views v using public.survey_items i
+    where i.id = v.item_id and i.survey_id = s.id and i.kind = 'survey';
+    update public.surveys set answers_purged_at = now() where id = s.id;
+    v_surveys := v_surveys + 1;
+    perform public.log_moderation_action('survey_answers_purged', 'survey', s.id, null, null,
+      format('Aufbewahrungsfrist von %s Monaten abgelaufen', p_months), null,
+      jsonb_build_object('months', p_months));
+  end loop;
+  return jsonb_build_object('surveys', v_surveys, 'responses', v_responses, 'participations', v_participations);
+end;
+$$;
+revoke all on function public.survey_purge_expired_answers(integer) from public, anon, authenticated;
