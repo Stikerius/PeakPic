@@ -12825,3 +12825,368 @@ begin
   end loop;
 end;
 $$;
+
+-- ---------------------------------------------------------------- evaluation and results (admins)
+-- Numbers are only ever computed here, from the anonymous answers. A published summary is a
+-- fixed snapshot that the server builds from the admin's choice (questions, quotes, conclusion),
+-- so it can't contain made-up numbers and never changes afterwards.
+
+-- Statistics of one question: answered, distribution (key, label, count), mean, median, NPS
+-- (scale 0-10), and for free text the answers (random order by their random id, with "hidden").
+create or replace function public.survey_question_stats(p_question uuid, p_with_texts boolean)
+returns jsonb
+language plpgsql stable security definer set search_path = ''
+as $$
+declare
+  q public.survey_questions%rowtype;
+  answered integer;
+  dist jsonb := '[]'::jsonb;
+  v_mean numeric;
+  v_median numeric;
+  v_nps numeric;
+  texts jsonb;
+begin
+  select * into q from public.survey_questions x where x.id = p_question;
+  if not found then
+    return null;
+  end if;
+  select count(*) into answered from public.survey_answers a where a.question_id = q.id;
+  if q.kind = 'single' then
+    select coalesce(jsonb_agg(jsonb_build_object('key', o.idx - 1, 'label', o.label,
+      'count', (select count(*) from public.survey_answers a where a.question_id = q.id and a.value = to_jsonb(o.idx - 1)))
+      order by o.idx), '[]') into dist
+    from jsonb_array_elements_text(q.options) with ordinality o(label, idx);
+  elsif q.kind = 'multiple' then
+    select coalesce(jsonb_agg(jsonb_build_object('key', o.idx - 1, 'label', o.label,
+      'count', (select count(*) from public.survey_answers a where a.question_id = q.id and a.value @> to_jsonb(o.idx - 1)))
+      order by o.idx), '[]') into dist
+    from jsonb_array_elements_text(q.options) with ordinality o(label, idx);
+  elsif q.kind = 'yes_no' then
+    dist := jsonb_build_array(
+      jsonb_build_object('key', 'true', 'label', 'Ja', 'count', (select count(*) from public.survey_answers a where a.question_id = q.id and a.value = 'true'::jsonb)),
+      jsonb_build_object('key', 'false', 'label', 'Nein', 'count', (select count(*) from public.survey_answers a where a.question_id = q.id and a.value = 'false'::jsonb)));
+  elsif q.kind = 'scale' then
+    select coalesce(jsonb_agg(jsonb_build_object('key', v, 'label', v::text,
+      'count', (select count(*) from public.survey_answers a where a.question_id = q.id and a.value = to_jsonb(v)))
+      order by v), '[]') into dist
+    from generate_series(q.scale_min, q.scale_max) v;
+    select avg((a.value #>> '{}')::numeric), percentile_cont(0.5) within group (order by (a.value #>> '{}')::numeric)
+    into v_mean, v_median
+    from public.survey_answers a where a.question_id = q.id;
+    if q.scale_min = 0 and q.scale_max = 10 and answered > 0 then
+      select round(((count(*) filter (where (a.value #>> '{}')::numeric >= 9))
+                   - (count(*) filter (where (a.value #>> '{}')::numeric <= 6))) * 100.0 / count(*), 1)
+      into v_nps from public.survey_answers a where a.question_id = q.id;
+    end if;
+  elsif q.kind = 'text' and p_with_texts then
+    select coalesce(jsonb_agg(jsonb_build_object('response_id', a.response_id, 'text', a.value #>> '{}', 'hidden', a.hidden)
+                              order by a.response_id), '[]')
+    into texts from public.survey_answers a where a.question_id = q.id;
+  end if;
+  return jsonb_build_object(
+    'question_id', q.id, 'position', q.position, 'kind', q.kind, 'prompt', q.prompt, 'required', q.required,
+    'answered', answered, 'distribution', dist, 'mean', round(v_mean, 2), 'median', v_median, 'nps', v_nps,
+    'texts', texts
+  );
+end;
+$$;
+
+-- The whole evaluation of a survey (internal; admin_survey_results adds the checks and the log).
+-- No single answers except free text (for hiding and choosing quotes), no times of people:
+-- participations per day, and per hour only from 20 participations on.
+create or replace function public.survey_results_json(p_survey uuid)
+returns jsonb
+language plpgsql stable security definer set search_path = ''
+as $$
+declare
+  s public.surveys%rowtype;
+  item uuid;
+  participants integer;
+  responses integer;
+begin
+  select * into s from public.surveys x where x.id = p_survey;
+  if not found then
+    return null;
+  end if;
+  select i.id into item from public.survey_items i where i.survey_id = p_survey and i.kind = 'survey';
+  select count(*) into participants from public.survey_participation p where p.survey_id = p_survey;
+  select count(*) into responses from public.survey_responses r where r.survey_id = p_survey;
+  return jsonb_build_object(
+    'survey', jsonb_build_object('id', s.id, 'title', s.title, 'state', public.survey_state(s.published_at, s.starts_at, s.ends_at, s.cancelled_at, now()),
+                                 'starts_at', s.starts_at, 'ends_at', s.ends_at, 'cancelled_at', s.cancelled_at,
+                                 'cancel_keep_answers', s.cancel_keep_answers, 'allow_text', s.allow_text),
+    'participants', participants,
+    'responses', responses,
+    'eligible_start', s.eligible_count_at_start,
+    'eligible_close', s.eligible_count_at_close,
+    'eligible_now', public.survey_eligible_count(),
+    'started', coalesce((select sum(c.count) from public.survey_counters c where c.survey_id = p_survey and c.event = 'started'), 0),
+    'opened', coalesce((select sum(c.count) from public.survey_counters c where c.survey_id = p_survey and c.event = 'card_opened'), 0),
+    'dismissed', coalesce((select sum(c.count) from public.survey_counters c where c.survey_id = p_survey and c.event = 'dismissed'), 0),
+    'reach', (select count(*) from public.survey_item_views v where v.item_id = item and v.first_seen_at is not null),
+    'per_day', coalesce((select jsonb_agg(jsonb_build_object('day', d.day, 'count', d.n) order by d.day)
+                         from (select r.submitted_day as day, count(*) as n from public.survey_responses r
+                               where r.survey_id = p_survey group by r.submitted_day) d), '[]'::jsonb),
+    'hours', case when participants >= 20 then (
+      select jsonb_agg(coalesce((select count(*) from public.survey_participation p
+                                 where p.survey_id = p_survey
+                                   and extract(hour from p.submitted_at at time zone 'Europe/Zurich') = h), 0) order by h)
+      from generate_series(0, 23) h) end,
+    'questions', coalesce((select jsonb_agg(public.survey_question_stats(q.id, true) order by q.position)
+                           from public.survey_questions q where q.survey_id = p_survey), '[]'::jsonb),
+    'min_answers', 5,
+    'results_items', coalesce((select jsonb_agg(jsonb_build_object('id', i.id, 'status', i.status, 'published_at', i.published_at,
+                                                                   'feed_until', i.feed_until, 'profile_until', i.profile_until)
+                                                order by i.published_at)
+                               from public.survey_items i where i.survey_id = p_survey and i.kind = 'results'), '[]'::jsonb)
+  );
+end;
+$$;
+
+-- The evaluation for the dashboard (also as an interim result while running). Looking at it
+-- (free texts included) is logged.
+create or replace function public.admin_survey_results(p_survey_id uuid)
+returns jsonb
+language plpgsql security definer set search_path = ''
+as $$
+declare
+  result jsonb;
+begin
+  perform public.require_admin();
+  result := public.survey_results_json(p_survey_id);
+  if result is null then
+    raise exception 'survey_not_found';
+  end if;
+  perform public.log_moderation_action('survey_results_view', 'survey', p_survey_id, null, null, 'Umfrage-Auswertung angesehen', null,
+    jsonb_build_object('responses', result -> 'responses'));
+  return result;
+end;
+$$;
+
+-- Hides (or shows again) one free text answer in the evaluation; the answer itself stays.
+create or replace function public.admin_survey_text_hide(p_response_id uuid, p_question_id uuid, p_hidden boolean)
+returns void
+language plpgsql security definer set search_path = ''
+as $$
+declare
+  survey uuid;
+begin
+  perform public.require_admin();
+  select q.survey_id into survey from public.survey_questions q where q.id = p_question_id and q.kind = 'text';
+  if survey is null then
+    raise exception 'answer_not_found';
+  end if;
+  update public.survey_answers set hidden = coalesce(p_hidden, true)
+  where response_id = p_response_id and question_id = p_question_id;
+  if not found then
+    raise exception 'answer_not_found';
+  end if;
+  perform public.log_moderation_action('survey_text_hide', 'survey', survey, null, null,
+    case when coalesce(p_hidden, true) then 'Freitext verborgen' else 'Freitext wieder angezeigt' end, null,
+    jsonb_build_object('question_id', p_question_id));
+end;
+$$;
+
+-- The snapshot of a results post in the format of the app (ResultsSnapshot in shared/surveys.ts),
+-- built here from the choice: {questions: [question ids in order], quotes: {question id: [response
+-- ids]}, conclusion, show_rate}. Quotes must be visible free text answers of that question.
+create or replace function public.survey_build_snapshot(p_survey uuid, p_options jsonb)
+returns jsonb
+language plpgsql stable security definer set search_path = ''
+as $$
+declare
+  s public.surveys%rowtype;
+  conclusion text := btrim(coalesce(p_options ->> 'conclusion', ''));
+  qid text;
+  stats jsonb;
+  quotes jsonb;
+  questions jsonb := '[]'::jsonb;
+  answered numeric;
+  responses integer;
+  rate numeric;
+begin
+  select * into s from public.surveys x where x.id = p_survey;
+  if not found then
+    raise exception 'survey_not_found';
+  end if;
+  if p_options is null or jsonb_typeof(p_options) <> 'object' or jsonb_typeof(p_options -> 'questions') is distinct from 'array'
+     or jsonb_array_length(p_options -> 'questions') not between 1 and 10 then
+    raise exception 'invalid_selection';
+  end if;
+  if char_length(conclusion) not between 1 and 600 then
+    raise exception 'invalid_conclusion';
+  end if;
+  select count(*) into responses from public.survey_responses r where r.survey_id = p_survey;
+  if responses < 5 then
+    raise exception 'too_few_answers';
+  end if;
+  for qid in select x.value from jsonb_array_elements_text(p_options -> 'questions') x loop
+    if not exists (select 1 from public.survey_questions q where q.id::text = qid and q.survey_id = p_survey) then
+      raise exception 'invalid_selection';
+    end if;
+    stats := public.survey_question_stats(qid::uuid, false);
+    answered := (stats ->> 'answered')::numeric;
+    quotes := '[]'::jsonb;
+    if jsonb_typeof(p_options -> 'quotes' -> qid) = 'array' then
+      if jsonb_array_length(p_options -> 'quotes' -> qid) > 20 then
+        raise exception 'invalid_selection';
+      end if;
+      if exists (select 1 from jsonb_array_elements_text(p_options -> 'quotes' -> qid) r
+                 where not exists (select 1 from public.survey_answers a
+                                   where a.question_id::text = qid and a.response_id::text = r.value and not a.hidden)) then
+        raise exception 'invalid_quote';
+      end if;
+      select coalesce(jsonb_agg(a.value order by a.response_id), '[]') into quotes
+      from public.survey_answers a
+      where a.question_id::text = qid and a.response_id::text in (select r.value from jsonb_array_elements_text(p_options -> 'quotes' -> qid) r);
+    end if;
+    questions := questions || jsonb_build_array(jsonb_build_object(
+      'prompt', stats ->> 'prompt',
+      'kind', stats ->> 'kind',
+      'answered', answered,
+      'options', coalesce((select jsonb_agg(jsonb_build_object(
+        'label', d ->> 'label', 'count', (d ->> 'count')::numeric,
+        'percent', case when answered > 0 then round((d ->> 'count')::numeric * 100 / answered, 1) else 0 end))
+        from jsonb_array_elements(stats -> 'distribution') d), '[]'::jsonb),
+      'mean', stats -> 'mean',
+      'median', stats -> 'median',
+      'nps', stats -> 'nps',
+      'quotes', quotes
+    ));
+  end loop;
+  rate := case when coalesce(s.eligible_count_at_start, 0) > 0
+    then round(least(1, (select count(*) from public.survey_participation p where p.survey_id = p_survey)::numeric / s.eligible_count_at_start), 3) end;
+  return jsonb_build_object(
+    'version', 1,
+    'title', s.title,
+    'conclusion', conclusion,
+    'participants', responses,
+    'participationRate', case when coalesce((p_options ->> 'show_rate')::boolean, false) then rate end,
+    'closedAt', coalesce(s.cancelled_at, case when s.ends_at <= now() then s.ends_at end),
+    'questions', questions,
+    'media', public.survey_media_json(p_survey, 'results')
+  );
+end;
+$$;
+
+-- What the results post would show (nothing is stored).
+create or replace function public.admin_results_preview(p_survey_id uuid, p_options jsonb)
+returns jsonb
+language plpgsql stable security definer set search_path = ''
+as $$
+begin
+  perform public.require_admin();
+  return public.survey_build_snapshot(p_survey_id, p_options);
+end;
+$$;
+
+-- Publishes results: only for an ended survey (or one cancelled with its answers kept), at least
+-- 5 answers, the confirmation word. The snapshot is stored once and never changes; feed and
+-- profile time from now. Logged with a hash of the snapshot.
+create or replace function public.admin_results_publish(p_survey_id uuid, p_options jsonb, p_feed_days integer, p_profile_days integer, p_confirm text)
+returns uuid
+language plpgsql security definer set search_path = ''
+as $$
+declare
+  s public.surveys%rowtype;
+  state text;
+  snapshot jsonb;
+  saved uuid;
+begin
+  perform public.require_admin();
+  if p_confirm is distinct from 'VERÖFFENTLICHEN' then
+    raise exception 'confirmation_required';
+  end if;
+  if public.official_user_id() is null then
+    raise exception 'official_account_missing';
+  end if;
+  select * into s from public.surveys x where x.id = p_survey_id for update;
+  if not found then
+    raise exception 'survey_not_found';
+  end if;
+  state := public.survey_state(s.published_at, s.starts_at, s.ends_at, s.cancelled_at, now());
+  if not (state = 'closed' or (state = 'cancelled' and s.cancel_keep_answers)) then
+    raise exception 'survey_not_finished';
+  end if;
+  if p_feed_days is null or p_feed_days not between 1 and 90 or (p_profile_days is not null and p_profile_days not between 1 and 3650) then
+    raise exception 'invalid_display';
+  end if;
+  snapshot := public.survey_build_snapshot(p_survey_id, p_options);
+  insert into public.survey_items (kind, survey_id, published_at, feed_until, profile_until, snapshot, created_by)
+  values ('results', p_survey_id, now(), now() + make_interval(days => p_feed_days),
+          case when p_profile_days is null then null else now() + make_interval(days => p_profile_days) end, snapshot, auth.uid())
+  returning id into saved;
+  perform public.log_moderation_action('survey_results_publish', 'survey_item', saved, null, null, 'Umfrage-Auswertung veröffentlicht', null,
+    jsonb_build_object('survey_id', p_survey_id, 'snapshot_hash', encode(sha256(convert_to(snapshot::text, 'UTF8')), 'hex'),
+                       'questions', jsonb_array_length(snapshot -> 'questions'), 'participants', snapshot -> 'participants'));
+  return saved;
+end;
+$$;
+
+-- Overview "Umfragen und Aktivität" for a period (days in Europe/Zurich): cards, participations
+-- per day, per survey (state, answers, rate, reach) and per hour from 30 participations on.
+create or replace function public.admin_survey_stats(p_from date, p_to date)
+returns jsonb
+language plpgsql stable security definer set search_path = ''
+as $$
+declare
+  counter jsonb;
+  participations integer;
+begin
+  perform public.require_admin();
+  if p_from is null or p_to is null or p_to < p_from or p_to - p_from > 3660 then
+    raise exception 'invalid_period';
+  end if;
+  select coalesce(jsonb_object_agg(c.event, c.total), '{}'::jsonb) into counter
+  from (select event, sum(count) as total from public.survey_counters where day between p_from and p_to group by event) c;
+  select count(*) into participations from public.survey_participation p
+  where (p.submitted_at at time zone 'Europe/Zurich')::date between p_from and p_to;
+  return jsonb_build_object(
+    'active', (select count(*) from public.surveys s where public.survey_state(s.published_at, s.starts_at, s.ends_at, s.cancelled_at, now()) = 'active'),
+    'participations', participations,
+    'running_participants', (select count(*) from public.survey_participation p join public.surveys s on s.id = p.survey_id
+                             where public.survey_state(s.published_at, s.starts_at, s.ends_at, s.cancelled_at, now()) = 'active'),
+    'running_eligible', (select coalesce(sum(s.eligible_count_at_start), 0) from public.surveys s
+                         where public.survey_state(s.published_at, s.starts_at, s.ends_at, s.cancelled_at, now()) = 'active'),
+    'counters', counter,
+    'per_day', coalesce((select jsonb_agg(jsonb_build_object('day', d.day, 'count', d.n) order by d.day)
+                         from (select r.submitted_day as day, count(*) as n from public.survey_responses r
+                               where r.submitted_day between p_from and p_to group by r.submitted_day) d), '[]'::jsonb),
+    'hours', case when participations >= 30 then (
+      select jsonb_agg(coalesce((select count(*) from public.survey_participation p
+                                 where (p.submitted_at at time zone 'Europe/Zurich')::date between p_from and p_to
+                                   and extract(hour from p.submitted_at at time zone 'Europe/Zurich') = h), 0) order by h)
+      from generate_series(0, 23) h) end,
+    'surveys', coalesce((select jsonb_agg(jsonb_build_object(
+        'id', s.id, 'title', s.title,
+        'state', public.survey_state(s.published_at, s.starts_at, s.ends_at, s.cancelled_at, now()),
+        'ends_at', s.ends_at,
+        'responses', (select count(*) from public.survey_responses r where r.survey_id = s.id),
+        'eligible_start', s.eligible_count_at_start,
+        'reach', (select count(*) from public.survey_item_views v join public.survey_items i on i.id = v.item_id
+                  where i.survey_id = s.id and i.kind = 'survey' and v.first_seen_at is not null)
+      ) order by s.published_at desc)
+      from public.surveys s where s.published_at is not null), '[]'::jsonb)
+  );
+end;
+$$;
+
+do $$
+declare
+  f text;
+begin
+  foreach f in array array[
+    'public.survey_question_stats(uuid, boolean)', 'public.survey_results_json(uuid)', 'public.survey_build_snapshot(uuid, jsonb)'
+  ] loop
+    execute format('revoke all on function %s from public, anon, authenticated', f);
+  end loop;
+  foreach f in array array[
+    'public.admin_survey_results(uuid)', 'public.admin_survey_text_hide(uuid, uuid, boolean)',
+    'public.admin_results_preview(uuid, jsonb)', 'public.admin_results_publish(uuid, jsonb, integer, integer, text)',
+    'public.admin_survey_stats(date, date)'
+  ] loop
+    execute format('revoke all on function %s from public, anon', f);
+    execute format('grant execute on function %s to authenticated', f);
+  end loop;
+end;
+$$;

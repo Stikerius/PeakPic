@@ -28,6 +28,8 @@ const errors: unknown[] = [];
 const original = console.error;
 beforeAll(() => {
   (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+  // The preview autoplays; a frozen frame clock keeps the playhead at 0 so the keyframe positions don't depend on machine speed.
+  window.requestAnimationFrame = () => 0;
   window.matchMedia = ((q: string) => ({ matches: false, media: q, addEventListener: () => undefined, removeEventListener: () => undefined })) as unknown as typeof window.matchMedia;
   console.error = (...args: unknown[]) => {
     errors.push(args);
@@ -138,4 +140,4 @@ it("renders and edits without errors", async () => {
   await act(async () => new Promise((r) => setTimeout(r, 200)));
   await act(async () => root.unmount());
   expect(errors).toEqual([]);
-});
+}, 30000); // heavy render: generous under parallel load

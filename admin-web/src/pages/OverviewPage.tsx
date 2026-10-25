@@ -4,6 +4,7 @@ import { fetchLegalOverview, fetchOverview, type Overview } from "../lib/api";
 import { useAuth } from "../lib/auth";
 import { formatAge, formatDateTime } from "../lib/format";
 import { href } from "../lib/router";
+import { SurveyActivity } from "../components/surveys/SurveyActivity";
 import { PageHeader } from "../components/ui";
 
 export function OverviewPage() {
@@ -56,8 +57,15 @@ export function OverviewPage() {
               </span>
             </a>
           )}
+          {isAdmin && (
+            <a className="card" href={href({ page: "usage" })}>
+              <span className="card-value">→</span>
+              <span className="card-label">Nutzungsüberblick (Bereiche, Ereignisse, Verlauf)</span>
+            </a>
+          )}
         </div>
       )}
+      {isAdmin && <SurveyActivity />}
     </>
   );
 }

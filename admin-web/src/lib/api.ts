@@ -1,5 +1,7 @@
 import { asArray, asRecord, bool, isRecord, num, str, strOrNull, type Json } from "./decode";
 import { DEFAULT_COLOR_SET, parseColorSet, type ColorSet } from "./brand";
+import { draftFromServer, draftToServer, type SurveyDraft, type SurveyListRow, type SurveyResults } from "./surveyAdmin";
+import { parseSnapshot, type ResultsSnapshot, type SurveyState } from "./surveys";
 import type { ColorTarget } from "./colorLibrary";
 import { toCounts, type Candidate, type Counts, type JobStatus, type ResetMode } from "./reset";
 import { SIGNED_URL_SECONDS, supabase } from "./supabase";
@@ -1470,4 +1472,326 @@ export async function deleteColorSet(id: string): Promise<void> {
 
 export async function activateColorSet(id: string, targets: ColorTarget[]): Promise<void> {
   await colorRpc("admin_color_activate", { p_color_id: id, p_targets: targets });
+}
+
+// ------------------------------------------------------------------ surveys (admins)
+
+const SURVEY_ERRORS: Record<string, string> = {
+  not_authorized: "Nur Admins mit Zwei-Faktor-Anmeldung.",
+  invalid_survey: "Die Umfrage ist ungültig.",
+  invalid_title: "Titel mit 3 bis 120 Zeichen.",
+  invalid_topic: "„Worum geht es“ mit 10 bis 1000 Zeichen.",
+  invalid_dates: "Start und Ende passen nicht (mindestens 1 Stunde, höchstens 90 Tage, Ende in der Zukunft).",
+  invalid_display: "Anzeige im Feed 1 bis 90 Tage, im Profil 1 bis 3650 Tage oder unbegrenzt.",
+  invalid_questions: "1 bis 10 Fragen.",
+  invalid_prompt: "Jede Frage braucht 3 bis 200 Zeichen.",
+  invalid_options: "Antworten: 2 bis 10, je 1 bis 80 Zeichen.",
+  duplicate_options: "Eine Frage hat zwei gleiche Antworten.",
+  invalid_max_choices: "Die Anzahl ankreuzbarer Antworten passt nicht.",
+  invalid_scale: "Bitte eine gültige Skala wählen.",
+  invalid_text_max: "Freitext: 20 bis 280 Zeichen.",
+  text_not_allowed: "Freitext ist für diese Umfrage nicht erlaubt.",
+  no_questions: "Mindestens eine Frage.",
+  survey_not_found: "Umfrage nicht gefunden.",
+  survey_finished: "Die Umfrage ist beendet oder abgebrochen.",
+  survey_locked: "Es gibt schon Antworten: Fragen und Texte sind gesperrt. Möglich sind Verlängern, Abbrechen und Bilder.",
+  confirmation_required: "Bitte die Veröffentlichung bestätigen.",
+  totp_required: "Bitte den Zwei-Faktor-Code erneut eingeben (höchstens 5 Minuten alt).",
+  official_account_missing: "Kein offizielles Konto festgelegt (supabase/official-account-setup.sql).",
+  already_published: "Die Umfrage ist schon veröffentlicht.",
+  start_in_past: "Der Start liegt in der Vergangenheit.",
+  invalid_reason: "Bitte eine Begründung mit 10 bis 500 Zeichen.",
+  invalid_choice: "Bitte wählen, ob die Antworten bleiben.",
+  not_a_draft: "Nur Entwürfe lassen sich löschen.",
+  item_not_found: "Beitrag nicht gefunden.",
+  invalid_media: "Ungültiges Bild oder Logo.",
+  too_many_images: "Höchstens 4 Bilder.",
+  too_many_logos: "Höchstens 3 Logos.",
+  logo_not_found: "Logo nicht gefunden.",
+  media_not_found: "Medium nicht gefunden.",
+  media_in_use: "Das Medium gehört zu einer veröffentlichten Auswertung.",
+  invalid_selection: "Bitte 1 bis 10 Fragen auswählen.",
+  invalid_conclusion: "Bitte ein Fazit mit 1 bis 600 Zeichen.",
+  invalid_quote: "Ein gewähltes Zitat ist nicht (mehr) verfügbar.",
+  too_few_answers: "Mindestens 5 Antworten nötig.",
+  survey_not_finished: "Erst nach dem Ende der Umfrage (oder nach Abbruch mit behaltenen Antworten).",
+  answer_not_found: "Antwort nicht gefunden.",
+  invalid_period: "Ungültiger Zeitraum.",
+  invalid_alt_text: "Bitte einen Alternativtext mit 1 bis 140 Zeichen.",
+  invalid_type: "Nur PNG, JPEG oder WebP (kein SVG).",
+  too_large: "Das Bild ist grösser als 2 MB.",
+  too_many_pixels: "Das Bild ist grösser als 1600 Pixel.",
+};
+
+async function surveyRpc(name: string, args: Record<string, unknown>): Promise<unknown> {
+  const { data, error } = await supabase.rpc(name, args);
+  if (error) throw new ApiError(SURVEY_ERRORS[error.message] ?? ERROR_TEXTS[error.message] ?? `Fehler: ${error.message}`);
+  return data;
+}
+
+function surveyState(value: unknown): SurveyState {
+  return value === "scheduled" || value === "active" || value === "closed" || value === "cancelled" ? value : "draft";
+}
+
+export async function fetchSurveyList(): Promise<SurveyListRow[]> {
+  return asArray(await surveyRpc("admin_survey_list", {})).map((value) => {
+    const r = asRecord(value);
+    return {
+      id: str(r.id),
+      title: str(r.title),
+      state: surveyState(r.state),
+      startsAt: strOrNull(r.starts_at),
+      endsAt: strOrNull(r.ends_at),
+      responses: num(r.responses),
+      participants: num(r.participants),
+      eligibleStart: typeof r.eligible_count_at_start === "number" ? r.eligible_count_at_start : null,
+      locked: bool(r.locked),
+    };
+  });
+}
+
+export type SurveyMediaRow = {
+  id: string;
+  scope: "survey" | "results";
+  kind: "image" | "logo";
+  path: string | null;
+  logoId: string | null;
+  logo: unknown;
+  altText: string;
+  position: number;
+  width: number | null;
+  height: number | null;
+};
+
+export type SurveyDetail = {
+  draft: SurveyDraft;
+  state: SurveyState;
+  locked: boolean;
+  participants: number;
+  responses: number;
+  eligibleNow: number;
+  eligibleStart: number | null;
+  publishedAt: string | null;
+  startsAt: string | null;
+  endsAt: string | null;
+  cancelKeepAnswers: boolean;
+  media: SurveyMediaRow[];
+  items: { id: string; kind: "survey" | "results"; status: "visible" | "withdrawn"; publishedAt: string; feedUntil: string; profileUntil: string | null }[];
+};
+
+export async function fetchSurveyDetail(id: string): Promise<SurveyDetail> {
+  const r = asRecord(await surveyRpc("admin_survey_get", { p_survey_id: id }));
+  if (typeof r.id !== "string") throw new ApiError("Umfrage nicht gefunden.");
+  return {
+    draft: draftFromServer(r),
+    state: surveyState(r.state),
+    locked: bool(r.locked),
+    participants: num(r.participants),
+    responses: num(r.responses),
+    eligibleNow: num(r.eligible_now),
+    eligibleStart: typeof r.eligible_count_at_start === "number" ? r.eligible_count_at_start : null,
+    publishedAt: strOrNull(r.published_at),
+    startsAt: strOrNull(r.starts_at),
+    endsAt: strOrNull(r.ends_at),
+    cancelKeepAnswers: r.cancel_keep_answers === true,
+    media: asArray(r.media).map((m) => {
+      const x = asRecord(m);
+      return {
+        id: str(x.id),
+        scope: x.scope === "results" ? "results" : "survey",
+        kind: x.kind === "logo" ? "logo" : "image",
+        path: strOrNull(x.path),
+        logoId: strOrNull(x.logo_id),
+        logo: x.logo,
+        altText: str(x.alt_text),
+        position: num(x.position),
+        width: typeof x.width === "number" ? x.width : null,
+        height: typeof x.height === "number" ? x.height : null,
+      };
+    }),
+    items: asArray(r.items).map((i) => {
+      const x = asRecord(i);
+      return {
+        id: str(x.id),
+        kind: x.kind === "results" ? "results" : "survey",
+        status: x.status === "withdrawn" ? "withdrawn" : "visible",
+        publishedAt: str(x.published_at),
+        feedUntil: str(x.feed_until),
+        profileUntil: strOrNull(x.profile_until),
+      };
+    }),
+  };
+}
+
+export async function saveSurvey(id: string | null, draft: SurveyDraft): Promise<string> {
+  return str(await surveyRpc("admin_survey_save", { p_id: id, p_survey: draftToServer(draft) }));
+}
+
+export async function publishSurvey(id: string): Promise<{ startsAt: string; eligible: number }> {
+  const r = asRecord(await surveyRpc("admin_survey_publish", { p_id: id, p_confirm: "VERÖFFENTLICHEN" }));
+  return { startsAt: str(r.starts_at), eligible: num(r.eligible) };
+}
+
+export async function extendSurvey(id: string, endsAt: string): Promise<void> {
+  await surveyRpc("admin_survey_extend", { p_id: id, p_ends_at: endsAt });
+}
+
+export async function cancelSurvey(id: string, reason: string, keepAnswers: boolean): Promise<void> {
+  await surveyRpc("admin_survey_cancel", { p_id: id, p_reason: reason, p_keep_answers: keepAnswers });
+}
+
+export async function deleteSurvey(id: string): Promise<void> {
+  await surveyRpc("admin_survey_delete", { p_id: id });
+}
+
+export async function withdrawItem(itemId: string): Promise<void> {
+  await surveyRpc("admin_item_withdraw", { p_item_id: itemId });
+}
+
+export async function addSurveyLogo(surveyId: string, scope: "survey" | "results", logoId: string, altText: string): Promise<void> {
+  await surveyRpc("admin_survey_media_add_logo", { p_survey_id: surveyId, p_scope: scope, p_logo_id: logoId, p_alt_text: altText });
+}
+
+export async function updateSurveyMedia(mediaId: string, altText: string, position: number): Promise<void> {
+  await surveyRpc("admin_survey_media_update", { p_media_id: mediaId, p_alt_text: altText, p_position: position });
+}
+
+async function surveyMediaFunction(body: Record<string, unknown>): Promise<Record<string, unknown>> {
+  const { data, error } = await supabase.functions.invoke("survey_media_upload", { body });
+  if (error) {
+    const context: unknown = (error as { context?: unknown }).context;
+    let code = "";
+    let message = "";
+    if (context instanceof Response) {
+      try {
+        const r = asRecord(await context.json());
+        code = str(r.error);
+        message = str(r.message);
+      } catch {
+        // No JSON body.
+      }
+    }
+    throw new ApiError(message !== "" ? message : (SURVEY_ERRORS[code] ?? "Die Edge Function survey_media_upload ist nicht erreichbar (nicht deployt?)."));
+  }
+  return asRecord(data);
+}
+
+/** Uploads an image already scaled and re-encoded in the browser (base64 of the bytes). */
+export async function uploadSurveyImage(surveyId: string, scope: "survey" | "results", altText: string, data: string): Promise<void> {
+  await surveyMediaFunction({ action: "upload", survey_id: surveyId, scope, alt_text: altText, data });
+}
+
+/** Removes an image (file and row) or a logo (row). */
+export async function removeSurveyMedia(mediaId: string): Promise<void> {
+  await surveyMediaFunction({ action: "delete", media_id: mediaId });
+}
+
+/** Short-lived links to survey images (admins may read every one, for previews). */
+export async function signSurveyImages(paths: string[]): Promise<Map<string, string>> {
+  const urls = new Map<string, string>();
+  if (paths.length === 0) return urls;
+  const { data, error } = await supabase.storage.from("survey-media").createSignedUrls(paths, SIGNED_URL_SECONDS);
+  if (error) return urls;
+  for (const entry of data) if (entry.path !== null && entry.signedUrl) urls.set(entry.path, entry.signedUrl);
+  return urls;
+}
+
+export type SurveyResultsDetail = SurveyResults & {
+  allowText: boolean;
+  cancelKeepAnswers: boolean;
+  resultsItems: { id: string; status: "visible" | "withdrawn"; publishedAt: string; feedUntil: string; profileUntil: string | null }[];
+};
+
+export async function fetchSurveyResults(id: string): Promise<SurveyResultsDetail> {
+  const r = asRecord(await surveyRpc("admin_survey_results", { p_survey_id: id }));
+  const s = asRecord(r.survey);
+  const n = (v: unknown) => (typeof v === "number" ? v : typeof v === "string" && v !== "" && Number.isFinite(Number(v)) ? Number(v) : null);
+  const state = surveyState(s.state);
+  return {
+    title: str(s.title),
+    state,
+    allowText: bool(s.allow_text),
+    cancelKeepAnswers: s.cancel_keep_answers === true,
+    participants: num(r.participants),
+    responses: num(r.responses),
+    eligibleStart: n(r.eligible_start),
+    eligibleEnd: state === "active" || state === "scheduled" ? n(r.eligible_now) : n(r.eligible_close),
+    started: n(r.started) ?? 0,
+    reach: num(r.reach),
+    perDay: asArray(r.per_day).map((d) => ({ day: str(asRecord(d).day), count: num(asRecord(d).count) })),
+    hours: Array.isArray(r.hours) ? r.hours.map((h) => (typeof h === "number" ? h : 0)) : null,
+    questions: asArray(r.questions).map((q) => {
+      const x = asRecord(q);
+      return {
+        questionId: str(x.question_id),
+        kind: (typeof x.kind === "string" ? x.kind : "single") as SurveyResults["questions"][number]["kind"],
+        prompt: str(x.prompt),
+        answered: num(x.answered),
+        distribution: asArray(x.distribution).map((d) => ({ label: str(asRecord(d).label), count: num(asRecord(d).count) })),
+        mean: n(x.mean),
+        median: n(x.median),
+        nps: n(x.nps),
+        texts: asArray(x.texts).map((t) => ({ responseId: str(asRecord(t).response_id), text: str(asRecord(t).text), hidden: bool(asRecord(t).hidden) })),
+      };
+    }),
+    resultsItems: asArray(r.results_items).map((i) => {
+      const x = asRecord(i);
+      return { id: str(x.id), status: x.status === "withdrawn" ? "withdrawn" : "visible", publishedAt: str(x.published_at), feedUntil: str(x.feed_until), profileUntil: strOrNull(x.profile_until) };
+    }),
+  };
+}
+
+export async function hideSurveyText(responseId: string, questionId: string, hidden: boolean): Promise<void> {
+  await surveyRpc("admin_survey_text_hide", { p_response_id: responseId, p_question_id: questionId, p_hidden: hidden });
+}
+
+export type ResultsOptions = { questions: string[]; quotes: Record<string, string[]>; conclusion: string; show_rate: boolean };
+
+export async function previewResults(id: string, options: ResultsOptions): Promise<ResultsSnapshot> {
+  const snapshot = parseSnapshot(await surveyRpc("admin_results_preview", { p_survey_id: id, p_options: options }));
+  if (snapshot === null) throw new ApiError("Die Vorschau konnte nicht gelesen werden.");
+  return snapshot;
+}
+
+export async function publishResults(id: string, options: ResultsOptions, feedDays: number, profileDays: number | null): Promise<string> {
+  return str(
+    await surveyRpc("admin_results_publish", { p_survey_id: id, p_options: options, p_feed_days: feedDays, p_profile_days: profileDays, p_confirm: "VERÖFFENTLICHEN" }),
+  );
+}
+
+export type SurveyStats = {
+  active: number;
+  participations: number;
+  runningParticipants: number;
+  runningEligible: number;
+  counters: Record<string, number>;
+  perDay: { day: string; count: number }[];
+  hours: number[] | null;
+  surveys: { id: string; title: string; state: SurveyState; endsAt: string | null; responses: number; eligibleStart: number | null; reach: number }[];
+};
+
+export async function fetchSurveyStats(from: string, to: string): Promise<SurveyStats> {
+  const r = asRecord(await surveyRpc("admin_survey_stats", { p_from: from, p_to: to }));
+  const counters = asRecord(r.counters);
+  return {
+    active: num(r.active),
+    participations: num(r.participations),
+    runningParticipants: num(r.running_participants),
+    runningEligible: num(r.running_eligible),
+    counters: Object.fromEntries(Object.entries(counters).map(([k, v]) => [k, Number(v) || 0])),
+    perDay: asArray(r.per_day).map((d) => ({ day: str(asRecord(d).day), count: num(asRecord(d).count) })),
+    hours: Array.isArray(r.hours) ? r.hours.map((h) => (typeof h === "number" ? h : 0)) : null,
+    surveys: asArray(r.surveys).map((s) => {
+      const x = asRecord(s);
+      return {
+        id: str(x.id),
+        title: str(x.title),
+        state: surveyState(x.state),
+        endsAt: strOrNull(x.ends_at),
+        responses: num(x.responses),
+        eligibleStart: typeof x.eligible_start === "number" ? x.eligible_start : null,
+        reach: num(x.reach),
+      };
+    }),
+  };
 }

@@ -136,14 +136,15 @@ select * from (
   where n.nspname = 'public'
     and (p.proname like 'admin_survey_%' or p.proname in ('admin_item_withdraw', 'submit_survey_response', 'get_official_feed_items',
          'mark_item_seen', 'dismiss_item', 'get_active_surveys', 'get_official_profile', 'get_official_profile_items',
-         'get_survey', 'track_survey_event', 'survey_media_readable', 'get_official_item', 'get_official_account_id'))
+         'get_survey', 'track_survey_event', 'survey_media_readable', 'get_official_item', 'get_official_account_id',
+         'admin_results_preview', 'admin_results_publish'))
 
   union all
   select 'survey functions: not for anon: ' || p.proname, not has_function_privilege('anon', p.oid, 'execute')
   from pg_proc p join pg_namespace n on n.oid = p.pronamespace
   where n.nspname = 'public'
     and (p.proname like 'admin_survey_%' or p.proname in ('submit_survey_response', 'get_official_feed_items', 'get_survey',
-         'track_survey_event', 'mark_item_seen', 'dismiss_item'))
+         'track_survey_event', 'mark_item_seen', 'dismiss_item', 'admin_results_preview', 'admin_results_publish'))
 
   union all
   select 'survey internals not for clients: ' || p.proname,
@@ -151,7 +152,8 @@ select * from (
   from pg_proc p join pg_namespace n on n.oid = p.pronamespace
   where n.nspname = 'public'
     and p.proname in ('survey_answers_problem', 'survey_store_questions', 'survey_item_json', 'survey_item_visible',
-                      'survey_bump', 'survey_eligible_count', 'official_visible_to_me', 'official_user_id', 'survey_log_summary')
+                      'survey_bump', 'survey_eligible_count', 'official_visible_to_me', 'official_user_id', 'survey_log_summary',
+                      'survey_question_stats', 'survey_results_json', 'survey_build_snapshot')
 
   union all
   select 'bucket survey-media private', exists (select 1 from storage.buckets b where b.id = 'survey-media' and not b.public)

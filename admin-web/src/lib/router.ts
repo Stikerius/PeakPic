@@ -2,7 +2,8 @@ import { useEffect, useState } from "react";
 
 /**
  * Tiny hash router: #/queue, #/reports/<id>, #/users, #/users/<id>, #/audit, #/legal,
- * #/legal/<id>, #/pending, #/usage, #/reset, #/reset/<id>, #/mail, #/mail/<id>, #/logos, #/design, #/ (overview).
+ * #/legal/<id>, #/pending, #/usage, #/reset, #/reset/<id>, #/mail, #/mail/<id>, #/logos, #/design, #/surveys,
+ * #/surveys/new, #/surveys/<id>, #/surveys/<id>/results, #/ (overview).
  */
 export type Route =
   | { page: "overview" }
@@ -20,13 +21,16 @@ export type Route =
   | { page: "mail" }
   | { page: "mail-campaign"; id: string }
   | { page: "logos" }
-  | { page: "design" };
+  | { page: "design" }
+  | { page: "surveys" }
+  | { page: "survey-edit"; id: string | null }
+  | { page: "survey-results"; id: string };
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 export function parseRoute(hash: string): Route {
   const parts = hash.replace(/^#\/?/, "").split("/").filter((p) => p !== "");
-  const [first, second] = parts;
+  const [first, second, third] = parts;
   if (first === "queue") return { page: "queue" };
   if (first === "reports" && second !== undefined && UUID.test(second)) return { page: "report", id: second };
   if (first === "users" && second !== undefined && UUID.test(second)) return { page: "user", id: second };
@@ -42,6 +46,11 @@ export function parseRoute(hash: string): Route {
   if (first === "mail") return { page: "mail" };
   if (first === "logos") return { page: "logos" };
   if (first === "design") return { page: "design" };
+  if (first === "surveys" && second === "new") return { page: "survey-edit", id: null };
+  if (first === "surveys" && second !== undefined && UUID.test(second)) {
+    return third === "results" ? { page: "survey-results", id: second } : { page: "survey-edit", id: second };
+  }
+  if (first === "surveys") return { page: "surveys" };
   return { page: "overview" };
 }
 
@@ -77,6 +86,12 @@ export function href(route: Route): string {
       return `#/mail/${route.id}`;
     case "logos":
       return "#/logos";
+    case "surveys":
+      return "#/surveys";
+    case "survey-edit":
+      return route.id === null ? "#/surveys/new" : `#/surveys/${route.id}`;
+    case "survey-results":
+      return `#/surveys/${route.id}/results`;
     case "design":
       return "#/design";
   }

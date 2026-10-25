@@ -14,7 +14,8 @@ export type IconName =
   | "mail"
   | "audit"
   | "logos"
-  | "design";
+  | "design"
+  | "surveys";
 
 export type NavGroup = "Moderation" | "Verwaltung" | "Gestaltung";
 
@@ -39,6 +40,7 @@ export const NAV_ITEMS: readonly NavItem[] = [
   { route: { page: "pending" }, label: "Offene Bestätigungen", group: "Verwaltung", icon: "pending", adminOnly: true, pages: ["pending"], keywords: "rechtstexte erinnerung" },
   { route: { page: "reset" }, label: "Bereinigung", group: "Verwaltung", icon: "reset", adminOnly: true, pages: ["reset", "reset-job"], keywords: "neustart löschen daten" },
   { route: { page: "mail" }, label: "Mitteilungen", group: "Verwaltung", icon: "mail", adminOnly: true, pages: ["mail", "mail-campaign"], keywords: "e-mail mail senden" },
+  { route: { page: "surveys" }, label: "Umfragen", group: "Verwaltung", icon: "surveys", adminOnly: true, pages: ["surveys", "survey-edit", "survey-results"], keywords: "umfrage feedback auswertung ergebnis offiziell" },
   { route: { page: "audit" }, label: "Audit-Log", group: "Verwaltung", icon: "audit", adminOnly: true, pages: ["audit"], keywords: "protokoll aktionen" },
   { route: { page: "logos" }, label: "Logos", group: "Gestaltung", icon: "logos", adminOnly: true, pages: ["logos"], keywords: "bibliothek svg animation" },
   { route: { page: "design" }, label: "Design", group: "Gestaltung", icon: "design", adminOnly: true, pages: ["design"], keywords: "farbe stil modus hell dunkel" },

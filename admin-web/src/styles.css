@@ -586,3 +586,86 @@ a.card:hover { border-color: var(--text-3); }
   .workbench-top, .workbench-main { grid-template-columns: 1fr; }
   .timeline { grid-template-columns: 170px minmax(0, 1fr); }
 }
+
+/* ------------------------------------------------------------------ surveys */
+.table-wrap { overflow-x: auto; }
+.table-wrap .action-row { flex-wrap: wrap; gap: 4px; }
+.form-grid { display: flex; flex-direction: column; gap: 12px; border: none; padding: 0; margin: 0; max-width: 720px; }
+.form-grid textarea, .media-manager textarea { width: 100%; }
+.step-button { all: unset; cursor: pointer; }
+.step-button:disabled { cursor: default; }
+.step-button:focus-visible { outline: 2px solid var(--accent-text); outline-offset: 2px; border-radius: 999px; }
+.stepper li.current { border-color: var(--text); color: var(--text); font-weight: 600; }
+.stepper li.done { color: var(--text); }
+.problems { margin: 12px 0 0; padding-left: 18px; color: var(--text-2); font-size: 13px; }
+.free-text { border: none; padding: 0; margin: 0 0 12px; display: flex; flex-direction: column; gap: 8px; }
+.question-list { display: flex; flex-direction: column; gap: 12px; }
+.question { margin: 0; display: flex; flex-direction: column; gap: 10px; }
+.question legend { font-weight: 600; padding: 0 4px; }
+.question.dragging { opacity: 0.6; }
+.drag-handle { cursor: grab; color: var(--text-2); padding: 0 4px; user-select: none; }
+.options-editor { display: flex; flex-direction: column; gap: 6px; }
+.option-row { display: flex; gap: 8px; align-items: flex-end; }
+.media-manager { display: flex; flex-direction: column; gap: 12px; }
+.media-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
+.media-item { display: flex; gap: 12px; align-items: flex-end; flex-wrap: wrap; padding: 8px; border: 1px solid var(--border); border-radius: var(--radius); }
+.media-thumb { width: 72px; height: 56px; display: grid; place-items: center; overflow: hidden; border-radius: var(--radius); background: var(--raised); }
+.media-thumb img { width: 100%; height: 100%; object-fit: cover; }
+.media-add { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 12px; }
+.media-add .panel { margin: 0; display: flex; flex-direction: column; gap: 8px; }
+.summary-list { display: grid; grid-template-columns: max-content 1fr; gap: 6px 16px; margin: 0 0 12px; }
+.summary-list div { display: contents; }
+.summary-list dt { color: var(--text-2); }
+.summary-list dd { margin: 0; }
+.text-answers { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.text-answers li { display: flex; justify-content: space-between; gap: 12px; align-items: center; padding: 6px 8px; border-bottom: 1px solid var(--border); }
+.text-answers li.hidden-answer span { color: var(--text-3); text-decoration: line-through; }
+.panel-head { display: flex; justify-content: space-between; align-items: flex-end; gap: 12px; flex-wrap: wrap; margin-bottom: 12px; }
+.panel-head h2 { margin: 0; }
+
+/* App preview (a close picture of the app's survey screens with the dashboard's tokens). */
+.app-previews { display: flex; flex-direction: column; gap: 12px; }
+.app-preview-row { display: flex; gap: 16px; flex-wrap: wrap; }
+.app-phone {
+  width: 320px; min-height: 420px; padding: 16px; display: flex; flex-direction: column; gap: 8px;
+  background: var(--bg); color: var(--text); border: 1px solid var(--border); border-radius: 28px;
+}
+.app-phone.wide { width: 380px; }
+.app-phone p { margin: 0; }
+.app-caption { font-size: 12px; color: var(--text-2); }
+.app-card { display: flex; flex-direction: column; gap: 8px; padding: 14px; border: 1px solid var(--border); border-radius: var(--radius-lg); background: var(--surface); }
+.app-card-head { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.app-badge { align-self: flex-start; font-size: 12px; font-weight: 600; padding: 2px 8px; border-radius: 999px; border: 1px solid var(--border); background: var(--surface); }
+.app-meta { font-size: 13px; color: var(--text-2); }
+.app-title { font-size: 20px; font-weight: 600; line-height: 1.25; }
+.app-strong { font-weight: 600; }
+.app-text { font-size: 15px; line-height: 1.4; display: -webkit-box; -webkit-line-clamp: 4; -webkit-box-orient: vertical; overflow: hidden; }
+.app-media { display: flex; gap: 8px; overflow: hidden; }
+.app-media img { height: 96px; border-radius: var(--radius); object-fit: cover; }
+.app-media-placeholder { width: 120px; height: 96px; border-radius: var(--radius); background: var(--raised); }
+.app-actions { display: flex; gap: 8px; margin-top: auto; }
+.app-button { padding: 8px 14px; border-radius: var(--radius); font-weight: 600; font-size: 14px; }
+.app-button.primary { background: var(--accent); color: var(--on-accent); }
+.app-button.ghost { color: var(--text); }
+.app-progress { display: block; height: 4px; border-radius: 999px; background: var(--raised); overflow: hidden; }
+.app-progress-fill, .app-bar-fill { display: block; height: 100%; background: var(--accent); }
+.app-option { display: block; padding: 10px 12px; border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface); }
+.app-scale { display: flex; flex-wrap: wrap; gap: 6px; }
+.app-scale-item { min-width: 32px; padding: 6px; text-align: center; border: 1px solid var(--border); border-radius: var(--radius); font-variant-numeric: tabular-nums; }
+.app-textarea { display: block; min-height: 72px; padding: 10px; border: 1px solid var(--border); border-radius: var(--radius); color: var(--text-2); }
+.app-result { display: flex; flex-direction: column; gap: 6px; padding: 8px 0; border-bottom: 1px solid var(--border); }
+.app-bar-row { display: flex; flex-direction: column; gap: 4px; }
+.app-bar-label { display: flex; justify-content: space-between; gap: 8px; }
+.app-bar { display: block; height: 10px; border-radius: 4px; background: var(--raised); overflow: hidden; }
+.app-quote { color: var(--text-2); font-style: italic; }
+.app-progress-fill.w0, .app-bar-fill.w0 { width: 0%; }
+.app-progress-fill.w1, .app-bar-fill.w1 { width: 10%; }
+.app-progress-fill.w2, .app-bar-fill.w2 { width: 20%; }
+.app-progress-fill.w3, .app-bar-fill.w3 { width: 30%; }
+.app-progress-fill.w4, .app-bar-fill.w4 { width: 40%; }
+.app-progress-fill.w5, .app-bar-fill.w5 { width: 50%; }
+.app-progress-fill.w6, .app-bar-fill.w6 { width: 60%; }
+.app-progress-fill.w7, .app-bar-fill.w7 { width: 70%; }
+.app-progress-fill.w8, .app-bar-fill.w8 { width: 80%; }
+.app-progress-fill.w9, .app-bar-fill.w9 { width: 90%; }
+.app-progress-fill.w10, .app-bar-fill.w10 { width: 100%; }

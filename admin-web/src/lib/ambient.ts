@@ -13,7 +13,7 @@ export type AmbientVariant =
   | "paper" // Rechtstexte, Offene Bestätigungen
   | "flight" // Mitteilungen
   | "hazard" // Bereinigung
-  | "dots" // Logos, Design: still, so the previews stay in focus
+  | "dots" // Logos, Design, Umfragen-Editor und -Auswertung: still, so the content stays in focus
   | "still"; // Meldungs-Detail: no motion at all for sensitive content
 
 const BY_PAGE: Record<Route["page"], AmbientVariant> = {
@@ -33,6 +33,9 @@ const BY_PAGE: Record<Route["page"], AmbientVariant> = {
   "mail-campaign": "flight",
   logos: "dots",
   design: "dots",
+  surveys: "streams",
+  "survey-edit": "dots",
+  "survey-results": "dots",
 };
 
 export function ambientFor(route: Route): AmbientVariant {

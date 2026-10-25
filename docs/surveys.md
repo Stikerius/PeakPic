@@ -2,8 +2,7 @@
 
 Eine **Umfrage** („Survey“) besteht aus bis zu 10 Fragen. Veröffentlichte Umfragen und ihre
 Auswertungen sind **offizielle Beiträge** des offiziellen Kontos. Dieses Dokument beschreibt das
-Datenmodell und die Server-Regeln (Phase 3). App-Ansichten und Dashboard folgen in eigenen
-Abschnitten.
+Datenmodell, die Server-Regeln, die App und das Dashboard.
 
 ## Offizielles Konto
 
@@ -59,7 +58,7 @@ Konto lesen, aber nur die eigenen Zeilen.
   Antworten bleiben.
 - Restrisiko: Antworten nur eines Tages mit sehr wenigen Teilnahmen könnten über den Tag einer
   Teilnahme zugeordnet werden. Darum zeigt das Dashboard Auswertungen erst ab 5 Antworten ohne
-  Warnung und veröffentlicht sie erst dann (Phase 5).
+  Warnung und veröffentlicht sie erst dann.
 
 ## Status
 
@@ -122,7 +121,37 @@ aus Zählern, sondern aus `survey_participation`. Allgemeine Nutzungszähler: `s
 | `admin_item_withdraw(id)` | zieht einen Beitrag sofort zurück |
 | `admin_survey_media_*` | Logos hinzufügen, Alternativtext und Reihenfolge, entfernen (Medien einer veröffentlichten Auswertung bleiben) |
 
-Das Protokoll enthält Titel, Zeiten und Prüfwerte (Hash) von Thema und Fragen, nie Antworten.
+| `admin_survey_results(id)` | Auswertung (auch Zwischenstand): Teilnahmen, erreichbare Konten bei Start und Ende, begonnen, Reichweite, je Frage Verteilung, Mittelwert, Median, NPS und Freitexte; pro Tag; pro Stunde erst ab 20 Teilnahmen. Jeder Aufruf wird protokolliert (`survey_results_view`) |
+| `admin_survey_text_hide(antwort, frage, verborgen)` | Freitext verbergen oder wieder zeigen (nur für Zitate und Anzeige; die Zahlen bleiben) |
+| `admin_results_preview(id, auswahl)` | baut den Snapshot so, wie er veröffentlicht würde, ohne ihn zu speichern |
+| `admin_results_publish(id, auswahl, feed_tage, profil_tage, 'VERÖFFENTLICHEN')` | nur beendet oder abgebrochen mit „behalten“, mindestens 5 Antworten, Fazit 1–600 Zeichen, Zitate nur sichtbare Freitexte der gewählten Fragen; der Server baut den Snapshot und speichert ihn unveränderlich als neuen Beitrag |
+| `admin_survey_stats(von, bis)` | Übersicht: aktive Umfragen, Teilnahmen, Quoten, Zähler, pro Tag, je Umfrage die Reichweite; Tageszeit erst ab 30 Teilnahmen im Zeitraum |
+
+Das Protokoll enthält Titel, Zeiten und Prüfwerte (Hash) von Thema, Fragen und Fazit, nie Antworten.
+
+## Dashboard
+
+- **Umfragen** (Navigation): Liste mit Suche und Statusfilter (Entwurf, geplant, aktiv, beendet,
+  abgebrochen), Restzeit, Antworten, Teilnahmequote und den Aktionen je Status (Bearbeiten,
+  Duplizieren, Verlängern, Abbrechen mit Begründung und „behalten“/„verwerfen“, Löschen nur für
+  Entwürfe, Auswertung).
+- **Editor** in Schritten: Grunddaten (Titel, Thema, Start, Ende, Dauer), Medien (Bilder werden im
+  Browser verkleinert, Logos aus der Bibliothek, Alternativtext, Reihenfolge), Fragen (alle Typen,
+  Ziehen oder ↑↓, Pflicht, Optionen), Anzeige (oben anheften, Tage im Feed und Profil), Vorschau wie
+  in der App (Karte und Fragen, eine Annäherung) und Veröffentlichen mit Bestätigungswort und
+  Zwei-Faktor-Code. „Weiter“ speichert den Entwurf und bleibt aus, solange Pflichtangaben fehlen.
+  Ab der ersten Antwort sind die Fragen gesperrt (Hinweis im Editor).
+- **Auswertung:** Karten mit Teilnahme-, Abschlussquote und Reichweite, je Frage Diagramm (umschaltbar
+  als Tabelle, gleiche Zahlen), Freitexte mit „Verbergen“, Teilnahmen pro Tag und Tageszeit. Unter 5
+  Antworten eine deutliche Warnung, Veröffentlichen gesperrt. Export als JSON oder CSV nur mit
+  zusammengefassten Zahlen (CSV gegen Formel-Einschleusung abgesichert).
+- **Auswertung veröffentlichen:** Fragen wählen, Zitate einzeln wählen (mit Warnung zur
+  Wiedererkennbarkeit), Fazit, Medien, Anzeigedauer, Vorschau aus dem Server-Snapshot, dann
+  Bestätigung. Veröffentlichte Auswertungen lassen sich zurückziehen.
+- **Übersicht → Umfragen und Aktivität:** Zeitraum 7/30/90 Tage oder alles, aktive Umfragen,
+  Teilnahmen, Quoten, Ausblend-Quote, Aufrufe der Auswertungen, Teilnahmen pro Tag, Tabelle je
+  Umfrage, Tageszeit.
+- Alles im Bundle (SVG-Diagramme, eigene Komponenten), die CSP bleibt unverändert.
 
 ## Bilder
 
@@ -134,8 +163,8 @@ Das Protokoll enthält Titel, Zeiten und Prüfwerte (Hash) von Thema und Fragen,
   SVG), speichert unter zufälligem Pfad, registriert in `survey_media`. Der ursprüngliche Dateiname
   wird weder benutzt noch gespeichert. Nicht registrierte Dateien (älter als 10 Minuten) werden bei
   jedem Aufruf entfernt.
-- Das Dashboard verkleinert und kodiert Bilder vor dem Upload im Browser neu (dabei verschwinden
-  EXIF-Daten), Phase 5.
+- Das Dashboard verkleinert und kodiert Bilder vor dem Upload im Browser neu (Canvas, höchstens
+  1600 Pixel, dabei verschwinden EXIF-Daten).
 
 ## App
 
@@ -186,10 +215,19 @@ Das Protokoll enthält Titel, Zeiten und Prüfwerte (Hash) von Thema und Fragen,
   Uhrzeit, Abbrechen mit „verwerfen“ löscht, Nutzer sehen nur erlaubte Felder und keine E-Mail,
   offizielles Konto nicht anschreibbar und nicht folgbar, Moderatoren und Nutzer verwalten nichts,
   Fragen nach der ersten Antwort gesperrt, Feed-Reihenfolge, Bereinigung, Storage-Leserechte.
+- `src/lib/__tests__/surveyAdmin.test.ts`: Editor-Schritte und Pflichtangaben, Dauer, Entwurf hin und
+  zurück, Duplizieren, Filter, Aktionen je Status, Quoten, Exporte (keine Einzelantworten, CSV ohne
+  Formeln), Veröffentlichungs-Sperre unter 5 Antworten.
+- `src/lib/__tests__/surveyPages.test.tsx` (jsdom): Editor Schritt für Schritt bis zur Bestätigung,
+  Liste mit Aktionen je Status, Auswertung (Tabelle = Diagramm, Mindestzahl, Verbergen).
+- Datenbanktest Auswertung (PGlite): Zahlen, Median und NPS, Stunden erst ab der Mindestzahl,
+  Veröffentlichen erst nach dem Ende und ab 5 Antworten, Snapshot unveränderlich und unabhängig von
+  späteren Antworten, verborgene Texte nicht zitierbar, Moderatoren und Nutzer ohne Zugriff, jeder
+  Aufruf protokolliert.
 - `supabase/reset-checks.sql`: Rechte, RLS, keine Personen- und Zeitspalten in den Antworten,
   Bucket privat, keine Schreib-Policies, jede Veröffentlichung protokolliert.
 
 ## Offene Punkte
 
-- Median der Ausfülldauer: noch nicht erfasst (bräuchte eigene Zähler, Phase 5).
-- Auswertung und ihr Snapshot (`admin_survey_results`, Veröffentlichen einer Auswertung): Phase 5.
+- Median der Ausfülldauer: bewusst nicht erfasst (bräuchte Zeitpunkte je Teilnahme, die die
+  Anonymität schwächen würden); das Dashboard zeigt „–“.

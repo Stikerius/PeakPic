@@ -6,6 +6,9 @@ import { DashboardBrandProvider } from "./lib/dashboardBrand";
 import { useRoute } from "./lib/router";
 import { AuditPage } from "./pages/AuditPage";
 import { DesignPage } from "./pages/DesignPage";
+import { SurveyEditorPage } from "./pages/SurveyEditorPage";
+import { SurveyResultsPage } from "./pages/SurveyResultsPage";
+import { SurveysPage } from "./pages/SurveysPage";
 import { LegalEditPage } from "./pages/LegalEditPage";
 import { LegalPage } from "./pages/LegalPage";
 import { LoginPage } from "./pages/LoginPage";
@@ -60,6 +63,9 @@ export function App() {
         {route.page === "mail-campaign" && isAdmin && <MailPage key={route.id} campaignId={route.id} />}
         {route.page === "logos" && isAdmin && <LogosPage />}
         {route.page === "design" && isAdmin && <DesignPage />}
+        {route.page === "surveys" && isAdmin && <SurveysPage />}
+        {route.page === "survey-edit" && isAdmin && <SurveyEditorPage key={route.id ?? "new"} id={route.id} />}
+        {route.page === "survey-results" && isAdmin && <SurveyResultsPage key={route.id} id={route.id} />}
       </Layout>
     </DashboardBrandProvider>
   );
