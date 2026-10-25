@@ -143,6 +143,9 @@ function RootNavigator() {
         <Stack.Screen name="app-icon" options={{ title: "App-Icon" }} />
         <Stack.Screen name="blocked-accounts" options={{ title: "Blockierte Konten" }} />
         <Stack.Screen name="my-reports" options={{ title: "Meine Meldungen" }} />
+        <Stack.Screen name="surveys" options={{ title: "Umfragen" }} />
+        <Stack.Screen name="results/[itemId]" options={{ title: "Ergebnis", presentation: "modal" }} />
+        <Stack.Screen name="survey/[surveyId]" options={{ headerShown: false, presentation: "fullScreenModal", gestureEnabled: false }} />
         <Stack.Screen
           name="post-create"
           options={{ headerShown: false, presentation: "fullScreenModal", gestureEnabled: false }}

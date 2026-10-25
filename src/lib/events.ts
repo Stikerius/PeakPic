@@ -10,6 +10,10 @@ type AppEvents = {
   chatRead: undefined;
   notificationsSeen: undefined;
   highlightsChanged: undefined;
+  /** Took part in a survey (feed card shows "Teilgenommen", settings badge counts down). */
+  surveyAnswered: { surveyId: string };
+  /** An official card was hidden somewhere (feed, profile). */
+  surveyItemDismissed: { itemId: string };
 };
 
 type Listeners = { [K in keyof AppEvents]: Set<(payload: AppEvents[K]) => void> };
@@ -22,6 +26,8 @@ const listeners: Listeners = {
   chatRead: new Set(),
   notificationsSeen: new Set(),
   highlightsChanged: new Set(),
+  surveyAnswered: new Set(),
+  surveyItemDismissed: new Set(),
 };
 
 export function emitAppEvent<K extends keyof AppEvents>(event: K, payload: AppEvents[K]): void {

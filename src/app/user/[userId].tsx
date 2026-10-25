@@ -4,6 +4,7 @@ import { useEffect, useState, type ReactNode } from "react";
 import { ActivityIndicator, Alert, Pressable, StyleSheet, Text, View } from "react-native";
 
 import { FollowButton } from "@/components/follow-button";
+import { OfficialProfileView } from "@/components/surveys/official-profile";
 import { useReport } from "@/components/moderation/report-provider";
 import { Avatar } from "@/components/ui/avatar";
 import { STORY_RING_INSET, StoryRing } from "@/components/stories/story-ring";
@@ -71,7 +72,34 @@ function Stat({ value, label, icon, onPress }: StatProps) {
   );
 }
 
+/**
+ * A profile: the official account gets its own view (surveys and results, no follower lists,
+ * activities, statistics, plans or chat); everybody else the regular profile.
+ */
 export default function UserProfileScreen() {
+  const { userId } = useLocalSearchParams<{ userId: string }>();
+  const officialId = useOfficialAccountId();
+  const { colors } = useTheme();
+  if (officialId === undefined) {
+    return (
+      <View style={profileLoading.centered}>
+        <ActivityIndicator color={colors.accent} />
+      </View>
+    );
+  }
+  if (officialId === userId) return <OfficialProfileView />;
+  return <RegularProfile />;
+}
+
+const profileLoading = StyleSheet.create({
+  centered: {
+    flex: 1,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+});
+
+function RegularProfile() {
   useTrackScreen("screen_user_profile");
   const { colors } = useTheme();
   const styles = useStyles();
@@ -82,7 +110,7 @@ export default function UserProfileScreen() {
   const blockUser = useBlockUser();
   // The official account: no "Folgen", "Nachricht" or "Blockieren" (the database refuses them too).
   const officialId = useOfficialAccountId();
-  const isOfficial = officialId !== null && officialId === userId;
+  const isOfficial = typeof officialId === "string" && officialId === userId;
 
   const [summary, setSummary] = useState<UserProfileSummary | null | undefined>(undefined);
   const [content, setContent] = useState<Content | null>(null);

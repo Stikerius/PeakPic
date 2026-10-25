@@ -1,6 +1,6 @@
 import Ionicons from "@expo/vector-icons/Ionicons";
 import { router, useNavigation } from "expo-router";
-import { useEffect, useRef } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
   FlatList,
@@ -9,9 +9,11 @@ import {
   StyleSheet,
   Text,
   View,
+  type ViewToken,
 } from "react-native";
 
 import { PostCard } from "@/components/feed/post-card";
+import { OfficialCard } from "@/components/surveys/official-card";
 import { StoryBar } from "@/components/stories/story-bar";
 import { Button } from "@/components/ui/button";
 import { fontSize, radius, spacing } from "@/constants/theme";
@@ -20,9 +22,11 @@ import { useOtherPostActions } from "@/hooks/use-other-post-actions";
 import { usePostActions, useRepostActions } from "@/hooks/use-post-actions";
 import { useSession } from "@/lib/session";
 import { useFeed } from "@/hooks/use-feed";
+import { useOfficialFeed } from "@/hooks/use-official-feed";
+import { useOfficialAccountId } from "@/lib/officialAccount";
+import { mergeFeed, type FeedEntry } from "@/lib/surveyFeed";
 import { refreshStories } from "@/lib/storyStore";
 import { makeStyles, useTheme } from "@/lib/theme";
-import type { FeedPost } from "@/types/social";
 import { useTrackScreen } from "@/lib/usage";
 
 /** The bits of the tab navigator this screen needs; expo-router doesn't export its tab types. */
@@ -36,7 +40,24 @@ export default function FeedScreen() {
   const { colors } = useTheme();
   const styles = useStyles();
   const { posts, status, error, hasMore, refresh, loadMore, toggleLike, likeByDoubleTap, dismissError } = useFeed();
-  const listRef = useRef<FlatList<FeedPost>>(null);
+  const listRef = useRef<FlatList<FeedEntry>>(null);
+  // Surveys and results of the official account, put between the posts by date.
+  const official = useOfficialFeed();
+  const officialId = useOfficialAccountId();
+  const entries = useMemo(() => mergeFeed(posts, official.feed, hasMore), [posts, official.feed, hasMore]);
+  // A card counts as seen after a second on screen (not when scrolling past quickly). FlatList
+  // needs these once; markSeen is stable.
+  const { markSeen } = official;
+  const [viewabilityPairs] = useState(() => [
+    {
+      viewabilityConfig: { itemVisiblePercentThreshold: 60, minimumViewTime: 1000 },
+      onViewableItemsChanged: ({ viewableItems }: { viewableItems: ViewToken<FeedEntry>[] }) => {
+        for (const token of viewableItems) {
+          if (token.isViewable && token.item.type === "official") markSeen(token.item.item);
+        }
+      },
+    },
+  ]);
   const navigation = useNavigation<TabScreenNavigation>();
   const openProfile = useOpenProfile();
   const showPostActions = usePostActions();
@@ -51,8 +72,9 @@ export default function FeedScreen() {
       listRef.current?.scrollToOffset({ offset: 0, animated: true });
       void refresh();
       void refreshStories();
+      void official.reload();
     });
-  }, [navigation, refresh]);
+  }, [navigation, refresh, official]);
 
   if (status === "loading") {
     return (
@@ -72,9 +94,28 @@ export default function FeedScreen() {
       )}
       <FlatList
         ref={listRef}
-        data={posts}
-        keyExtractor={(post) => post.feedKey}
-        renderItem={({ item }) => (
+        data={entries}
+        keyExtractor={(entry) => entry.key}
+        viewabilityConfigCallbackPairs={viewabilityPairs}
+        renderItem={({ item: entry }) => {
+          if (entry.type === "official") {
+            const card = entry.item;
+            return (
+              <OfficialCard
+                item={card}
+                onOpen={() =>
+                  card.kind === "survey"
+                    ? router.push({ pathname: "/survey/[surveyId]", params: { surveyId: card.surveyId } })
+                    : router.push({ pathname: "/results/[itemId]", params: { itemId: card.itemId } })
+                }
+                onOpenProfile={typeof officialId === "string" ? () => router.push({ pathname: "/user/[userId]", params: { userId: officialId } }) : undefined}
+                onLater={card.kind === "survey" && !card.pinUntilAnswered ? () => official.later(card) : undefined}
+                onDismiss={() => official.dismiss(card)}
+              />
+            );
+          }
+          const item = entry.post;
+          return (
           <PostCard
             post={item}
             onToggleLike={(id) => void toggleLike(id)}
@@ -94,7 +135,8 @@ export default function FeedScreen() {
                   : showOtherPostActions
             }
           />
-        )}
+          );
+        }}
         onEndReached={() => {
           if (hasMore) void loadMore();
         }}
@@ -106,6 +148,7 @@ export default function FeedScreen() {
             onRefresh={() => {
               void refresh();
               void refreshStories();
+              void official.reload();
             }}
             tintColor={colors.accent}
           />
@@ -125,7 +168,7 @@ export default function FeedScreen() {
             <Button label="Leute finden" onPress={() => router.push("/search")} />
           </View>
         }
-        contentContainerStyle={posts.length === 0 ? styles.emptyContainer : undefined}
+        contentContainerStyle={entries.length === 0 ? styles.emptyContainer : undefined}
       />
     </View>
   );

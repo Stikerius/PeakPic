@@ -66,7 +66,8 @@ export function FollowButton({ userId, username, status, onChange, size = "sm" }
     );
   }
 
-  if (userId === officialId) return null;
+  // Hidden for the official account, and until it is known (no button that disappears again).
+  if (officialId === undefined || userId === officialId) return null;
   return (
     <Button
       label={LABELS[status]}

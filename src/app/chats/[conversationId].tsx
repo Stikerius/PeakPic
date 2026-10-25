@@ -224,7 +224,7 @@ export default function ChatScreen() {
       ...(partner !== null && partnerAvailable
         ? [
             { label: "Profil melden", destructive: true, onPress: () => openReport({ targetType: "profile", targetId: partner.id }) },
-            ...(partner.id === officialId
+            ...(partner.id === officialId || officialId === undefined
               ? []
               : [{ label: "Blockieren", destructive: true, onPress: () => blockUser(partner, () => setBlockCheck((v) => v + 1)) }]),
           ]

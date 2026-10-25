@@ -1,8 +1,10 @@
 import type { ReactNode } from "react";
 import { Pressable, StyleSheet, Text, View } from "react-native";
 
+import { OfficialBadge } from "@/components/surveys/official-badge";
 import { Avatar } from "@/components/ui/avatar";
 import { spacing, typography } from "@/constants/theme";
+import { useOfficialAccountId } from "@/lib/officialAccount";
 import { makeStyles } from "@/lib/theme";
 import type { PublicProfile } from "@/types/social";
 
@@ -16,6 +18,8 @@ type ProfileRowProps = {
 
 export function ProfileRow({ profile, accessory, onPress }: ProfileRowProps) {
   const styles = useStyles();
+  // The official account carries its badge everywhere it is listed (e.g. the search).
+  const official = useOfficialAccountId() === profile.id;
   const identity = (
     <>
       <Avatar uri={profile.avatarUrl} username={profile.username} size={44} />
@@ -26,6 +30,7 @@ export function ProfileRow({ profile, accessory, onPress }: ProfileRowProps) {
         <Text style={styles.handle} numberOfLines={1}>
           @{profile.username}
         </Text>
+        {official && <OfficialBadge />}
       </View>
     </>
   );

@@ -137,10 +137,49 @@ Das Protokoll enthält Titel, Zeiten und Prüfwerte (Hash) von Thema und Fragen,
 - Das Dashboard verkleinert und kodiert Bilder vor dem Upload im Browser neu (dabei verschwinden
   EXIF-Daten), Phase 5.
 
+## App
+
+- **Feed:** Umfrage- und Auswertungskarten als eigener Kartentyp (`OfficialCard`) mit Abzeichen
+  „Offiziell“, Titel, Thema bzw. Fazit, Bildern oder Logos, Restzeit und einer klaren Aktion
+  („Teilnehmen“, „Ergebnis ansehen“); „Später“ und „Ausblenden“ (Menü). Keine Likes, Kommentare oder
+  Teilen. Oben stehen die Karten aus `top`, die übrigen reihen sich nach Datum zwischen die
+  Beiträge (`mergeFeed`; ältere warten, bis keine Beiträge mehr nachladen). Eine Karte gilt als
+  gesehen, wenn sie mindestens eine Sekunde zu mindestens 60 % sichtbar war
+  (`minimumViewTime` der FlatList, `mark_item_seen`), schnelles Vorbeiscrollen zählt nicht. Ein
+  Fehler beim Laden blendet die Karten einfach aus, der Feed wartet nie darauf.
+- **Teilnahme** (`/survey/[surveyId]`, Vollbild): Einleitung, eine Frage pro Bildschirm mit
+  Fortschritt, „Pflichtfrage“ bzw. „Freiwillig“, Zurück, Abschicken nach Bestätigung, Danke. Wischen
+  nach unten schliesst nur, solange nichts eingegeben ist; sonst „Schliessen“ mit dem Hinweis, dass
+  die Eingaben verloren gehen. Ist die Umfrage inzwischen beendet oder abgebrochen, wird nichts
+  gesendet; bei einem Netzfehler bleiben die Eingaben für „Erneut senden“.
+- **Einstellungen → Umfragen** (`/surveys`): laufende Umfragen (offen oder teilgenommen, Restzeit,
+  auch ausgeblendete) und Auswertungen der letzten 30 Tage; der Eintrag zeigt die Zahl offener
+  Umfragen.
+- **Offizielles Profil:** eigene Ansicht (Name, Bild, Beschreibung, Abzeichen, Tabs „Umfragen“ und
+  „Auswertungen“), erreichbar über das Abzeichen einer Karte und über die Suche (Abzeichen in der
+  Liste). Ohne E-Mail, Follower-Listen, Aktivitäten, Statistik, Pläne und Chat-Knopf. Normale
+  Beiträge des Kontos zeigt die Ansicht nicht.
+- **Auswertung** (`/results/[itemId]`): nur der gespeicherte Snapshot (Format `ResultsSnapshot` in
+  `shared/surveys.ts`), Balken mit `react-native-svg` und per Knopf als Tabelle, Fazit, Bilder oder
+  Logos. Nach `feed_until` verschwindet die Karte aus dem Feed, im Profil bleibt sie bis
+  `profile_until`.
+- **Barrierefreiheit:** Karten und Diagramme mit Beschriftungen für VoiceOver, Optionen als Radio
+  bzw. Checkbox, Bedienelemente mindestens 44 Punkte, Skeletons respektieren „Bewegung reduzieren“.
+- **Statistik:** `track_survey_event` (Karte geöffnet, gestartet, ausgeblendet, Auswertung
+  geöffnet, Profil-Tab, Einstellungsliste) und `track()` (`survey_card_opened`, `results_opened`),
+  beides nur, wenn die Nutzungsstatistik in den Einstellungen an ist. „Gesehen“ und
+  „ausgeblendet“ zählt der Server bei `mark_item_seen` und `dismiss_item` mit (für die Reichweite).
+
 ## Tests
 
 - `src/lib/__tests__/surveys.test.ts`: Status an den genauen Grenzen, Fragen- und Antwortregeln,
   Bildprüfung.
+- `src/lib/__tests__/surveyApp.test.ts`: Feed (oben, Wandern nach „Später“ und nach der Antwort,
+  angeheftet bis beantwortet, Ausblenden), Teilnahme (Pflichtfragen, Mehrfachauswahl, was gesendet
+  wird, Fehlerarten), Parser (nur bekannte Felder, keine E-Mail oder Personen-IDs).
+- `src/lib/__tests__/surveyScreens.test.tsx`: offizielles Profil ohne Chat, Folgen, Follower und
+  Blockieren; Teilnahme bei Netzfehler (Eingaben bleiben), bei beendeter Umfrage (nichts gesendet)
+  und bei Erfolg.
 - Datenbanktest (PGlite): TS- und SQL-Regeln stimmen an 1800 gültigen und manipulierten Fällen
   überein; doppelte Teilnahme unmöglich, Pflichtfragen, ungültige Optionen, nach Fristende keine
   Antwort, keine Verbindung zwischen Konto und Antworten (Spalten und Fremdschlüssel geprüft), keine

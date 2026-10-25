@@ -593,6 +593,16 @@ export type Database = {
       mark_moderation_notices_read: { Args: Record<string, never>; Returns: undefined };
       conversation_has_block: { Args: { conversation: Uuid }; Returns: boolean };
       get_official_account_id: { Args: Record<string, never>; Returns: Uuid | null };
+      get_official_feed_items: { Args: Record<string, never>; Returns: Json };
+      mark_item_seen: { Args: { p_item_id: Uuid }; Returns: boolean };
+      dismiss_item: { Args: { p_item_id: Uuid }; Returns: boolean };
+      get_active_surveys: { Args: Record<string, never>; Returns: Json };
+      get_official_profile: { Args: Record<string, never>; Returns: Json | null };
+      get_official_profile_items: { Args: { p_tab: "surveys" | "results"; p_before?: Timestamp | null; p_limit?: number }; Returns: Json };
+      get_survey: { Args: { p_survey_id: Uuid }; Returns: Json | null };
+      get_official_item: { Args: { p_item_id: Uuid }; Returns: Json | null };
+      submit_survey_response: { Args: { p_survey_id: Uuid; p_answers: Json }; Returns: Json };
+      track_survey_event: { Args: { p_survey_id: Uuid | null; p_event: string }; Returns: boolean };
       get_current_legal_documents: {
         Args: Record<string, never>;
         Returns: {

@@ -23,9 +23,9 @@ export function fetchOfficialAccountId(): Promise<string | null> {
   return request;
 }
 
-/** The official account's id, or null while unknown or when there is none. */
-export function useOfficialAccountId(): string | null {
-  const [id, setId] = useState<string | null>(null);
+/** The official account's id; null when there is none, undefined until it is known. */
+export function useOfficialAccountId(): string | null | undefined {
+  const [id, setId] = useState<string | null | undefined>(undefined);
   useEffect(() => {
     let active = true;
     void fetchOfficialAccountId().then((value) => {

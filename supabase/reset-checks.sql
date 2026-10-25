@@ -136,7 +136,7 @@ select * from (
   where n.nspname = 'public'
     and (p.proname like 'admin_survey_%' or p.proname in ('admin_item_withdraw', 'submit_survey_response', 'get_official_feed_items',
          'mark_item_seen', 'dismiss_item', 'get_active_surveys', 'get_official_profile', 'get_official_profile_items',
-         'get_survey', 'track_survey_event', 'survey_media_readable'))
+         'get_survey', 'track_survey_event', 'survey_media_readable', 'get_official_item', 'get_official_account_id'))
 
   union all
   select 'survey functions: not for anon: ' || p.proname, not has_function_privilege('anon', p.oid, 'execute')

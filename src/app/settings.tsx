@@ -4,6 +4,7 @@ import type { ComponentProps } from "react";
 import { useCallback, useState } from "react";
 import { Alert, Pressable, ScrollView, StyleSheet, Switch, Text, View } from "react-native";
 
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { SegmentedControl } from "@/components/ui/segmented-control";
 import { appIconForNativeName } from "@/constants/appIcons";
@@ -17,6 +18,7 @@ import { formatDate } from "@/lib/format";
 import { useLegalGate } from "@/lib/legalGate";
 import { LEGAL_TYPE_LABELS } from "@/lib/legalRepo";
 import { listHiddenUserIds } from "@/lib/privacyRepo";
+import { fetchOpenSurveyCount } from "@/lib/surveyRepo";
 import {
   getMyPlanAdoptNotify,
   getMyProfile,
@@ -40,16 +42,18 @@ type RowProps = {
   title: string;
   subtitle: string;
   onPress: () => void;
+  /** A count on the right (e.g. open surveys); nothing at 0. */
+  badge?: number;
 };
 
-function SettingsRow({ icon, title, subtitle, onPress }: RowProps) {
+function SettingsRow({ icon, title, subtitle, onPress, badge = 0 }: RowProps) {
   const { colors } = useTheme();
   const styles = useStyles();
   return (
     <Pressable
       onPress={onPress}
       accessibilityRole="button"
-      accessibilityLabel={`${title}, ${subtitle}`}
+      accessibilityLabel={`${title}, ${subtitle}${badge > 0 ? `, ${badge} offen` : ""}`}
       style={({ pressed }) => [styles.row, pressed && styles.pressed]}
     >
       <Ionicons name={icon} size={22} color={colors.text} />
@@ -57,6 +61,7 @@ function SettingsRow({ icon, title, subtitle, onPress }: RowProps) {
         <Text style={styles.rowTitle}>{title}</Text>
         <Text style={styles.rowSubtitle}>{subtitle}</Text>
       </View>
+      {badge > 0 && <Badge value={badge} />}
       <Ionicons name="chevron-forward" size={20} color={colors.textSecondary} />
     </Pressable>
   );
@@ -136,9 +141,11 @@ export default function SettingsScreen() {
   const [activityVisibility, setActivityVisibility] = useState<ActivityVisibility | null>(null);
   const [statsVisibility, setStatsVisibility] = useState<ActivityVisibility | null>(null);
   const restTimer = useRestTimerSettings();
+  const [openSurveys, setOpenSurveys] = useState(0);
 
   useFocusEffect(
     useCallback(() => {
+      void fetchOpenSurveyCount().then(setOpenSurveys);
       getMyProfile()
         .then(({ isPrivate, storyVisibility, postVisibility }) => setPrivacy({ isPrivate, storyVisibility, postVisibility }))
         .catch(() => undefined);
@@ -417,6 +424,17 @@ export default function SettingsScreen() {
           title="Einführung nochmal ansehen"
           subtitle="Kurzer Überblick über die App"
           onPress={() => router.push({ pathname: "/onboarding", params: { replay: "1" } })}
+        />
+      </View>
+
+      <Text style={[styles.sectionTitle, styles.sectionSpacing]}>Umfragen</Text>
+      <View style={styles.card}>
+        <SettingsRow
+          icon="stats-chart-outline"
+          title="Umfragen"
+          subtitle={openSurveys > 0 ? (openSurveys === 1 ? "1 offene Umfrage" : `${openSurveys} offene Umfragen`) : "Laufende Umfragen und Auswertungen"}
+          badge={openSurveys}
+          onPress={() => router.push("/surveys")}
         />
       </View>
 

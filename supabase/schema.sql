@@ -12086,6 +12086,14 @@ as $$
   ) x;
 $$;
 
+-- One official post (results view, links): only when the caller can see it.
+create or replace function public.get_official_item(p_item_id uuid)
+returns jsonb
+language sql stable security definer set search_path = ''
+as $$
+  select case when public.survey_item_visible(p_item_id, 'any') then public.survey_item_json(p_item_id) end;
+$$;
+
 -- A survey for taking part: its questions (without anything about others), whether the caller
 -- has answered, the state and the end. Null when the caller can't see it.
 create or replace function public.get_survey(p_survey_id uuid)
@@ -12801,7 +12809,7 @@ begin
     'public.dismiss_item(uuid)', 'public.get_active_surveys()', 'public.get_official_profile()',
     'public.get_official_profile_items(text, timestamptz, integer)', 'public.get_survey(uuid)',
     'public.submit_survey_response(uuid, jsonb)', 'public.is_official(uuid)', 'public.survey_media_readable(text)',
-    'public.get_official_account_id()',
+    'public.get_official_account_id()', 'public.get_official_item(uuid)',
     'public.survey_state(timestamptz, timestamptz, timestamptz, timestamptz, timestamptz)',
     -- Admins (each checks admin and two-factor first).
     'public.admin_survey_get(uuid)', 'public.admin_survey_list()', 'public.admin_survey_save(uuid, jsonb)',

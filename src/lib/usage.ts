@@ -82,7 +82,9 @@ export type UsageEvent =
   | "screen_notifications"
   | "screen_follow_requests"
   | "screen_my_reports"
-  | "report_opened";
+  | "report_opened"
+  | "survey_card_opened"
+  | "results_opened";
 
 const STORAGE_KEY = "peakpic.usageStats";
 const FLUSH_INTERVAL_MS = 60_000;
