@@ -7,7 +7,7 @@
 
 export type ResetMode = "categories" | "full";
 
-export type CategoryKey = "chats" | "activities" | "plans" | "posts" | "stories" | "social" | "notifications" | "other";
+export type CategoryKey = "chats" | "activities" | "plans" | "posts" | "stories" | "social" | "notifications" | "surveys" | "other";
 
 export const CATEGORIES: readonly { key: CategoryKey; label: string; description: string }[] = [
   {
@@ -22,6 +22,11 @@ export const CATEGORIES: readonly { key: CategoryKey; label: string; description
   { key: "stories", label: "Storys", description: "Storys mit Fotos, Highlights, eigene Story-Likes und -Aufrufe." },
   { key: "social", label: "Follower und Gefolgte", description: "Follower, Gefolgte, Anfragen, eigene Blockierungen und „Verbergen vor“." },
   { key: "notifications", label: "Benachrichtigungen", description: "Alle Benachrichtigungen der Person." },
+  {
+    key: "surveys",
+    label: "Umfragen",
+    description: "Teilnahmen und gesehene oder ausgeblendete Umfragekarten. Die anonymen Antworten und die Umfragen selbst bleiben.",
+  },
   { key: "other", label: "Sonstiges", description: "Abgegebene Meldungen werden anonym, Einstellungen zurück auf Standard." },
 ];
 
@@ -62,6 +67,8 @@ export const COUNT_LABELS: Record<string, string> = {
   hidden_from: "Verborgen vor",
   notifications: "Benachrichtigungen",
   reports_as_reporter: "Meldungen (anonymisiert)",
+  participations: "Umfrage-Teilnahmen",
+  item_views: "Gesehene oder ausgeblendete Umfragekarten",
   settings: "Einstellungen",
   account: "Konto",
 };

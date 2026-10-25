@@ -105,7 +105,7 @@ Deno.serve(async (request) => {
       p_reason: reason,
     });
     if (error) {
-      const known = ["not_authorized", "cannot_delete_self", "cannot_delete_staff", "username_mismatch", "not_found"];
+      const known = ["not_authorized", "cannot_delete_self", "cannot_delete_staff", "cannot_delete_official", "username_mismatch", "not_found"];
       return known.includes(error.message) ? json(403, { error: error.message }) : json(500, { error: "request_failed" });
     }
     targetId = target;

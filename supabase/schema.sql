@@ -1089,6 +1089,35 @@ as $$
     );
 $$;
 
+-- ---------------------------------------------------------------- official account
+-- The one account official posts (surveys, results) come from. Set by hand with
+-- supabase/official-account-setup.sql (not part of this file). Nobody can write to it or follow
+-- it; it is protected in the data reset and can't be deleted while it is the official account.
+-- Its e-mail address and account data never leave the server (only public profile fields do).
+create table if not exists public.official_account (
+  id         boolean primary key default true check (id),
+  user_id    uuid not null unique references public.profiles (id) on delete cascade,
+  -- "Beschreibung" on the official profile (public).
+  bio        text check (bio is null or char_length(btrim(bio)) between 1 and 300),
+  updated_at timestamptz not null default now()
+);
+alter table public.official_account enable row level security;
+revoke all on public.official_account from public, anon, authenticated;
+
+create or replace function public.official_user_id()
+returns uuid
+language sql stable security definer set search_path = ''
+as $$
+  select o.user_id from public.official_account o where o.id;
+$$;
+
+create or replace function public.is_official(p_user uuid)
+returns boolean
+language sql stable security definer set search_path = ''
+as $$
+  select p_user is not null and exists (select 1 from public.official_account o where o.id and o.user_id = p_user);
+$$;
+
 -- True if `owner`'s posts or active stories ('posts' / 'stories') are open to every
 -- signed-in user: public profile and the setting is 'everyone'.
 create or replace function public.is_public_content(owner uuid, scope text)
@@ -1132,6 +1161,10 @@ returns trigger
 language plpgsql security definer set search_path = ''
 as $$
 begin
+  -- The official account takes no followers and no requests (neutral message).
+  if public.is_official(new.following_id) then
+    raise exception 'follow_not_possible';
+  end if;
   new.status := case
     when exists (select 1 from public.profiles p where p.id = new.following_id and not p.is_private)
       then 'accepted'
@@ -5488,6 +5521,10 @@ begin
   if not public.can_see_account(other_user) then
     raise exception 'chat_not_possible';
   end if;
+  -- The official account can't be written to (neutral message, nothing about why).
+  if public.is_official(other_user) then
+    raise exception 'chat_not_possible';
+  end if;
   if not public.is_following(other_user) then
     raise exception 'you can only start chats with people you follow';
   end if;
@@ -6812,6 +6849,9 @@ begin
   if exists (select 1 from public.admin_roles r where r.user_id = p_user) then
     return 'staff';
   end if;
+  if public.is_official(p_user) then
+    return 'official';
+  end if;
   if target.account_status = 'banned' then
     return 'banned';
   end if;
@@ -6875,6 +6915,10 @@ begin
   end if;
   if exists (select 1 from public.admin_roles r where r.user_id = p_user_id) then
     raise exception 'cannot_delete_staff';
+  end if;
+  -- First assign another official account (official-account-setup.sql).
+  if public.is_official(p_user_id) then
+    raise exception 'cannot_delete_official';
   end if;
   if lower(btrim(coalesce(p_username, ''))) <> target_name then
     raise exception 'username_mismatch';
@@ -7895,7 +7939,7 @@ create or replace function public.reset_category_keys()
 returns text[]
 language sql immutable set search_path = ''
 as $$
-  select array['chats', 'activities', 'plans', 'posts', 'stories', 'social', 'notifications', 'other'];
+  select array['chats', 'activities', 'plans', 'posts', 'stories', 'social', 'notifications', 'surveys', 'other'];
 $$;
 
 create or replace function public.reset_full_allowed()
@@ -7914,6 +7958,7 @@ as $$
     when p_user = (select auth.uid()) then 'self'
     when exists (select 1 from public.admin_roles r where r.user_id = p_user) then 'staff'
     when exists (select 1 from public.protected_accounts pa where pa.user_id = p_user) then 'protected'
+    when public.is_official(p_user) then 'protected'
   end;
 $$;
 
@@ -7977,7 +8022,7 @@ as $$
   select jsonb_build_object(
     'max_targets', 500, 'batch_size', 25, 'phrase', 'NEUSTART', 'totp_max_age_seconds', 300, 'max_attempts', 5,
     'email_keep_days', 7,
-    'categories', jsonb_build_array('chats', 'activities', 'plans', 'posts', 'stories', 'social', 'notifications', 'other')
+    'categories', jsonb_build_array('chats', 'activities', 'plans', 'posts', 'stories', 'social', 'notifications', 'surveys', 'other')
   );
 $$;
 
@@ -7989,7 +8034,8 @@ as $$
   select case p_key
     when 'chats' then 'Chats' when 'activities' then 'Aktivitäten' when 'plans' then 'Pläne'
     when 'posts' then 'Beiträge' when 'stories' then 'Storys' when 'social' then 'Follower und Gefolgte'
-    when 'notifications' then 'Benachrichtigungen' when 'other' then 'Sonstiges (Einstellungen, abgegebene Meldungen)'
+    when 'notifications' then 'Benachrichtigungen' when 'surveys' then 'Umfragen (Teilnahme und Anzeige)'
+    when 'other' then 'Sonstiges (Einstellungen, abgegebene Meldungen)'
     else p_key
   end;
 $$;
@@ -8000,7 +8046,8 @@ returns boolean
 language sql stable security definer set search_path = ''
 as $$
   select exists (select 1 from public.admin_roles r where r.user_id = p_user)
-    or exists (select 1 from public.protected_accounts pa where pa.user_id = p_user);
+    or exists (select 1 from public.protected_accounts pa where pa.user_id = p_user)
+    or public.is_official(p_user);
 $$;
 
 drop function if exists public.reset_conversation_full(uuid, uuid[]);
@@ -8081,6 +8128,7 @@ declare
   with_social boolean := 'social' = any (p_categories);
   with_notifications boolean := 'notifications' = any (p_categories);
   with_other boolean := 'other' = any (p_categories);
+  with_surveys boolean := 'surveys' = any (p_categories);
   ended_convs uuid[] := '{}';
   my_ended uuid[] := '{}';
   part_convs uuid[] := '{}';
@@ -8243,6 +8291,15 @@ begin
     ));
   end if;
 
+  -- Surveys: who took part and which official cards were seen or hidden. The anonymous answers
+  -- and the surveys themselves stay (they hold no reference to the person).
+  if with_surveys then
+    counts := counts || jsonb_build_object('surveys', jsonb_build_object(
+      'participations', (select count(*) from public.survey_participation x where x.user_id = p_user),
+      'item_views', (select count(*) from public.survey_item_views x where x.user_id = p_user)
+    ));
+  end if;
+
   if with_other then
     counts := counts || jsonb_build_object('other', jsonb_build_object(
       'reports_as_reporter', (select count(*) from public.reports x where x.reporter_id = p_user),
@@ -8325,6 +8382,10 @@ begin
     delete from public.follows x where x.follower_id = p_user or x.following_id = p_user;
     delete from public.user_blocks x where x.blocker_id = p_user;
     delete from public.audience_restrictions x where x.owner_id = p_user;
+  end if;
+  if with_surveys then
+    delete from public.survey_participation x where x.user_id = p_user;
+    delete from public.survey_item_views x where x.user_id = p_user;
   end if;
   if with_other then
     update public.reports set reporter_id = null where reporter_id = p_user;
@@ -9158,6 +9219,15 @@ begin
   if 'notifications' = any (cats) then
     result := result || jsonb_build_object('notifications', jsonb_build_object(
       'notifications', (select coalesce(jsonb_agg(to_jsonb(x)), '[]') from public.notifications x where x.user_id = p_user)
+    ));
+  end if;
+  if 'surveys' = any (cats) then
+    result := result || jsonb_build_object('surveys', jsonb_build_object(
+      'participations', (select coalesce(jsonb_agg(jsonb_build_object('survey_id', x.survey_id, 'submitted_at', x.submitted_at)), '[]')
+                         from public.survey_participation x where x.user_id = p_user),
+      'item_views', (select coalesce(jsonb_agg(jsonb_build_object('item_id', x.item_id, 'first_seen_at', x.first_seen_at,
+                                                                  'dismissed_at', x.dismissed_at, 'answered_at', x.answered_at)), '[]')
+                     from public.survey_item_views x where x.user_id = p_user)
     ));
   end if;
   if 'other' = any (cats) then
@@ -11282,3 +11352,1439 @@ end;
 $$;
 revoke all on function public.get_public_design_config() from public;
 grant execute on function public.get_public_design_config() to anon, authenticated;
+
+
+-- =============================================================================================
+-- Surveys ("Umfragen") and official posts
+-- =============================================================================================
+-- A survey has up to 10 questions. Published surveys and their results are "official posts"
+-- (survey_items) of the official account. Clients never touch these tables: everything goes
+-- through the functions below, which return only what users may see (never e-mail addresses,
+-- never who answered, never raw answers).
+--
+-- Anonymity: survey_participation knows WHO took part (to prevent taking part twice);
+-- survey_responses / survey_answers know WHAT was answered, with a random id and only the day,
+-- no user and no time of day. Nothing links the two. Deleting an account removes its
+-- participation; the anonymous answers stay.
+--
+-- No background job: the state of a survey and the end of the feed/profile time are computed
+-- from the timestamps on every read (survey_state).
+
+create table if not exists public.surveys (
+  id                      uuid primary key default gen_random_uuid(),
+  title                   text not null check (char_length(btrim(title, E' \t\r\n')) between 3 and 120),
+  topic                   text not null check (char_length(btrim(topic, E' \t\r\n')) between 10 and 1000),
+  -- The state at the last write; readers always use survey_state() (computed from the times).
+  status                  text not null default 'draft' check (status in ('draft', 'scheduled', 'active', 'closed', 'cancelled')),
+  starts_at               timestamptz,
+  ends_at                 timestamptz,
+  cancelled_at            timestamptz,
+  cancel_reason           text check (cancel_reason is null or char_length(btrim(cancel_reason)) between 10 and 500),
+  cancel_keep_answers     boolean,
+  pin_until_answered      boolean not null default false,
+  allow_text              boolean not null default false,
+  feed_days               integer not null default 7 check (feed_days between 1 and 90),
+  -- null: "unbegrenzt" (only for the profile).
+  profile_days            integer default 90 check (profile_days is null or profile_days between 1 and 3650),
+  feed_until              timestamptz,
+  profile_until           timestamptz,
+  eligible_count_at_start integer check (eligible_count_at_start >= 0),
+  eligible_count_at_close integer check (eligible_count_at_close >= 0),
+  created_by              uuid references public.profiles (id) on delete set null,
+  created_at              timestamptz not null default now(),
+  updated_at              timestamptz not null default now(),
+  published_at            timestamptz,
+  check (ends_at is null or starts_at is null
+         or (ends_at >= starts_at + interval '1 hour' and ends_at <= starts_at + interval '90 days')),
+  check ((cancelled_at is null) = (cancel_reason is null) and (cancelled_at is null) = (cancel_keep_answers is null)),
+  check (published_at is null or (starts_at is not null and ends_at is not null and feed_until is not null)),
+  check (cancelled_at is null or published_at is not null)
+);
+alter table public.surveys enable row level security;
+revoke all on public.surveys from public, anon, authenticated;
+
+-- Why a question can't be stored (a code), or null. The same rules as questionProblem() in
+-- shared/surveys.ts (a test compares both). The question as JSON with the column names.
+create or replace function public.survey_question_problem(q jsonb, p_allow_text boolean)
+returns text
+language plpgsql immutable set search_path = ''
+as $$
+declare
+  kind text := q ->> 'kind';
+  options jsonb := case when jsonb_typeof(q -> 'options') = 'null' then null else q -> 'options' end;
+  n integer;
+  ok boolean;
+begin
+  if jsonb_typeof(q) is distinct from 'object' then
+    return 'invalid_kind';
+  end if;
+  if jsonb_typeof(q -> 'kind') is distinct from 'string' or kind not in ('single', 'multiple', 'scale', 'yes_no', 'text') then
+    return 'invalid_kind';
+  end if;
+  if jsonb_typeof(q -> 'prompt') is distinct from 'string'
+    or char_length(btrim(q ->> 'prompt', E' \t\r\n')) not between 3 and 200 then
+    return 'invalid_prompt';
+  end if;
+  if jsonb_typeof(q -> 'required') is distinct from 'boolean' then
+    return 'invalid_required';
+  end if;
+  if kind in ('single', 'multiple') then
+    if jsonb_typeof(options) is distinct from 'array' then
+      return 'invalid_options';
+    end if;
+    n := jsonb_array_length(options);
+    if n not between 2 and 10 then
+      return 'invalid_options';
+    end if;
+    if exists (select 1 from jsonb_array_elements(options) o
+               where jsonb_typeof(o) <> 'string' or char_length(btrim(o #>> '{}', E' \t\r\n')) not between 1 and 80) then
+      return 'invalid_options';
+    end if;
+    if (select count(distinct lower(btrim(o #>> '{}', E' \t\r\n'))) from jsonb_array_elements(options) o) <> n then
+      return 'duplicate_options';
+    end if;
+  elsif options is not null then
+    return 'invalid_options';
+  end if;
+  if kind = 'multiple' then
+    if not public.brand_int_between(q -> 'max_choices', 1, n) then
+      return 'invalid_max_choices';
+    end if;
+  elsif coalesce(jsonb_typeof(q -> 'max_choices'), 'null') <> 'null' then
+    return 'invalid_max_choices';
+  end if;
+  if kind = 'scale' then
+    ok := jsonb_typeof(q -> 'scale_min') = 'number' and jsonb_typeof(q -> 'scale_max') = 'number'
+      and ((q ->> 'scale_min')::numeric, (q ->> 'scale_max')::numeric) in ((1, 5), (1, 10), (0, 10));
+    if not coalesce(ok, false) then
+      return 'invalid_scale';
+    end if;
+  elsif coalesce(jsonb_typeof(q -> 'scale_min'), 'null') <> 'null' or coalesce(jsonb_typeof(q -> 'scale_max'), 'null') <> 'null' then
+    return 'invalid_scale';
+  end if;
+  if kind = 'text' then
+    if not coalesce(p_allow_text, false) then
+      return 'text_not_allowed';
+    end if;
+    if not public.brand_int_between(q -> 'text_max', 20, 280) then
+      return 'invalid_text_max';
+    end if;
+  elsif coalesce(jsonb_typeof(q -> 'text_max'), 'null') <> 'null' then
+    return 'invalid_text_max';
+  end if;
+  return null;
+end;
+$$;
+
+create table if not exists public.survey_questions (
+  id          uuid primary key default gen_random_uuid(),
+  survey_id   uuid not null references public.surveys (id) on delete cascade,
+  -- 0..9: at most 10 questions per survey.
+  position    integer not null check (position between 0 and 9),
+  kind        text not null check (kind in ('single', 'multiple', 'scale', 'yes_no', 'text')),
+  prompt      text not null,
+  required    boolean not null default true,
+  options     jsonb,
+  max_choices integer,
+  scale_min   integer,
+  scale_max   integer,
+  text_max    integer,
+  unique (survey_id, position),
+  -- Free text is allowed here; whether the survey allows it is checked when saving and publishing.
+  check (public.survey_question_problem(jsonb_build_object(
+    'kind', kind, 'prompt', prompt, 'required', required, 'options', options, 'max_choices', max_choices,
+    'scale_min', scale_min, 'scale_max', scale_max, 'text_max', text_max), true) is null)
+);
+alter table public.survey_questions enable row level security;
+revoke all on public.survey_questions from public, anon, authenticated;
+
+-- Images (bucket survey-media) and logos (from the logo library). scope 'survey': shown with the
+-- survey; 'results': chosen for a results post (copied into its snapshot).
+create table if not exists public.survey_media (
+  id           uuid primary key default gen_random_uuid(),
+  survey_id    uuid not null references public.surveys (id) on delete cascade,
+  scope        text not null default 'survey' check (scope in ('survey', 'results')),
+  kind         text not null check (kind in ('image', 'logo')),
+  storage_path text unique check (storage_path ~ '^survey/[0-9a-f-]{36}/[a-z]+-[0-9a-f-]{36}\.(png|jpg|webp)$'),
+  logo_id      uuid references public.logo_library (id) on delete restrict,
+  alt_text     text not null check (char_length(btrim(alt_text)) between 1 and 140),
+  position     integer not null check (position between 0 and 6),
+  width        integer check (width between 1 and 1600),
+  height       integer check (height between 1 and 1600),
+  bytes        integer check (bytes between 1 and 2097152),
+  created_at   timestamptz not null default now(),
+  check ((kind = 'image') = (storage_path is not null and width is not null and height is not null and bytes is not null)),
+  check ((kind = 'logo') = (logo_id is not null)),
+  check (storage_path is null or split_part(storage_path, '/', 2) = survey_id::text)
+);
+alter table public.survey_media enable row level security;
+revoke all on public.survey_media from public, anon, authenticated;
+create index if not exists survey_media_survey_idx on public.survey_media (survey_id, scope, position);
+
+-- Who took part (prevents taking part twice). Never linked to the answers.
+create table if not exists public.survey_participation (
+  survey_id    uuid not null references public.surveys (id) on delete cascade,
+  user_id      uuid not null references public.profiles (id) on delete cascade,
+  submitted_at timestamptz not null default now(),
+  primary key (survey_id, user_id)
+);
+alter table public.survey_participation enable row level security;
+revoke all on public.survey_participation from public, anon, authenticated;
+create index if not exists survey_participation_user_idx on public.survey_participation (user_id);
+
+-- The anonymous answers: a random id and the day (no user, no time of day).
+create table if not exists public.survey_responses (
+  id            uuid primary key default gen_random_uuid(),
+  survey_id     uuid not null references public.surveys (id) on delete cascade,
+  submitted_day date not null
+);
+alter table public.survey_responses enable row level security;
+revoke all on public.survey_responses from public, anon, authenticated;
+create index if not exists survey_responses_survey_idx on public.survey_responses (survey_id);
+
+create table if not exists public.survey_answers (
+  response_id uuid not null references public.survey_responses (id) on delete cascade,
+  question_id uuid not null references public.survey_questions (id) on delete cascade,
+  value       jsonb not null check (octet_length(value::text) <= 2000),
+  -- Free text hidden by an admin in the evaluation (the answer itself never changes).
+  hidden      boolean not null default false,
+  primary key (response_id, question_id)
+);
+alter table public.survey_answers enable row level security;
+revoke all on public.survey_answers from public, anon, authenticated;
+create index if not exists survey_answers_question_idx on public.survey_answers (question_id);
+
+-- Official posts: the survey itself and published results (with their fixed snapshot).
+create table if not exists public.survey_items (
+  id                 uuid primary key default gen_random_uuid(),
+  kind               text not null check (kind in ('survey', 'results')),
+  survey_id          uuid not null references public.surveys (id) on delete cascade,
+  published_at       timestamptz not null,
+  feed_until         timestamptz not null,
+  -- null: shown in the profile without end.
+  profile_until      timestamptz,
+  pin_until_answered boolean not null default false,
+  status             text not null default 'visible' check (status in ('visible', 'withdrawn')),
+  withdrawn_at       timestamptz,
+  snapshot           jsonb check (snapshot is null or octet_length(snapshot::text) <= 200000),
+  created_by         uuid references public.profiles (id) on delete set null,
+  created_at         timestamptz not null default now(),
+  check ((kind = 'results') = (snapshot is not null)),
+  check ((status = 'withdrawn') = (withdrawn_at is not null)),
+  check (feed_until > published_at and (profile_until is null or profile_until > published_at))
+);
+alter table public.survey_items enable row level security;
+revoke all on public.survey_items from public, anon, authenticated;
+create unique index if not exists survey_items_one_survey_post on public.survey_items (survey_id) where kind = 'survey';
+create index if not exists survey_items_published_idx on public.survey_items (published_at desc);
+
+-- Per account and official post: first seen, hidden, answered (reach, "first time on top").
+-- Written only through functions; every account reads only its own rows.
+create table if not exists public.survey_item_views (
+  item_id       uuid not null references public.survey_items (id) on delete cascade,
+  user_id       uuid not null references public.profiles (id) on delete cascade,
+  first_seen_at timestamptz,
+  dismissed_at  timestamptz,
+  answered_at   timestamptz,
+  primary key (item_id, user_id)
+);
+alter table public.survey_item_views enable row level security;
+revoke all on public.survey_item_views from public, anon, authenticated;
+grant select on public.survey_item_views to authenticated;
+drop policy if exists "survey_item_views: owner reads" on public.survey_item_views;
+create policy "survey_item_views: owner reads" on public.survey_item_views
+  for select to authenticated using (user_id = (select auth.uid()));
+create index if not exists survey_item_views_user_idx on public.survey_item_views (user_id);
+
+-- Statistics counters per survey (or none: whole-feature events), day and event. No user id.
+-- "Abgeschickt" never comes from here but from survey_participation.
+create table if not exists public.survey_counters (
+  survey_id uuid references public.surveys (id) on delete cascade,
+  scope_key uuid generated always as (coalesce(survey_id, '00000000-0000-0000-0000-000000000000'::uuid)) stored,
+  day       date not null,
+  event     text not null check (event in ('card_shown', 'card_opened', 'started', 'dismissed', 'results_shown',
+                                           'results_opened', 'profile_tab_opened', 'settings_list_opened')),
+  count     bigint not null default 0 check (count >= 0),
+  primary key (scope_key, day, event)
+);
+alter table public.survey_counters enable row level security;
+revoke all on public.survey_counters from public, anon, authenticated;
+
+-- Global rate of counter events per minute (protects against floods; nothing about the caller).
+create table if not exists public.survey_event_rate (
+  minute timestamptz primary key,
+  count  integer not null default 0
+);
+alter table public.survey_event_rate enable row level security;
+revoke all on public.survey_event_rate from public, anon, authenticated;
+
+-- ---------------------------------------------------------------- guards
+
+-- Questions, title, topic and free text are fixed once the first answer is in (also for the
+-- service role). Still possible afterwards: extending the end, cancelling, exchanging images.
+create or replace function public.survey_guard_questions()
+returns trigger
+language plpgsql security definer set search_path = ''
+as $$
+declare
+  target uuid := case when tg_op = 'DELETE' then old.survey_id else new.survey_id end;
+begin
+  if exists (select 1 from public.survey_responses r where r.survey_id = target)
+    and exists (select 1 from public.surveys s where s.id = target) then
+    raise exception 'survey_locked';
+  end if;
+  return case when tg_op = 'DELETE' then old else new end;
+end;
+$$;
+drop trigger if exists survey_questions_guard on public.survey_questions;
+create trigger survey_questions_guard
+  before insert or update or delete on public.survey_questions
+  for each row execute function public.survey_guard_questions();
+
+create or replace function public.survey_guard_update()
+returns trigger
+language plpgsql security definer set search_path = ''
+as $$
+begin
+  if (new.title, new.topic, new.allow_text, new.starts_at) is distinct from (old.title, old.topic, old.allow_text, old.starts_at)
+    and exists (select 1 from public.survey_responses r where r.survey_id = old.id) then
+    raise exception 'survey_locked';
+  end if;
+  return new;
+end;
+$$;
+drop trigger if exists surveys_guard_update on public.surveys;
+create trigger surveys_guard_update
+  before update on public.surveys
+  for each row execute function public.survey_guard_update();
+
+-- Answers never change (only the "hidden" mark of the evaluation); responses never change.
+create or replace function public.survey_guard_answers()
+returns trigger
+language plpgsql set search_path = ''
+as $$
+begin
+  if tg_table_name = 'survey_responses' or (new.response_id, new.question_id, new.value) is distinct from (old.response_id, old.question_id, old.value) then
+    raise exception 'answers_are_final';
+  end if;
+  return new;
+end;
+$$;
+drop trigger if exists survey_answers_final on public.survey_answers;
+create trigger survey_answers_final before update on public.survey_answers
+  for each row execute function public.survey_guard_answers();
+drop trigger if exists survey_responses_final on public.survey_responses;
+create trigger survey_responses_final before update on public.survey_responses
+  for each row execute function public.survey_guard_answers();
+
+-- The snapshot of a results post and what it belongs to never change; only withdrawing does.
+create or replace function public.survey_guard_items()
+returns trigger
+language plpgsql set search_path = ''
+as $$
+begin
+  if (new.kind, new.survey_id, new.snapshot, new.published_at) is distinct from (old.kind, old.survey_id, old.snapshot, old.published_at) then
+    raise exception 'item_is_final';
+  end if;
+  return new;
+end;
+$$;
+drop trigger if exists survey_items_final on public.survey_items;
+create trigger survey_items_final before update on public.survey_items
+  for each row execute function public.survey_guard_items();
+
+-- At most 4 images and 3 logos per survey and scope.
+create or replace function public.survey_guard_media()
+returns trigger
+language plpgsql security definer set search_path = ''
+as $$
+begin
+  if new.kind = 'image' and (select count(*) from public.survey_media m
+                             where m.survey_id = new.survey_id and m.scope = new.scope and m.kind = 'image' and m.id <> new.id) >= 4 then
+    raise exception 'too_many_images';
+  end if;
+  if new.kind = 'logo' and (select count(*) from public.survey_media m
+                            where m.survey_id = new.survey_id and m.scope = new.scope and m.kind = 'logo' and m.id <> new.id) >= 3 then
+    raise exception 'too_many_logos';
+  end if;
+  return new;
+end;
+$$;
+drop trigger if exists survey_media_limits on public.survey_media;
+create trigger survey_media_limits before insert or update on public.survey_media
+  for each row execute function public.survey_guard_media();
+
+-- The official account can't be written to: user messages into a chat with it are refused
+-- (server cards such as tag notices are not user messages and stay possible).
+create or replace function public.guard_official_messages()
+returns trigger
+language plpgsql security definer set search_path = ''
+as $$
+begin
+  if new.kind is null and not public.is_official(new.sender_id) and exists (
+    select 1 from public.conversation_members m
+    where m.conversation_id = new.conversation_id and public.is_official(m.user_id)
+  ) then
+    raise exception 'chat_not_possible';
+  end if;
+  return new;
+end;
+$$;
+drop trigger if exists messages_official_guard on public.messages;
+create trigger messages_official_guard before insert on public.messages
+  for each row execute function public.guard_official_messages();
+
+-- ---------------------------------------------------------------- state and visibility
+
+-- The state at p_at from the timestamps: active from the start (inclusive) until the end
+-- (exclusive), unless cancelled. Same as surveyState() in shared/surveys.ts.
+create or replace function public.survey_state(p_published_at timestamptz, p_starts_at timestamptz, p_ends_at timestamptz,
+                                               p_cancelled_at timestamptz, p_at timestamptz)
+returns text
+language sql immutable set search_path = ''
+as $$
+  select case
+    when p_cancelled_at is not null then 'cancelled'
+    when p_published_at is null or p_starts_at is null or p_ends_at is null then 'draft'
+    when p_at < p_starts_at then 'scheduled'
+    when p_at < p_ends_at then 'active'
+    else 'closed'
+  end;
+$$;
+
+create or replace function public.survey_state_of(p_survey uuid)
+returns text
+language sql stable security definer set search_path = ''
+as $$
+  select public.survey_state(s.published_at, s.starts_at, s.ends_at, s.cancelled_at, now()) from public.surveys s where s.id = p_survey;
+$$;
+
+-- Accounts that can take part: active, not the official account.
+create or replace function public.survey_eligible_count()
+returns integer
+language sql stable security definer set search_path = ''
+as $$
+  select count(*)::integer from public.profiles p
+  where public.account_is_active(p.id) and p.id is distinct from public.official_user_id();
+$$;
+
+-- Official posts exist for the caller at all: active account, an official account that is
+-- active and not blocked in either direction.
+create or replace function public.official_visible_to_me()
+returns boolean
+language sql stable security definer set search_path = ''
+as $$
+  select auth.uid() is not null
+    and public.is_account_active()
+    and public.official_user_id() is not null
+    and public.account_is_active(public.official_user_id())
+    and not public.is_blocked_between(auth.uid(), public.official_user_id());
+$$;
+
+-- Is an official post visible to the caller? scope 'feed' (within feed_until), 'profile'
+-- (within profile_until), 'any' (feed, profile, or a running survey in the settings). Survey
+-- posts of cancelled surveys and withdrawn posts are never visible.
+create or replace function public.survey_item_visible(p_item uuid, p_scope text)
+returns boolean
+language sql stable security definer set search_path = ''
+as $$
+  select public.official_visible_to_me() and exists (
+    select 1 from public.survey_items i join public.surveys s on s.id = i.survey_id
+    where i.id = p_item and i.status = 'visible' and i.published_at <= now()
+      and (i.kind = 'results' or s.cancelled_at is null)
+      and case p_scope
+        when 'feed' then now() < i.feed_until
+        when 'profile' then i.profile_until is null or now() < i.profile_until
+        else now() < i.feed_until or i.profile_until is null or now() < i.profile_until
+          or (i.kind = 'survey' and public.survey_state(s.published_at, s.starts_at, s.ends_at, s.cancelled_at, now()) = 'active')
+      end
+  );
+$$;
+
+-- The media of a survey or a results snapshot as users see them: the storage path (signed by
+-- the client, see the storage policy), the checked logo spec, alt text and size.
+create or replace function public.survey_media_json(p_survey uuid, p_scope text)
+returns jsonb
+language sql stable security definer set search_path = ''
+as $$
+  select coalesce(jsonb_agg(jsonb_build_object(
+    'kind', m.kind, 'path', m.storage_path, 'logo', l.spec, 'alt_text', m.alt_text, 'position', m.position,
+    'width', m.width, 'height', m.height
+  ) order by m.position), '[]'::jsonb)
+  from public.survey_media m left join public.logo_library l on l.id = m.logo_id
+  where m.survey_id = p_survey and m.scope = p_scope;
+$$;
+
+-- One official post as users see it. Only these fields; no ids of people, no answers.
+create or replace function public.survey_item_json(p_item uuid)
+returns jsonb
+language sql stable security definer set search_path = ''
+as $$
+  select jsonb_build_object(
+    'item_id', i.id,
+    'kind', i.kind,
+    'survey_id', s.id,
+    'title', s.title,
+    'topic', case when i.kind = 'survey' then s.topic end,
+    'state', public.survey_state(s.published_at, s.starts_at, s.ends_at, s.cancelled_at, now()),
+    'starts_at', s.starts_at,
+    'ends_at', s.ends_at,
+    'published_at', i.published_at,
+    'feed_until', i.feed_until,
+    'profile_until', i.profile_until,
+    'pin_until_answered', i.pin_until_answered,
+    'answered', exists (select 1 from public.survey_participation p where p.survey_id = s.id and p.user_id = auth.uid()),
+    'question_count', (select count(*) from public.survey_questions q where q.survey_id = s.id),
+    'media', case when i.kind = 'survey' then public.survey_media_json(s.id, 'survey') else coalesce(i.snapshot -> 'media', '[]'::jsonb) end,
+    'snapshot', case when i.kind = 'results' then i.snapshot end
+  )
+  from public.survey_items i join public.surveys s on s.id = i.survey_id
+  where i.id = p_item;
+$$;
+
+-- ---------------------------------------------------------------- counters
+
+-- Adds one to a counter. Global limits only (per minute for all, per day and survey), nothing
+-- about the caller is kept. Internal.
+create or replace function public.survey_bump(p_survey uuid, p_event text)
+returns boolean
+language plpgsql security definer set search_path = ''
+as $$
+declare
+  v_minute timestamptz := date_trunc('minute', now());
+  v_day date := (now() at time zone 'Europe/Zurich')::date;
+  v_cap bigint := greatest(500, 30 * coalesce((select s.eligible_count_at_start from public.surveys s where s.id = p_survey), 0));
+  v_count bigint;
+begin
+  insert into public.survey_event_rate as r (minute, count) values (v_minute, 1)
+  on conflict (minute) do update set count = r.count + 1
+  returning r.count into v_count;
+  if v_count > 3000 then
+    return false;
+  end if;
+  delete from public.survey_event_rate r where r.minute < now() - interval '10 minutes';
+  select c.count into v_count from public.survey_counters c
+  where c.scope_key = coalesce(p_survey, '00000000-0000-0000-0000-000000000000'::uuid) and c.day = v_day and c.event = p_event;
+  if coalesce(v_count, 0) >= v_cap then
+    return false;
+  end if;
+  insert into public.survey_counters as c (survey_id, day, event, count) values (p_survey, v_day, p_event, 1)
+  on conflict (scope_key, day, event) do update set count = c.count + 1;
+  return true;
+end;
+$$;
+
+-- Statistics event from the app (allow-list). Only for surveys the caller can see; returns
+-- whether it was counted. Stores nothing about the caller.
+create or replace function public.track_survey_event(p_survey_id uuid, p_event text)
+returns boolean
+language plpgsql security definer set search_path = ''
+as $$
+begin
+  if p_event is null or p_event not in ('card_shown', 'card_opened', 'started', 'dismissed', 'results_shown',
+                                         'results_opened', 'profile_tab_opened', 'settings_list_opened') then
+    return false;
+  end if;
+  if not public.official_visible_to_me() then
+    return false;
+  end if;
+  if p_event in ('profile_tab_opened', 'settings_list_opened') then
+    return public.survey_bump(null, p_event);
+  end if;
+  if not exists (select 1 from public.survey_items i where i.survey_id = p_survey_id and public.survey_item_visible(i.id, 'any')) then
+    return false;
+  end if;
+  return public.survey_bump(p_survey_id, p_event);
+end;
+$$;
+
+-- ---------------------------------------------------------------- reading (app)
+
+-- The official posts of the feed for the caller: at most one survey and one results post on
+-- top (new, not seen yet; or "oben anheften bis beantwortet" until answered or hidden), the
+-- others by date. Hidden posts are left out. For every active account except across a block;
+-- independent of following.
+create or replace function public.get_official_feed_items()
+returns jsonb
+language plpgsql stable security definer set search_path = ''
+as $$
+declare
+  me uuid := auth.uid();
+  result jsonb;
+begin
+  if not public.official_visible_to_me() then
+    return jsonb_build_object('top', '[]'::jsonb, 'items', '[]'::jsonb);
+  end if;
+  with candidates as (
+    select i.id, i.kind, i.published_at, i.pin_until_answered, v.first_seen_at,
+      public.survey_state(s.published_at, s.starts_at, s.ends_at, s.cancelled_at, now()) as state,
+      exists (select 1 from public.survey_participation p where p.survey_id = i.survey_id and p.user_id = me) as answered
+    from public.survey_items i
+    join public.surveys s on s.id = i.survey_id
+    left join public.survey_item_views v on v.item_id = i.id and v.user_id = me
+    where i.status = 'visible' and i.published_at <= now() and now() < i.feed_until
+      and (i.kind = 'results' or s.cancelled_at is null)
+      and v.dismissed_at is null
+  ), wanted as (
+    select c.*, case
+      when c.kind = 'survey' and (c.answered or c.state <> 'active') then false
+      when c.first_seen_at is null then true
+      when c.kind = 'survey' and c.pin_until_answered then true
+      else false
+    end as wants_top
+    from candidates c
+  ), ranked as (
+    select w.*, row_number() over (partition by w.kind, w.wants_top order by w.published_at desc, w.id) as rn from wanted w
+  )
+  select jsonb_build_object(
+    'top', coalesce((select jsonb_agg(public.survey_item_json(r.id) || jsonb_build_object('seen', r.first_seen_at is not null)
+                                      order by r.published_at desc)
+                     from ranked r where r.wants_top and r.rn = 1), '[]'::jsonb),
+    'items', coalesce((select jsonb_agg(public.survey_item_json(r.id) || jsonb_build_object('seen', r.first_seen_at is not null)
+                                        order by r.published_at desc)
+                       from ranked r where not (r.wants_top and r.rn = 1)), '[]'::jsonb)
+  ) into result;
+  return result;
+end;
+$$;
+
+-- The card was visible for at least a second (the app decides): next time it takes its normal
+-- place. The first time counts for the reach ("card_shown"). Returns false if not visible.
+create or replace function public.mark_item_seen(p_item_id uuid)
+returns boolean
+language plpgsql security definer set search_path = ''
+as $$
+declare
+  first boolean;
+  survey uuid;
+begin
+  if not public.survey_item_visible(p_item_id, 'any') then
+    return false;
+  end if;
+  insert into public.survey_item_views (item_id, user_id, first_seen_at) values (p_item_id, auth.uid(), now())
+  on conflict (item_id, user_id) do update set first_seen_at = coalesce(public.survey_item_views.first_seen_at, now())
+  returning (xmax = 0) into first;
+  select i.survey_id into survey from public.survey_items i where i.id = p_item_id;
+  if first then
+    perform public.survey_bump(survey, case when (select i.kind from public.survey_items i where i.id = p_item_id) = 'results'
+                                         then 'results_shown' else 'card_shown' end);
+  end if;
+  return true;
+end;
+$$;
+
+-- Hides a card in the caller's feed (running surveys stay reachable in the settings).
+create or replace function public.dismiss_item(p_item_id uuid)
+returns boolean
+language plpgsql security definer set search_path = ''
+as $$
+declare
+  before timestamptz;
+begin
+  if not public.survey_item_visible(p_item_id, 'any') then
+    return false;
+  end if;
+  select v.dismissed_at into before from public.survey_item_views v where v.item_id = p_item_id and v.user_id = auth.uid();
+  insert into public.survey_item_views (item_id, user_id, first_seen_at, dismissed_at) values (p_item_id, auth.uid(), now(), now())
+  on conflict (item_id, user_id) do update
+    set dismissed_at = coalesce(public.survey_item_views.dismissed_at, now()),
+        first_seen_at = coalesce(public.survey_item_views.first_seen_at, now());
+  if before is null then
+    perform public.survey_bump((select i.survey_id from public.survey_items i where i.id = p_item_id), 'dismissed');
+  end if;
+  return true;
+end;
+$$;
+
+-- Settings, "Umfragen": running surveys (open or answered, with the time left; also hidden
+-- ones) and results of the last 30 days. open_count for the badge on the entry.
+create or replace function public.get_active_surveys()
+returns jsonb
+language plpgsql stable security definer set search_path = ''
+as $$
+declare
+  surveys jsonb;
+  results jsonb;
+begin
+  if not public.official_visible_to_me() then
+    return jsonb_build_object('surveys', '[]'::jsonb, 'results', '[]'::jsonb, 'open_count', 0);
+  end if;
+  select coalesce(jsonb_agg(public.survey_item_json(i.id) order by s.ends_at), '[]'::jsonb) into surveys
+  from public.survey_items i join public.surveys s on s.id = i.survey_id
+  where i.kind = 'survey' and i.status = 'visible' and i.published_at <= now()
+    and public.survey_state(s.published_at, s.starts_at, s.ends_at, s.cancelled_at, now()) = 'active';
+  select coalesce(jsonb_agg(public.survey_item_json(i.id) order by i.published_at desc), '[]'::jsonb) into results
+  from public.survey_items i
+  where i.kind = 'results' and i.published_at > now() - interval '30 days' and public.survey_item_visible(i.id, 'any');
+  return jsonb_build_object(
+    'surveys', surveys,
+    'results', results,
+    'open_count', (select count(*) from jsonb_array_elements(surveys) e where not (e ->> 'answered')::boolean)
+  );
+end;
+$$;
+
+-- The official account's public profile: name, picture, description, badge and how many
+-- surveys and results it shows. Never e-mail or other account data.
+create or replace function public.get_official_profile()
+returns jsonb
+language sql stable security definer set search_path = ''
+as $$
+  select case when public.official_visible_to_me() then (
+    select jsonb_build_object(
+      'user_id', p.id, 'username', p.username, 'display_name', p.display_name, 'avatar_path', p.avatar_path,
+      'bio', o.bio, 'official', true,
+      'survey_count', (select count(*) from public.survey_items i where i.kind = 'survey' and public.survey_item_visible(i.id, 'profile')),
+      'results_count', (select count(*) from public.survey_items i where i.kind = 'results' and public.survey_item_visible(i.id, 'profile'))
+    )
+    from public.official_account o join public.profiles p on p.id = o.user_id
+    where o.id
+  ) end;
+$$;
+
+-- Posts of the official profile, tab 'surveys' or 'results', newest first, before a time.
+create or replace function public.get_official_profile_items(p_tab text, p_before timestamptz default null, p_limit integer default 20)
+returns jsonb
+language sql stable security definer set search_path = ''
+as $$
+  select coalesce(jsonb_agg(public.survey_item_json(x.id) order by x.published_at desc), '[]'::jsonb)
+  from (
+    select i.id, i.published_at from public.survey_items i
+    where i.kind = case p_tab when 'results' then 'results' else 'survey' end
+      and p_tab in ('surveys', 'results')
+      and (p_before is null or i.published_at < p_before)
+      and public.survey_item_visible(i.id, 'profile')
+    order by i.published_at desc
+    limit least(greatest(coalesce(p_limit, 20), 1), 50)
+  ) x;
+$$;
+
+-- A survey for taking part: its questions (without anything about others), whether the caller
+-- has answered, the state and the end. Null when the caller can't see it.
+create or replace function public.get_survey(p_survey_id uuid)
+returns jsonb
+language sql stable security definer set search_path = ''
+as $$
+  select jsonb_build_object(
+    'survey_id', s.id, 'title', s.title, 'topic', s.topic,
+    'state', public.survey_state(s.published_at, s.starts_at, s.ends_at, s.cancelled_at, now()),
+    'ends_at', s.ends_at, 'allow_text', s.allow_text,
+    'answered', exists (select 1 from public.survey_participation p where p.survey_id = s.id and p.user_id = auth.uid()),
+    'media', public.survey_media_json(s.id, 'survey'),
+    'questions', coalesce((select jsonb_agg(jsonb_build_object(
+      'id', q.id, 'kind', q.kind, 'prompt', q.prompt, 'required', q.required, 'options', q.options,
+      'max_choices', q.max_choices, 'scale_min', q.scale_min, 'scale_max', q.scale_max, 'text_max', q.text_max
+    ) order by q.position) from public.survey_questions q where q.survey_id = s.id), '[]'::jsonb)
+  )
+  from public.surveys s
+  join public.survey_items i on i.survey_id = s.id and i.kind = 'survey'
+  where s.id = p_survey_id and public.survey_item_visible(i.id, 'any');
+$$;
+
+-- ---------------------------------------------------------------- taking part
+
+-- Why answers can't be stored (a code), or null. Same as answersProblem() in shared/surveys.ts.
+create or replace function public.survey_answers_problem(p_survey uuid, p_answers jsonb)
+returns text
+language plpgsql stable security definer set search_path = ''
+as $$
+declare
+  q public.survey_questions%rowtype;
+  v jsonb;
+  allow boolean;
+  fits boolean;
+begin
+  if p_answers is null or jsonb_typeof(p_answers) <> 'object' or char_length(p_answers::text) > 12000 then
+    return 'invalid_answers';
+  end if;
+  select s.allow_text into allow from public.surveys s where s.id = p_survey;
+  if exists (select 1 from jsonb_object_keys(p_answers) k
+             where not exists (select 1 from public.survey_questions x where x.survey_id = p_survey and x.id::text = k)) then
+    return 'invalid_answers';
+  end if;
+  for q in select * from public.survey_questions x where x.survey_id = p_survey order by x.position loop
+    v := p_answers -> q.id::text;
+    if v is null or jsonb_typeof(v) = 'null' then
+      if q.required then
+        return 'required_missing';
+      end if;
+      continue;
+    end if;
+    fits := case q.kind
+      when 'single' then public.brand_int_between(v, 0, jsonb_array_length(q.options) - 1)
+      when 'multiple' then jsonb_typeof(v) = 'array' and jsonb_array_length(v) between 1 and q.max_choices
+        and not exists (select 1 from jsonb_array_elements(v) x where not public.brand_int_between(x, 0, jsonb_array_length(q.options) - 1))
+        and (select count(distinct (x #>> '{}')::numeric) from jsonb_array_elements(v) x) = jsonb_array_length(v)
+      when 'scale' then public.brand_int_between(v, q.scale_min, q.scale_max)
+      when 'yes_no' then jsonb_typeof(v) = 'boolean'
+      when 'text' then coalesce(allow, false) and jsonb_typeof(v) = 'string'
+        and char_length(btrim(v #>> '{}', E' \t\r\n')) between 1 and q.text_max
+      else false
+    end;
+    if not coalesce(fits, false) then
+      return 'invalid_answers';
+    end if;
+  end loop;
+  return null;
+end;
+$$;
+
+-- Takes part: participation and the anonymous answers in ONE transaction. Checks: active
+-- account, the survey visible and running, not yet taken part, the answers. Answers can't be
+-- changed afterwards. Returns only "Danke".
+create or replace function public.submit_survey_response(p_survey_id uuid, p_answers jsonb)
+returns jsonb
+language plpgsql security definer set search_path = ''
+as $$
+declare
+  me uuid := auth.uid();
+  s public.surveys%rowtype;
+  item uuid;
+  problem text;
+  response uuid;
+begin
+  if me is null or not public.is_account_active() then
+    raise exception 'account_inactive';
+  end if;
+  select * into s from public.surveys x where x.id = p_survey_id for share;
+  select i.id into item from public.survey_items i where i.survey_id = p_survey_id and i.kind = 'survey';
+  if not found or item is null or not public.survey_item_visible(item, 'any') then
+    raise exception 'survey_not_found';
+  end if;
+  if public.is_official(me) then
+    raise exception 'not_allowed';
+  end if;
+  if public.survey_state(s.published_at, s.starts_at, s.ends_at, s.cancelled_at, now()) <> 'active' then
+    raise exception 'survey_not_active';
+  end if;
+  problem := public.survey_answers_problem(p_survey_id, p_answers);
+  if problem is not null then
+    raise exception '%', problem;
+  end if;
+  insert into public.survey_participation (survey_id, user_id) values (p_survey_id, me) on conflict do nothing;
+  if not found then
+    raise exception 'already_answered';
+  end if;
+  insert into public.survey_responses (survey_id, submitted_day)
+  values (p_survey_id, (now() at time zone 'Europe/Zurich')::date)
+  returning id into response;
+  insert into public.survey_answers (response_id, question_id, value)
+  select response, q.id,
+    case when q.kind = 'text' then to_jsonb(btrim(p_answers ->> q.id::text, E' \t\r\n')) else p_answers -> q.id::text end
+  from public.survey_questions q
+  where q.survey_id = p_survey_id and coalesce(jsonb_typeof(p_answers -> q.id::text), 'null') <> 'null';
+  insert into public.survey_item_views (item_id, user_id, first_seen_at, answered_at) values (item, me, now(), now())
+  on conflict (item_id, user_id) do update
+    set answered_at = now(), first_seen_at = coalesce(public.survey_item_views.first_seen_at, now());
+  perform public.bump_usage('survey_submitted');
+  return jsonb_build_object('ok', true, 'message', 'Danke');
+end;
+$$;
+
+-- ---------------------------------------------------------------- admins
+
+-- Validates and stores the questions of a draft (replacing them). Internal.
+create or replace function public.survey_store_questions(p_survey uuid, p_questions jsonb, p_allow_text boolean)
+returns void
+language plpgsql security definer set search_path = ''
+as $$
+declare
+  q jsonb;
+  pos integer := 0;
+  problem text;
+begin
+  if p_questions is null or jsonb_typeof(p_questions) <> 'array' or jsonb_array_length(p_questions) > 10 then
+    raise exception 'invalid_questions';
+  end if;
+  for q in select x.value from jsonb_array_elements(p_questions) x loop
+    problem := public.survey_question_problem(q, p_allow_text);
+    if problem is not null then
+      raise exception '%', problem;
+    end if;
+  end loop;
+  delete from public.survey_questions x where x.survey_id = p_survey;
+  for q in select x.value from jsonb_array_elements(p_questions) x loop
+    insert into public.survey_questions (survey_id, position, kind, prompt, required, options, max_choices, scale_min, scale_max, text_max)
+    values (
+      p_survey, pos, q ->> 'kind', btrim(q ->> 'prompt', E' \t\r\n'), (q ->> 'required')::boolean,
+      case when q ->> 'kind' in ('single', 'multiple')
+        then (select jsonb_agg(to_jsonb(btrim(o #>> '{}', E' \t\r\n'))) from jsonb_array_elements(q -> 'options') o) end,
+      (q ->> 'max_choices')::numeric::integer, (q ->> 'scale_min')::numeric::integer, (q ->> 'scale_max')::numeric::integer,
+      (q ->> 'text_max')::numeric::integer
+    );
+    pos := pos + 1;
+  end loop;
+end;
+$$;
+
+-- What the log keeps of a survey (texts as hash; never answers).
+create or replace function public.survey_log_summary(p_survey uuid)
+returns jsonb
+language sql stable security definer set search_path = ''
+as $$
+  select jsonb_build_object(
+    'title', s.title,
+    'topic_hash', encode(sha256(convert_to(s.topic, 'UTF8')), 'hex'),
+    'questions_hash', encode(sha256(convert_to(coalesce((select jsonb_agg(to_jsonb(q) - 'id' - 'survey_id' order by q.position)
+                                                        from public.survey_questions q where q.survey_id = s.id), '[]'::jsonb)::text, 'UTF8')), 'hex'),
+    'questions', (select count(*) from public.survey_questions q where q.survey_id = s.id),
+    'starts_at', s.starts_at, 'ends_at', s.ends_at, 'allow_text', s.allow_text,
+    'pin_until_answered', s.pin_until_answered, 'feed_days', s.feed_days, 'profile_days', s.profile_days
+  )
+  from public.surveys s where s.id = p_survey;
+$$;
+
+-- Everything about one survey for the dashboard (questions, media, counts, whether locked).
+create or replace function public.admin_survey_get(p_survey_id uuid)
+returns jsonb
+language plpgsql stable security definer set search_path = ''
+as $$
+begin
+  perform public.require_admin();
+  return (
+    select to_jsonb(s) || jsonb_build_object(
+      'state', public.survey_state(s.published_at, s.starts_at, s.ends_at, s.cancelled_at, now()),
+      'locked', exists (select 1 from public.survey_responses r where r.survey_id = s.id),
+      'participants', (select count(*) from public.survey_participation p where p.survey_id = s.id),
+      'responses', (select count(*) from public.survey_responses r where r.survey_id = s.id),
+      'eligible_now', public.survey_eligible_count(),
+      'created_by_name', (select u.username from public.profiles u where u.id = s.created_by),
+      'questions', coalesce((select jsonb_agg(to_jsonb(q) - 'survey_id' order by q.position) from public.survey_questions q where q.survey_id = s.id), '[]'::jsonb),
+      'media', coalesce((select jsonb_agg(jsonb_build_object('id', m.id, 'scope', m.scope, 'kind', m.kind, 'path', m.storage_path,
+                                                             'logo_id', m.logo_id, 'logo', l.spec, 'alt_text', m.alt_text,
+                                                             'position', m.position, 'width', m.width, 'height', m.height)
+                                          order by m.scope, m.position)
+                         from public.survey_media m left join public.logo_library l on l.id = m.logo_id where m.survey_id = s.id), '[]'::jsonb),
+      'items', coalesce((select jsonb_agg(jsonb_build_object('id', i.id, 'kind', i.kind, 'status', i.status, 'published_at', i.published_at,
+                                                             'feed_until', i.feed_until, 'profile_until', i.profile_until)
+                                          order by i.published_at)
+                         from public.survey_items i where i.survey_id = s.id), '[]'::jsonb)
+    )
+    from public.surveys s where s.id = p_survey_id
+  );
+end;
+$$;
+
+-- All surveys with state, answers and participation rate. When a survey has ended, the number
+-- of eligible accounts at the end is fixed here (no background job).
+create or replace function public.admin_survey_list()
+returns jsonb
+language plpgsql security definer set search_path = ''
+as $$
+begin
+  perform public.require_admin();
+  update public.surveys s set eligible_count_at_close = public.survey_eligible_count(), status = 'closed'
+  where s.eligible_count_at_close is null and s.cancelled_at is null and s.published_at is not null and s.ends_at <= now();
+  return coalesce((
+    select jsonb_agg(jsonb_build_object(
+      'id', s.id, 'title', s.title,
+      'state', public.survey_state(s.published_at, s.starts_at, s.ends_at, s.cancelled_at, now()),
+      'starts_at', s.starts_at, 'ends_at', s.ends_at, 'published_at', s.published_at, 'cancelled_at', s.cancelled_at,
+      'participants', (select count(*) from public.survey_participation p where p.survey_id = s.id),
+      'responses', (select count(*) from public.survey_responses r where r.survey_id = s.id),
+      'eligible_count_at_start', s.eligible_count_at_start, 'eligible_count_at_close', s.eligible_count_at_close,
+      'questions', (select count(*) from public.survey_questions q where q.survey_id = s.id),
+      'locked', exists (select 1 from public.survey_responses r where r.survey_id = s.id),
+      'created_at', s.created_at, 'updated_at', s.updated_at
+    ) order by coalesce(s.published_at, s.created_at) desc)
+    from public.surveys s
+  ), '[]'::jsonb);
+end;
+$$;
+
+-- Creates (p_id null) or changes a survey. Everything is checked again. Drafts: everything.
+-- Published without answers: texts, questions and options (the start only while planned).
+-- Once there is an answer: refused ("survey_locked"; extend, cancel, images stay possible).
+-- p_survey: {title, topic, starts_at|null (= start when publishing), ends_at|null,
+-- pin_until_answered, allow_text, feed_days, profile_days|null, questions: [...]}
+create or replace function public.admin_survey_save(p_id uuid, p_survey jsonb)
+returns uuid
+language plpgsql security definer set search_path = ''
+as $$
+declare
+  existing public.surveys%rowtype;
+  state text;
+  saved uuid;
+  v_title text := btrim(p_survey ->> 'title', E' \t\r\n');
+  v_topic text := btrim(p_survey ->> 'topic', E' \t\r\n');
+  starts timestamptz;
+  ends timestamptz;
+  allow boolean := coalesce((p_survey ->> 'allow_text')::boolean, false);
+  feed integer := coalesce((p_survey ->> 'feed_days')::integer, 7);
+  profile integer := case when p_survey ? 'profile_days' then (p_survey ->> 'profile_days')::integer else 90 end;
+  before jsonb;
+begin
+  perform public.require_admin();
+  if p_survey is null or jsonb_typeof(p_survey) <> 'object' or octet_length(p_survey::text) > 60000 then
+    raise exception 'invalid_survey';
+  end if;
+  begin
+    starts := (p_survey ->> 'starts_at')::timestamptz;
+    ends := (p_survey ->> 'ends_at')::timestamptz;
+  exception when others then
+    raise exception 'invalid_dates';
+  end;
+  if v_title is null or char_length(v_title) not between 3 and 120 then
+    raise exception 'invalid_title';
+  end if;
+  if v_topic is null or char_length(v_topic) not between 10 and 1000 then
+    raise exception 'invalid_topic';
+  end if;
+  if feed not between 1 and 90 or (profile is not null and profile not between 1 and 3650) then
+    raise exception 'invalid_display';
+  end if;
+  if p_id is null and starts is not null and ends is not null
+    and (ends < starts + interval '1 hour' or ends > starts + interval '90 days') then
+    raise exception 'invalid_dates';
+  end if;
+  if not allow and exists (select 1 from jsonb_array_elements(coalesce(p_survey -> 'questions', '[]')) q where q ->> 'kind' = 'text') then
+    raise exception 'text_not_allowed';
+  end if;
+
+  if p_id is null then
+    insert into public.surveys (title, topic, starts_at, ends_at, pin_until_answered, allow_text, feed_days, profile_days, created_by)
+    values (v_title, v_topic, starts, ends, coalesce((p_survey ->> 'pin_until_answered')::boolean, false), allow, feed, profile, auth.uid())
+    returning id into saved;
+    perform public.survey_store_questions(saved, coalesce(p_survey -> 'questions', '[]'), allow);
+    perform public.log_moderation_action('survey_create', 'survey', saved, null, null, 'Umfrage angelegt', null,
+      jsonb_build_object('after', public.survey_log_summary(saved)));
+    return saved;
+  end if;
+
+  select * into existing from public.surveys s where s.id = p_id for update;
+  if not found then
+    raise exception 'survey_not_found';
+  end if;
+  state := public.survey_state(existing.published_at, existing.starts_at, existing.ends_at, existing.cancelled_at, now());
+  if state in ('closed', 'cancelled') then
+    raise exception 'survey_finished';
+  end if;
+  if exists (select 1 from public.survey_responses r where r.survey_id = p_id) then
+    raise exception 'survey_locked';
+  end if;
+  -- Once published, start, end and display time stay (the end changes only by extending).
+  if existing.published_at is not null then
+    starts := existing.starts_at;
+    ends := existing.ends_at;
+    feed := existing.feed_days;
+    profile := existing.profile_days;
+    if jsonb_array_length(coalesce(p_survey -> 'questions', '[]')) = 0 then
+      raise exception 'no_questions';
+    end if;
+  end if;
+  if starts is not null and ends is not null
+    and (ends < starts + interval '1 hour' or ends > starts + interval '90 days') then
+    raise exception 'invalid_dates';
+  end if;
+  before := public.survey_log_summary(p_id);
+  update public.surveys set
+    title = v_title, topic = v_topic, starts_at = starts, ends_at = ends,
+    pin_until_answered = coalesce((p_survey ->> 'pin_until_answered')::boolean, false), allow_text = allow,
+    feed_days = feed, profile_days = profile, updated_at = now()
+  where id = p_id;
+  perform public.survey_store_questions(p_id, coalesce(p_survey -> 'questions', '[]'), allow);
+  if existing.published_at is not null then
+    update public.survey_items i set
+      pin_until_answered = coalesce((p_survey ->> 'pin_until_answered')::boolean, false)
+    where i.survey_id = p_id and i.kind = 'survey';
+  end if;
+  perform public.log_moderation_action('survey_update', 'survey', p_id, null, null, 'Umfrage geändert', null,
+    jsonb_build_object('before', before, 'after', public.survey_log_summary(p_id)));
+  return p_id;
+end;
+$$;
+
+-- Publishes a draft. Needs the confirmation word and a fresh two-factor step (like other
+-- delicate actions): an official account, title, topic, 1 to 10 valid questions, the end set
+-- (start: now if empty). Fixes the number of eligible accounts and creates the official post.
+create or replace function public.admin_survey_publish(p_id uuid, p_confirm text)
+returns jsonb
+language plpgsql security definer set search_path = ''
+as $$
+declare
+  s public.surveys%rowtype;
+  starts timestamptz;
+  eligible integer;
+  q record;
+  problem text;
+begin
+  perform public.require_admin();
+  if p_confirm is distinct from 'VERÖFFENTLICHEN' then
+    raise exception 'confirmation_required';
+  end if;
+  if not public.reset_fresh_totp(300) then
+    raise exception 'totp_required';
+  end if;
+  if public.official_user_id() is null then
+    raise exception 'official_account_missing';
+  end if;
+  select * into s from public.surveys x where x.id = p_id for update;
+  if not found then
+    raise exception 'survey_not_found';
+  end if;
+  if s.published_at is not null then
+    raise exception 'already_published';
+  end if;
+  if not exists (select 1 from public.survey_questions x where x.survey_id = p_id) then
+    raise exception 'no_questions';
+  end if;
+  for q in select * from public.survey_questions x where x.survey_id = p_id loop
+    problem := public.survey_question_problem(jsonb_build_object(
+      'kind', q.kind, 'prompt', q.prompt, 'required', q.required, 'options', q.options, 'max_choices', q.max_choices,
+      'scale_min', q.scale_min, 'scale_max', q.scale_max, 'text_max', q.text_max), s.allow_text);
+    if problem is not null then
+      raise exception '%', problem;
+    end if;
+  end loop;
+  if s.ends_at is null then
+    raise exception 'invalid_dates';
+  end if;
+  starts := coalesce(s.starts_at, now());
+  if starts < now() - interval '5 minutes' then
+    raise exception 'start_in_past';
+  end if;
+  if s.ends_at < starts + interval '1 hour' or s.ends_at > starts + interval '90 days' then
+    raise exception 'invalid_dates';
+  end if;
+  eligible := public.survey_eligible_count();
+  update public.surveys set
+    starts_at = starts, published_at = now(), updated_at = now(),
+    status = case when starts > now() then 'scheduled' else 'active' end,
+    feed_until = starts + make_interval(days => s.feed_days),
+    profile_until = case when s.profile_days is null then null else starts + make_interval(days => s.profile_days) end,
+    eligible_count_at_start = eligible
+  where id = p_id;
+  insert into public.survey_items (kind, survey_id, published_at, feed_until, profile_until, pin_until_answered, created_by)
+  values ('survey', p_id, starts, starts + make_interval(days => s.feed_days),
+          case when s.profile_days is null then null else starts + make_interval(days => s.profile_days) end,
+          s.pin_until_answered, auth.uid());
+  perform public.log_moderation_action('survey_publish', 'survey', p_id, null, null, 'Umfrage veröffentlicht', null,
+    jsonb_build_object('after', public.survey_log_summary(p_id), 'eligible', eligible));
+  return jsonb_build_object('starts_at', starts, 'eligible', eligible);
+end;
+$$;
+
+-- Only a later end (at most 90 days after the start), while planned or running.
+create or replace function public.admin_survey_extend(p_id uuid, p_ends_at timestamptz)
+returns void
+language plpgsql security definer set search_path = ''
+as $$
+declare
+  s public.surveys%rowtype;
+begin
+  perform public.require_admin();
+  select * into s from public.surveys x where x.id = p_id for update;
+  if not found then
+    raise exception 'survey_not_found';
+  end if;
+  if public.survey_state(s.published_at, s.starts_at, s.ends_at, s.cancelled_at, now()) not in ('scheduled', 'active') then
+    raise exception 'survey_finished';
+  end if;
+  if p_ends_at is null or p_ends_at <= s.ends_at or p_ends_at > s.starts_at + interval '90 days' or p_ends_at <= now() then
+    raise exception 'invalid_dates';
+  end if;
+  update public.surveys set ends_at = p_ends_at, updated_at = now() where id = p_id;
+  perform public.log_moderation_action('survey_extend', 'survey', p_id, null, null, 'Umfrage verlängert', null,
+    jsonb_build_object('before', jsonb_build_object('ends_at', s.ends_at), 'after', jsonb_build_object('ends_at', p_ends_at)));
+end;
+$$;
+
+-- Cancels a planned or running survey (reason required). keep_answers: the answers stay for the
+-- internal evaluation; otherwise answers, participation and counters of the survey are deleted.
+-- The survey post disappears.
+create or replace function public.admin_survey_cancel(p_id uuid, p_reason text, p_keep_answers boolean)
+returns jsonb
+language plpgsql security definer set search_path = ''
+as $$
+declare
+  s public.surveys%rowtype;
+  reason text := btrim(coalesce(p_reason, ''));
+  responses integer;
+begin
+  perform public.require_admin();
+  if char_length(reason) not between 10 and 500 then
+    raise exception 'invalid_reason';
+  end if;
+  if p_keep_answers is null then
+    raise exception 'invalid_choice';
+  end if;
+  select * into s from public.surveys x where x.id = p_id for update;
+  if not found then
+    raise exception 'survey_not_found';
+  end if;
+  if public.survey_state(s.published_at, s.starts_at, s.ends_at, s.cancelled_at, now()) not in ('scheduled', 'active') then
+    raise exception 'survey_finished';
+  end if;
+  select count(*) into responses from public.survey_responses r where r.survey_id = p_id;
+  update public.surveys set cancelled_at = now(), cancel_reason = reason, cancel_keep_answers = p_keep_answers,
+    status = 'cancelled', eligible_count_at_close = public.survey_eligible_count(), updated_at = now()
+  where id = p_id;
+  update public.survey_items set status = 'withdrawn', withdrawn_at = now()
+  where survey_id = p_id and kind = 'survey' and status = 'visible';
+  if not p_keep_answers then
+    delete from public.survey_responses r where r.survey_id = p_id;
+    delete from public.survey_participation p where p.survey_id = p_id;
+    delete from public.survey_counters c where c.survey_id = p_id;
+  end if;
+  perform public.log_moderation_action('survey_cancel', 'survey', p_id, null, null, reason, null,
+    jsonb_build_object('keep_answers', p_keep_answers, 'responses', responses));
+  return jsonb_build_object('responses', responses, 'kept', p_keep_answers);
+end;
+$$;
+
+-- Deletes a draft (never a published survey).
+create or replace function public.admin_survey_delete(p_id uuid)
+returns void
+language plpgsql security definer set search_path = ''
+as $$
+declare
+  s public.surveys%rowtype;
+begin
+  perform public.require_admin();
+  select * into s from public.surveys x where x.id = p_id for update;
+  if not found then
+    raise exception 'survey_not_found';
+  end if;
+  if s.published_at is not null then
+    raise exception 'not_a_draft';
+  end if;
+  perform public.log_moderation_action('survey_delete', 'survey', p_id, null, null, 'Umfrage-Entwurf gelöscht', null,
+    jsonb_build_object('before', public.survey_log_summary(p_id)));
+  delete from public.surveys where id = p_id;
+end;
+$$;
+
+-- Withdraws an official post (survey or results) at once.
+create or replace function public.admin_item_withdraw(p_item_id uuid)
+returns void
+language plpgsql security definer set search_path = ''
+as $$
+declare
+  i public.survey_items%rowtype;
+begin
+  perform public.require_admin();
+  select * into i from public.survey_items x where x.id = p_item_id for update;
+  if not found then
+    raise exception 'item_not_found';
+  end if;
+  if i.status = 'withdrawn' then
+    return;
+  end if;
+  update public.survey_items set status = 'withdrawn', withdrawn_at = now() where id = p_item_id;
+  perform public.log_moderation_action('survey_item_withdraw', 'survey_item', p_item_id, null, null, 'Offizieller Beitrag zurückgezogen', null,
+    jsonb_build_object('kind', i.kind, 'survey_id', i.survey_id));
+end;
+$$;
+
+-- ---------------------------------------------------------------- media (admins)
+
+-- A path for a new image (the Edge Function survey_media_upload stores the file there with the
+-- service role, then registers it). Checks the survey and the limit first.
+create or replace function public.admin_survey_media_slot(p_survey_id uuid, p_scope text, p_ext text)
+returns text
+language plpgsql security definer set search_path = ''
+as $$
+declare
+  s public.surveys%rowtype;
+begin
+  perform public.require_admin();
+  if p_scope is null or p_scope not in ('survey', 'results') or p_ext is null or p_ext not in ('png', 'jpg', 'webp') then
+    raise exception 'invalid_media';
+  end if;
+  select * into s from public.surveys x where x.id = p_survey_id;
+  if not found then
+    raise exception 'survey_not_found';
+  end if;
+  if s.cancelled_at is not null and p_scope = 'survey' then
+    raise exception 'survey_finished';
+  end if;
+  if (select count(*) from public.survey_media m where m.survey_id = p_survey_id and m.scope = p_scope and m.kind = 'image') >= 4 then
+    raise exception 'too_many_images';
+  end if;
+  return 'survey/' || p_survey_id || '/' || p_scope || '-' || gen_random_uuid() || '.' || p_ext;
+end;
+$$;
+
+create or replace function public.admin_survey_media_register(
+  p_survey_id uuid, p_scope text, p_path text, p_alt_text text, p_width integer, p_height integer, p_bytes integer
+)
+returns uuid
+language plpgsql security definer set search_path = ''
+as $$
+declare
+  saved uuid;
+begin
+  perform public.require_admin();
+  if p_path is null or split_part(p_path, '/', 2) <> p_survey_id::text or split_part(split_part(p_path, '/', 3), '-', 1) <> p_scope then
+    raise exception 'invalid_media';
+  end if;
+  insert into public.survey_media (survey_id, scope, kind, storage_path, alt_text, position, width, height, bytes)
+  values (p_survey_id, p_scope, 'image', p_path, btrim(p_alt_text), coalesce((select max(m.position) + 1 from public.survey_media m
+          where m.survey_id = p_survey_id and m.scope = p_scope), 0), p_width, p_height, p_bytes)
+  returning id into saved;
+  perform public.log_moderation_action('survey_media_add', 'survey', p_survey_id, null, null, 'Bild zur Umfrage hinzugefügt', null,
+    jsonb_build_object('scope', p_scope, 'path', p_path, 'bytes', p_bytes, 'width', p_width, 'height', p_height));
+  return saved;
+end;
+$$;
+
+create or replace function public.admin_survey_media_add_logo(p_survey_id uuid, p_scope text, p_logo_id uuid, p_alt_text text)
+returns uuid
+language plpgsql security definer set search_path = ''
+as $$
+declare
+  saved uuid;
+begin
+  perform public.require_admin();
+  if p_scope is null or p_scope not in ('survey', 'results') then
+    raise exception 'invalid_media';
+  end if;
+  if not exists (select 1 from public.surveys s where s.id = p_survey_id) then
+    raise exception 'survey_not_found';
+  end if;
+  if not exists (select 1 from public.logo_library l where l.id = p_logo_id) then
+    raise exception 'logo_not_found';
+  end if;
+  insert into public.survey_media (survey_id, scope, kind, logo_id, alt_text, position)
+  values (p_survey_id, p_scope, 'logo', p_logo_id, btrim(p_alt_text),
+          coalesce((select max(m.position) + 1 from public.survey_media m where m.survey_id = p_survey_id and m.scope = p_scope), 0))
+  returning id into saved;
+  perform public.log_moderation_action('survey_media_add', 'survey', p_survey_id, null, null, 'Logo zur Umfrage hinzugefügt', null,
+    jsonb_build_object('scope', p_scope, 'logo_id', p_logo_id));
+  return saved;
+end;
+$$;
+
+-- Alt text and order (positions are given as the new order of the ids).
+create or replace function public.admin_survey_media_update(p_media_id uuid, p_alt_text text, p_position integer)
+returns void
+language plpgsql security definer set search_path = ''
+as $$
+declare
+  m public.survey_media%rowtype;
+begin
+  perform public.require_admin();
+  select * into m from public.survey_media x where x.id = p_media_id for update;
+  if not found then
+    raise exception 'media_not_found';
+  end if;
+  if p_position is null or p_position not between 0 and 6 then
+    raise exception 'invalid_media';
+  end if;
+  -- Swap with the one at the target position.
+  update public.survey_media x set position = m.position
+  where x.survey_id = m.survey_id and x.scope = m.scope and x.position = p_position and x.id <> m.id;
+  update public.survey_media set alt_text = btrim(p_alt_text), position = p_position where id = p_media_id;
+end;
+$$;
+
+-- Removes a media row; returns the storage path of an image (the Edge Function then deletes the
+-- file) or null for a logo. Media of a published results post stay (its snapshot shows them).
+create or replace function public.admin_survey_media_remove(p_media_id uuid)
+returns text
+language plpgsql security definer set search_path = ''
+as $$
+declare
+  m public.survey_media%rowtype;
+begin
+  perform public.require_admin();
+  select * into m from public.survey_media x where x.id = p_media_id for update;
+  if not found then
+    raise exception 'media_not_found';
+  end if;
+  if m.scope = 'results' and exists (select 1 from public.survey_items i where i.survey_id = m.survey_id and i.kind = 'results') then
+    raise exception 'media_in_use';
+  end if;
+  delete from public.survey_media where id = p_media_id;
+  perform public.log_moderation_action('survey_media_remove', 'survey', m.survey_id, null, null, 'Medium der Umfrage entfernt', null,
+    jsonb_build_object('scope', m.scope, 'kind', m.kind, 'path', m.storage_path, 'logo_id', m.logo_id));
+  return m.storage_path;
+end;
+$$;
+
+-- All registered image paths (the Edge Function removes files in the bucket that aren't).
+create or replace function public.admin_survey_media_paths()
+returns text[]
+language plpgsql stable security definer set search_path = ''
+as $$
+begin
+  perform public.require_admin();
+  return array(select m.storage_path from public.survey_media m where m.storage_path is not null);
+end;
+$$;
+
+-- ---------------------------------------------------------------- storage
+
+insert into storage.buckets (id, name, public, file_size_limit, allowed_mime_types)
+values ('survey-media', 'survey-media', false, 2097152, array['image/png', 'image/jpeg', 'image/webp'])
+on conflict (id) do update
+  set public = false,
+      file_size_limit = excluded.file_size_limit,
+      allowed_mime_types = excluded.allowed_mime_types;
+
+-- May the caller read this file? Admins always (previews); users only for an official post
+-- they can see (the survey's own images, or images chosen for its results).
+create or replace function public.survey_media_readable(p_name text)
+returns boolean
+language sql stable security definer set search_path = ''
+as $$
+  select public.is_admin() or exists (
+    select 1 from public.survey_media m
+    join public.survey_items i on i.survey_id = m.survey_id and i.kind = m.scope
+    where m.storage_path = p_name and public.survey_item_visible(i.id, 'any')
+  );
+$$;
+
+drop policy if exists "survey-media: read visible" on storage.objects;
+create policy "survey-media: read visible" on storage.objects
+  for select to authenticated
+  using (bucket_id = 'survey-media' and public.survey_media_readable(name));
+-- No insert, update or delete policies: files come and go only through the Edge Function.
+
+-- ---------------------------------------------------------------- usage events
+
+insert into public.usage_event_types (name, area, source) values
+  ('survey_card_opened', 'feed', 'client'),
+  ('survey_submitted', 'feed', 'server'),
+  ('results_opened', 'feed', 'client')
+on conflict (name) do nothing;
+
+-- ---------------------------------------------------------------- rights
+
+do $$
+declare
+  f text;
+begin
+  -- Internal: never callable by clients.
+  foreach f in array array[
+    'public.official_user_id()', 'public.survey_question_problem(jsonb, boolean)',
+    'public.survey_guard_questions()', 'public.survey_guard_update()', 'public.survey_guard_answers()',
+    'public.survey_guard_items()', 'public.survey_guard_media()', 'public.guard_official_messages()',
+    'public.survey_state_of(uuid)', 'public.survey_eligible_count()', 'public.official_visible_to_me()',
+    'public.survey_item_visible(uuid, text)', 'public.survey_media_json(uuid, text)', 'public.survey_item_json(uuid)',
+    'public.survey_bump(uuid, text)', 'public.survey_answers_problem(uuid, jsonb)',
+    'public.survey_store_questions(uuid, jsonb, boolean)', 'public.survey_log_summary(uuid)'
+  ] loop
+    execute format('revoke all on function %s from public, anon, authenticated', f);
+  end loop;
+  -- Signed-in users (each checks the account and visibility itself).
+  foreach f in array array[
+    'public.track_survey_event(uuid, text)', 'public.get_official_feed_items()', 'public.mark_item_seen(uuid)',
+    'public.dismiss_item(uuid)', 'public.get_active_surveys()', 'public.get_official_profile()',
+    'public.get_official_profile_items(text, timestamptz, integer)', 'public.get_survey(uuid)',
+    'public.submit_survey_response(uuid, jsonb)', 'public.is_official(uuid)', 'public.survey_media_readable(text)',
+    'public.survey_state(timestamptz, timestamptz, timestamptz, timestamptz, timestamptz)',
+    -- Admins (each checks admin and two-factor first).
+    'public.admin_survey_get(uuid)', 'public.admin_survey_list()', 'public.admin_survey_save(uuid, jsonb)',
+    'public.admin_survey_publish(uuid, text)', 'public.admin_survey_extend(uuid, timestamptz)',
+    'public.admin_survey_cancel(uuid, text, boolean)', 'public.admin_survey_delete(uuid)', 'public.admin_item_withdraw(uuid)',
+    'public.admin_survey_media_slot(uuid, text, text)',
+    'public.admin_survey_media_register(uuid, text, text, text, integer, integer, integer)',
+    'public.admin_survey_media_add_logo(uuid, text, uuid, text)', 'public.admin_survey_media_update(uuid, text, integer)',
+    'public.admin_survey_media_remove(uuid)', 'public.admin_survey_media_paths()'
+  ] loop
+    execute format('revoke all on function %s from public, anon', f);
+    execute format('grant execute on function %s to authenticated', f);
+  end loop;
+end;
+$$;

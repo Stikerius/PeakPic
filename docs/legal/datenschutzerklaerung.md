@@ -54,6 +54,10 @@ TODO: Rechtsgrundlage der Servicemitteilungen (Vertrag, berechtigtes Interesse, 
 
 TODO: prüfen und bestätigen, dass dabei Standortdaten (EXIF) entfernt werden.
 
+**Umfragen:** Das offizielle PeakPic-Konto veröffentlicht gelegentlich Umfragen. Die Teilnahme ist freiwillig. Wir speichern getrennt (1) dass du an einer Umfrage teilgenommen hast und wann, damit niemand zweimal teilnimmt, und (2) deine Antworten ohne Bezug zu deinem Konto: mit einer zufälligen Kennung und nur dem Tag, ohne Uhrzeit. Nichts verbindet die beiden. Ausserdem speichern wir, welche Umfragekarten du gesehen oder ausgeblendet hast, damit eine neue Umfrage zuerst oben erscheint und danach an ihren Platz rückt; diese Angaben siehst nur du. Für die Statistik zählen wir Tagessummen ohne Personenbezug (zum Beispiel „Karte geöffnet“). Veröffentlichte Auswertungen enthalten nur zusammengefasste Zahlen, und nur wenn mindestens 5 Personen geantwortet haben. Freitext-Antworten sind nur möglich, wenn eine Umfrage sie ausdrücklich zulässt; schreib dort nichts, woran man dich erkennen kann.
+
+TODO (Rechtsprüfung): Rechtsgrundlage der Umfragen (Einwilligung durch Teilnahme oder berechtigtes Interesse), Aufbewahrungsdauer der anonymen Antworten und die Frage, ob einzelne zitierte Freitexte Personendaten sein können.
+
 **Anonyme Nutzungsstatistik:** Um zu sehen, welche Bereiche der App genutzt werden, zählen wir Tagessummen für alle Nutzer zusammen, zum Beispiel „heute 120 Aufrufe des Feeds“ oder „heute 35 neue Beiträge“. Dabei speichern wir weder dein Konto noch dein Gerät, keine Sitzungskennung und keine Inhalte, und es gibt keine einzelnen Ereignisse, die sich dir zuordnen lassen. Die Aufrufe werden auf deinem Gerät gesammelt und höchstens einmal pro Minute als Summe gesendet. Du kannst das Zählen der Aufrufe in den Einstellungen unter Datenschutz → Anonyme Nutzungsstatistik ausschalten; die Wahl wird nur auf deinem Gerät gespeichert. Die Zahl neu erstellter Inhalte (Beiträge, Kommentare, Nachrichten usw.) zählt der Server unabhängig davon, ebenfalls nur als Tagessumme. Zweck: Verbesserung der App (berechtigtes Interesse).
 
 TODO: Unser Hosting-Anbieter Supabase führt eigene technische Zugriffsprotokolle (zum Beispiel Anfragen an den Server). Inhalt und Aufbewahrung prüfen und hier angeben.
@@ -104,6 +108,7 @@ Du kannst dein Konto jederzeit in der App löschen (Einstellungen → Konto → 
 - Meldungen und Entscheidungen der Moderation, mit einer zufälligen Kennung statt deines Namens. Namen und Nachrichten an dich werden aus diesen Einträgen entfernt.
 - Kopien gemeldeter Nachrichten samt Kontext, als Nachweis für die Moderation.
 - Ein Löschprotokoll mit Zeitpunkt und einem nicht umkehrbaren Prüfwert (Hash) der alten Kennung.
+- Deine Antworten in Umfragen: Sie waren nie mit deinem Konto verbunden und bleiben als anonyme Antworten in der Auswertung. Gelöscht wird, dass du teilgenommen hast.
 
 Diese Einträge bewahren wir {{AUFBEWAHRUNG_MODERATION}} auf.
 

@@ -468,6 +468,7 @@ const DELETION_ERRORS: Record<string, string> = {
   not_authorized: "Nur Admins mit Zwei-Faktor-Anmeldung.",
   cannot_delete_self: "Das eigene Konto lässt sich hier nicht löschen.",
   cannot_delete_staff: "Moderatoren und Admins lassen sich nicht löschen. Zuerst die Rolle per SQL entfernen.",
+  cannot_delete_official: "Das offizielle Konto lässt sich nicht löschen. Zuerst ein anderes Konto als offizielles festlegen (official-account-setup.sql).",
   username_mismatch: "Der Username stimmt nicht.",
   not_found: "Konto nicht gefunden.",
   invalid_reason: "Begründung: mindestens 10 Zeichen.",

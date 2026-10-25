@@ -21,6 +21,7 @@ const CATEGORY_LABELS: readonly [string, string][] = [
   ["stories", "Storys und Highlights"],
   ["social", "Follower und Gefolgte"],
   ["notifications", "Benachrichtigungen"],
+  ["surveys", "Umfrage-Teilnahmen"],
   ["other", "Einstellungen und abgegebene Meldungen"],
 ];
 

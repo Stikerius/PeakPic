@@ -1,5 +1,5 @@
 -- PeakPic: read-only checks for the data reset ("App-Neustart"), the e-mail notices
--- ("Mitteilungen") and the design (logos, animation presets, colour sets). NOT part of schema.sql; run by
+-- ("Mitteilungen"), the design (logos, animation presets, colour sets) and the surveys. NOT part of schema.sql; run by
 -- hand in the Supabase SQL editor. Changes nothing. Every row with ok = false needs a look.
 
 select * from (
@@ -13,7 +13,9 @@ select * from (
   from unnest(array['app_settings', 'protected_accounts', 'reset_jobs', 'reset_job_targets', 'seed_markers',
                      'mail_campaigns', 'mail_recipients', 'mail_templates', 'mail_tests',
                      'logo_library', 'animation_presets', 'design_assignments', 'app_design_config', 'logo_import_calls',
-                     'brand_colors', 'preset_versions']) t
+                     'brand_colors', 'preset_versions',
+                     'official_account', 'surveys', 'survey_questions', 'survey_media', 'survey_participation',
+                     'survey_responses', 'survey_answers', 'survey_items', 'survey_counters', 'survey_event_rate']) t
 
   union all
   -- RLS on, and no policies at all (access only through the functions).
@@ -24,7 +26,9 @@ select * from (
     and c.relname in ('app_settings', 'protected_accounts', 'reset_jobs', 'reset_job_targets', 'seed_markers',
                       'mail_campaigns', 'mail_recipients', 'mail_templates', 'mail_tests',
                       'logo_library', 'animation_presets', 'design_assignments', 'app_design_config', 'logo_import_calls',
-                      'brand_colors', 'preset_versions')
+                      'brand_colors', 'preset_versions',
+                      'official_account', 'surveys', 'survey_questions', 'survey_media', 'survey_participation',
+                      'survey_responses', 'survey_answers', 'survey_items', 'survey_counters', 'survey_event_rate')
 
   union all
   -- Every reset function: security definer with a fixed search_path.
@@ -105,6 +109,71 @@ select * from (
     ('falling times', '{"version":2,"duration":8,"strokeWidth":2,"tracks":[{"kind":"rotate","enabled":true,"target":{"type":"all"},"keyframes":[{"t":0.5,"v":0,"ease":{"type":"hold"}},{"t":0.2,"v":0,"ease":{"type":"hold"}}],"stagger":{"mode":"none","amount":0,"seed":0},"repeat":1}]}'::jsonb),
     ('41 sparks', '{"version":2,"duration":8,"strokeWidth":2,"tracks":[{"kind":"sparks","enabled":true,"target":{"type":"all"},"keyframes":[{"t":0,"v":0,"ease":{"type":"hold"}}],"stagger":{"mode":"none","amount":0,"seed":0},"repeat":1,"count":41,"seed":1,"size":1,"distance":1}]}'::jsonb)
   ) as x(label, spec)
+
+  union all
+  -- Surveys: card views are the only survey table with a client right (read own rows).
+  select 'survey_item_views: only select, only own rows',
+    has_table_privilege('authenticated', 'public.survey_item_views', 'select')
+    and not has_table_privilege('authenticated', 'public.survey_item_views', 'insert')
+    and not has_table_privilege('authenticated', 'public.survey_item_views', 'update')
+    and not has_table_privilege('authenticated', 'public.survey_item_views', 'delete')
+    and not has_table_privilege('anon', 'public.survey_item_views', 'select')
+    and (select count(*) = 1 and bool_and(p.cmd = 'SELECT' and p.qual like '%auth.uid()%')
+         from pg_policies p where p.schemaname = 'public' and p.tablename = 'survey_item_views')
+
+  union all
+  -- The anonymous answers hold no reference to a person and no time of day.
+  select 'anonymous answers: no person, no time: ' || c.table_name || '.' || c.column_name,
+    c.column_name not similar to '%(user|profile|account|created_by)%'
+    and c.data_type not like 'time%'
+  from information_schema.columns c
+  where c.table_schema = 'public' and c.table_name in ('survey_responses', 'survey_answers')
+
+  union all
+  select 'survey functions: definer + search_path: ' || p.proname,
+    p.prosecdef and coalesce(array_to_string(p.proconfig, ','), '') like '%search_path=%'
+  from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+  where n.nspname = 'public'
+    and (p.proname like 'admin_survey_%' or p.proname in ('admin_item_withdraw', 'submit_survey_response', 'get_official_feed_items',
+         'mark_item_seen', 'dismiss_item', 'get_active_surveys', 'get_official_profile', 'get_official_profile_items',
+         'get_survey', 'track_survey_event', 'survey_media_readable'))
+
+  union all
+  select 'survey functions: not for anon: ' || p.proname, not has_function_privilege('anon', p.oid, 'execute')
+  from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+  where n.nspname = 'public'
+    and (p.proname like 'admin_survey_%' or p.proname in ('submit_survey_response', 'get_official_feed_items', 'get_survey',
+         'track_survey_event', 'mark_item_seen', 'dismiss_item'))
+
+  union all
+  select 'survey internals not for clients: ' || p.proname,
+    not has_function_privilege('authenticated', p.oid, 'execute') and not has_function_privilege('anon', p.oid, 'execute')
+  from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+  where n.nspname = 'public'
+    and p.proname in ('survey_answers_problem', 'survey_store_questions', 'survey_item_json', 'survey_item_visible',
+                      'survey_bump', 'survey_eligible_count', 'official_visible_to_me', 'official_user_id', 'survey_log_summary')
+
+  union all
+  select 'bucket survey-media private', exists (select 1 from storage.buckets b where b.id = 'survey-media' and not b.public)
+
+  union all
+  -- Files of survey-media are written only by the Edge Function (service role): no client write policy.
+  select 'survey-media: no client write policy',
+    not exists (select 1 from pg_policies p where p.schemaname = 'storage' and p.tablename = 'objects'
+                and p.cmd in ('INSERT', 'UPDATE', 'DELETE', 'ALL')
+                and (coalesce(p.qual, '') || coalesce(p.with_check, '')) like '%survey-media%')
+
+  union all
+  select 'at most one official account', (select count(*) from public.official_account) <= 1
+
+  union all
+  select 'every published survey is logged',
+    not exists (select 1 from public.surveys s where s.published_at is not null
+                and not exists (select 1 from public.moderation_actions m where m.action = 'survey_publish' and m.target_id = s.id))
+
+  union all
+  select 'survey answers only for published surveys',
+    not exists (select 1 from public.survey_responses r join public.surveys s on s.id = r.survey_id where s.published_at is null)
 
   union all
   -- Every colour set meets the readability rules.
