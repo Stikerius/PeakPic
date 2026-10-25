@@ -29,6 +29,7 @@ import { TaggedTextInput } from "@/components/tagged-text-input";
 import { Avatar } from "@/components/ui/avatar";
 import { fontSize, radius, spacing, typography } from "@/constants/theme";
 import { useBlockUser } from "@/hooks/use-block-user";
+import { useOfficialAccountId } from "@/lib/officialAccount";
 import { showActionSheet } from "@/lib/actionSheet";
 import { isChatBlocked } from "@/lib/blockRepo";
 import {
@@ -104,6 +105,8 @@ export default function ChatScreen() {
   const [partner, setPartner] = useState<PublicProfile | null>(null);
   // A block between us: nobody can write, and both see the messages only as deleted.
   const [blocked, setBlocked] = useState(false);
+  // A chat with the official account (from before it became official): read only, no blocking.
+  const officialId = useOfficialAccountId();
   const [blockCheck, setBlockCheck] = useState(0);
   const [myUsername, setMyUsername] = useState<string | null>(null);
   // Newest first, for the inverted list.
@@ -221,7 +224,9 @@ export default function ChatScreen() {
       ...(partner !== null && partnerAvailable
         ? [
             { label: "Profil melden", destructive: true, onPress: () => openReport({ targetType: "profile", targetId: partner.id }) },
-            { label: "Blockieren", destructive: true, onPress: () => blockUser(partner, () => setBlockCheck((v) => v + 1)) },
+            ...(partner.id === officialId
+              ? []
+              : [{ label: "Blockieren", destructive: true, onPress: () => blockUser(partner, () => setBlockCheck((v) => v + 1)) }]),
           ]
         : []),
       { label: "Chat löschen", destructive: true, onPress: confirmClearChat },
@@ -727,9 +732,11 @@ export default function ChatScreen() {
             </View>
           )}
 
-          {blocked ? (
+          {blocked || (partner !== null && partner.id === officialId) ? (
             <View style={[styles.blockedBar, { paddingBottom: Math.max(insets.bottom, spacing.sm) }]}>
-              <Text style={styles.blockedText}>In diesem Chat können keine Nachrichten mehr gesendet werden.</Text>
+              <Text style={styles.blockedText}>
+                {blocked ? "In diesem Chat können keine Nachrichten mehr gesendet werden." : "Diesem Konto kann man nicht schreiben."}
+              </Text>
             </View>
           ) : (
             <View style={[styles.inputBar, { paddingBottom: Math.max(insets.bottom, spacing.sm) }]}>

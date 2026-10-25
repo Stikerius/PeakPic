@@ -4,6 +4,7 @@ import { Alert } from "react-native";
 import { Button } from "@/components/ui/button";
 import { describeError } from "@/lib/errors";
 import { emitAppEvent } from "@/lib/events";
+import { useOfficialAccountId } from "@/lib/officialAccount";
 import { followUser, unfollowUser, type FollowStatus } from "@/lib/socialRepo";
 
 type FollowButtonProps = {
@@ -22,10 +23,12 @@ const LABELS: Record<FollowStatus, string> = {
 
 /**
  * Folgen / Angefragt / Folge ich. Whether a follow is accepted right away or becomes a
- * request is decided by the database (public vs. private profile).
+ * request is decided by the database (public vs. private profile). Not shown at all for the
+ * official account (it takes no followers).
  */
 export function FollowButton({ userId, username, status, onChange, size = "sm" }: FollowButtonProps) {
   const [busy, setBusy] = useState(false);
+  const officialId = useOfficialAccountId();
 
   async function run(action: () => Promise<FollowStatus>) {
     setBusy(true);
@@ -63,6 +66,7 @@ export function FollowButton({ userId, username, status, onChange, size = "sm" }
     );
   }
 
+  if (userId === officialId) return null;
   return (
     <Button
       label={LABELS[status]}

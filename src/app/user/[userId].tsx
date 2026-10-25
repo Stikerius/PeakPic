@@ -18,6 +18,7 @@ import { fontSize, radius, spacing, typography } from "@/constants/theme";
 import { useBlockUser } from "@/hooks/use-block-user";
 import { showActionSheet } from "@/lib/actionSheet";
 import { getOrCreateDirectConversation } from "@/lib/chatRepo";
+import { useOfficialAccountId } from "@/lib/officialAccount";
 import { describeError } from "@/lib/errors";
 import { listHighlights, type Highlight } from "@/lib/highlightRepo";
 import { fetchUserStoryGroup } from "@/lib/storyRepo";
@@ -79,6 +80,9 @@ export default function UserProfileScreen() {
   const [tab, setTab] = useState<ProfileTab>(isProfileTab(tabParam) ? tabParam : "posts");
   const { openReport } = useReport();
   const blockUser = useBlockUser();
+  // The official account: no "Folgen", "Nachricht" or "Blockieren" (the database refuses them too).
+  const officialId = useOfficialAccountId();
+  const isOfficial = officialId !== null && officialId === userId;
 
   const [summary, setSummary] = useState<UserProfileSummary | null | undefined>(undefined);
   const [content, setContent] = useState<Content | null>(null);
@@ -199,7 +203,7 @@ export default function UserProfileScreen() {
                   destructive: true,
                   onPress: () => openReport({ targetType: "profile", targetId: profile.id }),
                 },
-                { label: "Blockieren", destructive: true, onPress: () => blockUser(profile, () => router.back()) },
+                ...(isOfficial ? [] : [{ label: "Blockieren", destructive: true, onPress: () => blockUser(profile, () => router.back()) }]),
               ])
             }
             accessibilityRole="button"
@@ -237,6 +241,12 @@ export default function UserProfileScreen() {
           <Text style={styles.handle}>@{profile.username}</Text>
         </View>
         <View style={styles.badges}>
+          {isOfficial && (
+            <View style={styles.badge} accessibilityLabel="Offizielles Konto">
+              <Ionicons name="checkmark-circle" size={11} color={colors.textSecondary} />
+              <Text style={styles.badgeText}>Offiziell</Text>
+            </View>
+          )}
           {summary.isPrivate && (
             <View style={styles.badge}>
               <Ionicons name="lock-closed" size={11} color={colors.textSecondary} />
@@ -278,26 +288,28 @@ export default function UserProfileScreen() {
         />
       </View>
 
-      <View style={styles.actions}>
-        <View style={styles.action}>
-          <FollowButton
-            userId={userId}
-            username={profile.username}
-            status={summary.followStatus}
-            size="md"
-            onChange={() => void load()}
-          />
+      {!isOfficial && (
+        <View style={styles.actions}>
+          <View style={styles.action}>
+            <FollowButton
+              userId={userId}
+              username={profile.username}
+              status={summary.followStatus}
+              size="md"
+              onChange={() => void load()}
+            />
+          </View>
+          {summary.followStatus === "accepted" && (
+            <Button
+              label="Nachricht"
+              variant="secondary"
+              onPress={() => void openChat()}
+              loading={chatBusy}
+              style={styles.action}
+            />
+          )}
         </View>
-        {summary.followStatus === "accepted" && (
-          <Button
-            label="Nachricht"
-            variant="secondary"
-            onPress={() => void openChat()}
-            loading={chatBusy}
-            style={styles.action}
-          />
-        )}
-      </View>
+      )}
 
       {error !== null && <Text style={styles.error}>{error}</Text>}
 

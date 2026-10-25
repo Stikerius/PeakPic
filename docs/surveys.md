@@ -17,6 +17,12 @@ Abschnitten.
     Nachrichten von anderen in einen bestehenden Chat mit ihm (Trigger `messages_official_guard`).
     Servernachrichten wie Markierungshinweise bleiben möglich.
   - Keine Follower und keine Follow-Anfragen (`follow_not_possible`).
+  - Niemand kann es blockieren (`block_not_possible`, Trigger auf `user_blocks`); frühere
+    Blockierungen werden beim Ausführen des Schemas und des Setup-Skripts entfernt. Das offizielle
+    Konto selbst darf andere blockieren.
+  - Die App kennt nur seine Kennung (`get_official_account_id`) und zeigt dort weder „Folgen“ noch
+    „Nachricht“ noch „Blockieren“, dafür das Abzeichen „Offiziell“. In einem älteren Chat mit ihm
+    steht statt des Eingabefelds „Diesem Konto kann man nicht schreiben.“
   - In der Bereinigung geschützt (`reset_protection` = `protected`, Chats wie bei geschützten Konten).
   - Nicht löschbar, solange offiziell (`account_deletion_blocker` = `official`,
     `admin_request_account_deletion` → `cannot_delete_official`).

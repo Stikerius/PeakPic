@@ -7,7 +7,7 @@
 --
 -- What changes for that account:
 --   * nobody can start a chat with it or send it messages (neutral message in the app),
---   * it takes no followers and no follow requests,
+--   * it takes no followers and no follow requests, and nobody can block it,
 --   * it is protected in the data reset and can't be deleted while it is official,
 --   * the app shows it with the badge "Offiziell"; its e-mail address and other account data
 --     never leave the server (users only see username, name, picture and the description).
@@ -27,8 +27,10 @@ begin
   insert into public.official_account (id, user_id, bio, updated_at)
   values (true, target, official_bio, now())
   on conflict (id) do update set user_id = excluded.user_id, bio = excluded.bio, updated_at = now();
-  -- Open follow requests to the official account are removed (it takes none).
+  -- Open follow requests to the official account are removed (it takes none), and so are
+  -- blocks of it (nobody can block the official account).
   delete from public.follows f where f.following_id = target and f.status = 'pending';
+  delete from public.user_blocks b where b.blocked_id = target;
   raise notice 'Offizielles Konto: @% (%)', lower(btrim(official_username)), target;
 end;
 $$;

@@ -1,5 +1,7 @@
 import { describe, expect, it } from "@jest/globals";
 
+import { describeError } from "@/lib/errors";
+
 import {
   SURVEY_IMAGE_LIMITS,
   checkSurveyImage,
@@ -165,5 +167,14 @@ describe("survey images (Edge Function)", () => {
     expect(cleanAltText("  Ein   Bild  ")).toBe("Ein Bild");
     expect(cleanAltText("   ")).toBeNull();
     expect(cleanAltText("x".repeat(141))).toBeNull();
+  });
+});
+
+describe("official account in the app", () => {
+  it("refusals of the database become neutral texts", () => {
+    expect(describeError({ message: "block_not_possible" })).toBe("Dieses Konto lässt sich nicht blockieren.");
+    expect(describeError(new Error("follow_not_possible"))).toBe("Diesem Konto kann man nicht folgen.");
+    expect(describeError({ message: "chat_not_possible" })).toBe("Diesem Konto kann man nicht schreiben.");
+    expect(describeError(new Error("Etwas anderes"))).toBe("Etwas anderes");
   });
 });

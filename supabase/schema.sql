@@ -11734,6 +11734,33 @@ drop trigger if exists messages_official_guard on public.messages;
 create trigger messages_official_guard before insert on public.messages
   for each row execute function public.guard_official_messages();
 
+-- Nobody can block the official account (its posts reach every account). Blocks that existed
+-- before it became official are removed.
+create or replace function public.guard_official_block()
+returns trigger
+language plpgsql security definer set search_path = ''
+as $$
+begin
+  if public.is_official(new.blocked_id) then
+    raise exception 'block_not_possible';
+  end if;
+  return new;
+end;
+$$;
+drop trigger if exists user_blocks_official_guard on public.user_blocks;
+create trigger user_blocks_official_guard before insert on public.user_blocks
+  for each row execute function public.guard_official_block();
+delete from public.user_blocks b where public.is_official(b.blocked_id);
+
+-- The official account's id for the app (to hide "Folgen", "Nachricht" and "Blockieren" and
+-- show the badge). Only the id, null when there is none.
+create or replace function public.get_official_account_id()
+returns uuid
+language sql stable security definer set search_path = ''
+as $$
+  select case when auth.uid() is not null then public.official_user_id() end;
+$$;
+
 -- ---------------------------------------------------------------- state and visibility
 
 -- The state at p_at from the timestamps: active from the start (inclusive) until the end
@@ -12760,6 +12787,7 @@ begin
     'public.official_user_id()', 'public.survey_question_problem(jsonb, boolean)',
     'public.survey_guard_questions()', 'public.survey_guard_update()', 'public.survey_guard_answers()',
     'public.survey_guard_items()', 'public.survey_guard_media()', 'public.guard_official_messages()',
+    'public.guard_official_block()',
     'public.survey_state_of(uuid)', 'public.survey_eligible_count()', 'public.official_visible_to_me()',
     'public.survey_item_visible(uuid, text)', 'public.survey_media_json(uuid, text)', 'public.survey_item_json(uuid)',
     'public.survey_bump(uuid, text)', 'public.survey_answers_problem(uuid, jsonb)',
@@ -12773,6 +12801,7 @@ begin
     'public.dismiss_item(uuid)', 'public.get_active_surveys()', 'public.get_official_profile()',
     'public.get_official_profile_items(text, timestamptz, integer)', 'public.get_survey(uuid)',
     'public.submit_survey_response(uuid, jsonb)', 'public.is_official(uuid)', 'public.survey_media_readable(text)',
+    'public.get_official_account_id()',
     'public.survey_state(timestamptz, timestamptz, timestamptz, timestamptz, timestamptz)',
     -- Admins (each checks admin and two-factor first).
     'public.admin_survey_get(uuid)', 'public.admin_survey_list()', 'public.admin_survey_save(uuid, jsonb)',

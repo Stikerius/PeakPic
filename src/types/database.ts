@@ -592,6 +592,7 @@ export type Database = {
       username_available: { Args: { name: string }; Returns: boolean };
       mark_moderation_notices_read: { Args: Record<string, never>; Returns: undefined };
       conversation_has_block: { Args: { conversation: Uuid }; Returns: boolean };
+      get_official_account_id: { Args: Record<string, never>; Returns: Uuid | null };
       get_current_legal_documents: {
         Args: Record<string, never>;
         Returns: {
